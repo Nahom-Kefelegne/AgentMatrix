@@ -4,9 +4,21 @@
 
 Build a web app that visualizes active Claude Code sessions as pixelated characters in a top-down pixel RPG-style office. Characters walk around, show working/idle status, and display summaries of what they're working on. Agent teams are visualized as meetings. This is a fun, visual dashboard for all Claude Code activity.
 
-**Repo**: `AgentMatrix`
-**App**: `claude-office/` (Next.js, already scaffolded)
+**Repo**: `/Users/nkefelegne/Desktop/DEV/AgentMatrix`
+**App**: Lives at repo root (Next.js, already scaffolded)
 **Master plan**: `docs/plans/master-plan.md`
+
+---
+
+## Step 0: Flatten project structure
+
+The Next.js app was scaffolded into `claude-office/` subdirectory. Move everything up to repo root:
+
+1. Move all files from `claude-office/` to repo root: `app/`, `public/`, `lib/`, `package.json`, `tsconfig.json`, `next.config.ts`, `next-env.d.ts`, `package-lock.json`
+2. Remove the now-empty `claude-office/` directory and its duplicate `README.md`
+3. Keep `docs/` and root `README.md` as-is
+4. Run `npm install` to re-link `node_modules` at root
+5. Verify `npm run dev` works from repo root
 
 ---
 
@@ -30,8 +42,9 @@ Build a web app that visualizes active Claude Code sessions as pixelated charact
 ## Project Structure
 
 ```
-claude-office/
+AgentMatrix/                           # Repo root = Next.js app root
 ├── server.ts                          # Custom HTTP server (socket.io + Next.js)
+├── docs/plans/                        # Planning docs (already committed)
 ├── app/
 │   ├── layout.tsx                     # (MODIFY) Dark bg, metadata
 │   ├── page.tsx                       # (REPLACE) Full-screen office page
@@ -218,6 +231,7 @@ Each route: parse JSON → update sessionStore → emit via socket.io → return
 
 ### Phase 1: Skeleton
 Static office rendering on canvas — no networking.
+- **First**: Flatten `claude-office/` into repo root (Step 0 above)
 - `lib/types.ts`, `lib/constants.ts`
 - `lib/engine/TileMap.ts` (colored rectangles fallback)
 - `lib/engine/GameEngine.ts` (minimal loop)
@@ -254,6 +268,31 @@ Team visualization, connection lines, real tileset integration.
 - Status animations (working bob, idle still)
 - Edge case handling
 - **Verify**: Configure hooks in Claude Code, run a real session, see full lifecycle
+
+---
+
+## Code Quality Guidelines
+
+- **No hardcoded strings**: Use constants for tile types, colors, positions, event names, routes, status values
+- **Atomic/isolated components**: Each React component does one thing. No mega-components with hundreds of lines of HTML. Extract sub-components (e.g., `StatusBadge`, `ActionList`, `CloseButton`)
+- **Clean patterns**: Consistent naming, typed event emitters, shared utility functions
+- **Separation of concerns**: Engine code (canvas/sprites) knows nothing about React. React components know nothing about canvas internals. Socket events are the bridge.
+
+## Agent Teams Execution Strategy
+
+Use parallel agent teams for maximum efficiency:
+
+| Agent | Responsibility |
+|-------|---------------|
+| **Architect** | Step 0 (flatten structure) + `lib/types.ts` + `lib/constants.ts` + project wiring |
+| **Engine** | All `lib/engine/` files: GameEngine, TileMap, SpriteSheet, Character, CharacterManager, Pathfinder, ConnectionLine |
+| **Backend** | `server.ts` + `lib/state/` + all 7 API routes in `app/api/hooks/` + socket emitter |
+| **Frontend** | All `app/components/` + `app/page.tsx` + `app/layout.tsx` + `app/globals.css` + `lib/hooks/useSocket.ts` |
+
+**Execution order**:
+1. Architect runs first (types/constants are dependencies for everything)
+2. Engine + Backend + Frontend run in parallel (they depend on types/constants but not each other)
+3. Integration pass at the end to wire everything together
 
 ---
 

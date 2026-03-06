@@ -1,0 +1,192 @@
+'use client';
+
+import React, { useEffect, useRef, useCallback } from 'react';
+import { CANVAS_W, CANVAS_H, DISPLAY_W, DISPLAY_H, SCALE } from '@/lib/constants';
+import { SOCKET_EVENTS } from '@/lib/types';
+import type { SessionData, CharacterData } from '@/lib/types';
+import type { SocketEventHandler } from '@/lib/hooks/useSocket';
+
+interface OfficeCanvasProps {
+  sessions: Map<string, SessionData>;
+  onEvent: (cb: (handler: SocketEventHandler) => void) => () => void;
+  onHover: (char: CharacterData | null, screenX: number, screenY: number) => void;
+  onClick: (char: CharacterData | null) => void;
+}
+
+export default function OfficeCanvas({ sessions, onEvent, onHover, onClick }: OfficeCanvasProps) {
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const overlayRef = useRef<HTMLCanvasElement>(null);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const engineRef = useRef<any>(null);
+  const initializedRef = useRef(false);
+  const eventBufferRef = useRef<SocketEventHandler[]>([]);
+  const engineReadyRef = useRef(false);
+
+  const processEvent = useCallback((handler: SocketEventHandler) => {
+    const engine = engineRef.current;
+    if (!engine) return;
+
+    switch (handler.event) {
+      case SOCKET_EVENTS.STATE_SNAPSHOT: {
+        const snapshot = handler.data as SessionData[];
+        snapshot.forEach(session => engine.spawnCharacter(session));
+        break;
+      }
+      case SOCKET_EVENTS.SESSION_START: {
+        const session = handler.data as SessionData;
+        engine.spawnCharacter(session);
+        break;
+      }
+      case SOCKET_EVENTS.SESSION_END: {
+        const data = handler.data as { sessionId: string };
+        engine.removeCharacter(data.sessionId);
+        break;
+      }
+      case SOCKET_EVENTS.SESSION_UPDATE: {
+        const data = handler.data as { sessionId: string; changes: Partial<SessionData> };
+        engine.updateCharacter(data.sessionId, data.changes);
+        break;
+      }
+      case SOCKET_EVENTS.TOOL_START: {
+        const data = handler.data as { sessionId: string; toolName: string };
+        engine.updateCharacter(data.sessionId, { currentTool: data.toolName, status: 'working' });
+        break;
+      }
+      case SOCKET_EVENTS.TOOL_COMPLETE: {
+        const data = handler.data as { sessionId: string; toolName: string; summary: string };
+        engine.updateCharacter(data.sessionId, { currentTool: undefined });
+        break;
+      }
+      case SOCKET_EVENTS.MEETING_START: {
+        const data = handler.data as { teamId: string; participantIds: string[] };
+        engine.startMeeting(data.teamId, data.participantIds);
+        break;
+      }
+      case SOCKET_EVENTS.MEETING_MESSAGE: {
+        const data = handler.data as { fromId: string; toId: string };
+        engine.drawConnectionLine(data.fromId, data.toId);
+        break;
+      }
+    }
+  }, []);
+
+  // Subscribe to socket events immediately (before engine init)
+  const handleSocketEvent = useCallback((handler: SocketEventHandler) => {
+    if (engineReadyRef.current) {
+      processEvent(handler);
+    } else {
+      // Buffer until engine is ready
+      eventBufferRef.current.push(handler);
+    }
+  }, [processEvent]);
+
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas || initializedRef.current) return;
+    initializedRef.current = true;
+
+    // Subscribe to events immediately so we don't miss the snapshot
+    const unsubscribe = onEvent(handleSocketEvent);
+    let stopped = false;
+
+    (async () => {
+      const { GameEngine } = await import('@/lib/engine/GameEngine');
+      const engine = new GameEngine(canvas, overlayRef.current || undefined);
+      engineRef.current = engine;
+
+      await engine.init();
+      if (stopped) return;
+      engine.start();
+
+      engine.setOnHover(onHover);
+      engine.setOnClick(onClick);
+
+      // Replay buffered events
+      engineReadyRef.current = true;
+      for (const event of eventBufferRef.current) {
+        processEvent(event);
+      }
+      eventBufferRef.current = [];
+
+      // Also spawn from current sessions state as fallback
+      sessions.forEach(session => {
+        engine.spawnCharacter(session);
+      });
+    })();
+
+    return () => {
+      stopped = true;
+      unsubscribe();
+      engineRef.current?.stop();
+    };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const handleMouseMove = useCallback((e: React.MouseEvent<HTMLCanvasElement>) => {
+    const engine = engineRef.current;
+    const overlay = overlayRef.current;
+    if (!engine || !overlay) return;
+
+    const rect = overlay.getBoundingClientRect();
+    const canvasX = (e.clientX - rect.left) / SCALE;
+    const canvasY = (e.clientY - rect.top) / SCALE;
+    engine.handleMouseMove(canvasX, canvasY, e.clientX, e.clientY);
+  }, []);
+
+  const handleMouseClick = useCallback((e: React.MouseEvent<HTMLCanvasElement>) => {
+    const engine = engineRef.current;
+    const overlay = overlayRef.current;
+    if (!engine || !overlay) return;
+
+    const rect = overlay.getBoundingClientRect();
+    const canvasX = (e.clientX - rect.left) / SCALE;
+    const canvasY = (e.clientY - rect.top) / SCALE;
+    engine.handleMouseClick(canvasX, canvasY);
+  }, []);
+
+  return (
+    <div
+      style={{
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        width: '100vw',
+        height: '100vh',
+        paddingTop: 'var(--header-height)',
+      }}
+    >
+      <div style={{ position: 'relative', width: DISPLAY_W, height: DISPLAY_H }}>
+        {/* Pixel art layer */}
+        <canvas
+          ref={canvasRef}
+          width={CANVAS_W}
+          height={CANVAS_H}
+          style={{
+            position: 'absolute',
+            top: 0,
+            left: 0,
+            width: DISPLAY_W,
+            height: DISPLAY_H,
+            imageRendering: 'pixelated',
+          }}
+        />
+        {/* Crisp text overlay */}
+        <canvas
+          ref={overlayRef}
+          width={DISPLAY_W}
+          height={DISPLAY_H}
+          onMouseMove={handleMouseMove}
+          onClick={handleMouseClick}
+          style={{
+            position: 'absolute',
+            top: 0,
+            left: 0,
+            width: DISPLAY_W,
+            height: DISPLAY_H,
+            cursor: 'pointer',
+          }}
+        />
+      </div>
+    </div>
+  );
+}
