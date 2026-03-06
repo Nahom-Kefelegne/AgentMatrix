@@ -176,27 +176,40 @@ export default function OfficeCanvas({ sessions, onEvent, onHover, onClick }: Of
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  const getCanvasCoords = useCallback((e: React.MouseEvent<HTMLCanvasElement>) => {
+    const overlay = overlayRef.current;
+    if (!overlay) return null;
+    const rect = overlay.getBoundingClientRect();
+    return {
+      canvasX: (e.clientX - rect.left) / SCALE,
+      canvasY: (e.clientY - rect.top) / SCALE,
+      screenX: e.clientX,
+      screenY: e.clientY,
+    };
+  }, []);
+
   const handleMouseMove = useCallback((e: React.MouseEvent<HTMLCanvasElement>) => {
     const engine = engineRef.current;
-    const overlay = overlayRef.current;
-    if (!engine || !overlay) return;
+    const coords = getCanvasCoords(e);
+    if (!engine || !coords) return;
+    engine.handleMouseMove(coords.canvasX, coords.canvasY, coords.screenX, coords.screenY);
+  }, [getCanvasCoords]);
 
-    const rect = overlay.getBoundingClientRect();
-    const canvasX = (e.clientX - rect.left) / SCALE;
-    const canvasY = (e.clientY - rect.top) / SCALE;
-    engine.handleMouseMove(canvasX, canvasY, e.clientX, e.clientY);
-  }, []);
-
-  const handleMouseClick = useCallback((e: React.MouseEvent<HTMLCanvasElement>) => {
+  const handleMouseDown = useCallback((e: React.MouseEvent<HTMLCanvasElement>) => {
     const engine = engineRef.current;
-    const overlay = overlayRef.current;
-    if (!engine || !overlay) return;
+    const coords = getCanvasCoords(e);
+    if (!engine || !coords) return;
+    engine.handleMouseDown(coords.canvasX, coords.canvasY);
+  }, [getCanvasCoords]);
 
-    const rect = overlay.getBoundingClientRect();
-    const canvasX = (e.clientX - rect.left) / SCALE;
-    const canvasY = (e.clientY - rect.top) / SCALE;
-    engine.handleMouseClick(canvasX, canvasY);
-  }, []);
+  const handleMouseUp = useCallback((e: React.MouseEvent<HTMLCanvasElement>) => {
+    const engine = engineRef.current;
+    const coords = getCanvasCoords(e);
+    if (!engine || !coords) return;
+    engine.handleMouseUp(coords.canvasX, coords.canvasY);
+    // Also trigger click for side panel
+    engine.handleMouseClick(coords.canvasX, coords.canvasY);
+  }, [getCanvasCoords]);
 
   return (
     <div
@@ -207,6 +220,7 @@ export default function OfficeCanvas({ sessions, onEvent, onHover, onClick }: Of
         width: '100vw',
         height: '100vh',
         paddingTop: 'var(--header-height)',
+        overflow: 'auto',
       }}
     >
       <div style={{ position: 'relative', width: DISPLAY_W, height: DISPLAY_H }}>
@@ -230,7 +244,8 @@ export default function OfficeCanvas({ sessions, onEvent, onHover, onClick }: Of
           width={DISPLAY_W}
           height={DISPLAY_H}
           onMouseMove={handleMouseMove}
-          onClick={handleMouseClick}
+          onMouseDown={handleMouseDown}
+          onMouseUp={handleMouseUp}
           style={{
             position: 'absolute',
             top: 0,

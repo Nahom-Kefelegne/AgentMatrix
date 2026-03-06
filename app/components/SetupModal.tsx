@@ -103,7 +103,7 @@ export default function SetupModal({ isOpen, onClose, connected, sessionCount }:
             borderBottom: '1px solid var(--border-color)',
           }}
         >
-          <span style={{ fontSize: 14, fontWeight: 'bold' }}>Setup</span>
+          <span style={{ fontSize: 18, fontWeight: 700 }}>Setup</span>
           <button
             onClick={onClose}
             style={{
@@ -137,11 +137,11 @@ export default function SetupModal({ isOpen, onClose, connected, sessionCount }:
                   display: 'inline-block',
                 }}
               />
-              <span style={{ fontSize: 12 }}>
+              <span style={{ fontSize: 14 }}>
                 {connected ? 'Connected' : 'Disconnected'}
               </span>
             </div>
-            <div style={{ fontSize: 12, color: 'var(--text-secondary)' }}>
+            <div style={{ fontSize: 14, color: 'var(--text-secondary)' }}>
               Active sessions: {sessionCount}
             </div>
           </div>
@@ -156,18 +156,18 @@ export default function SetupModal({ isOpen, onClose, connected, sessionCount }:
                 marginBottom: 8,
               }}
             >
-              <span style={{ fontSize: 11, color: 'var(--text-muted)', textTransform: 'uppercase' }}>
+              <span style={{ fontSize: 13, color: '#9a9ab0', textTransform: 'uppercase', letterSpacing: 1 }}>
                 ~/.claude/settings.json
               </span>
               <button
                 onClick={handleCopy}
                 style={{
-                  padding: '2px 8px',
-                  borderRadius: 3,
+                  padding: '4px 12px',
+                  borderRadius: 4,
                   border: '1px solid var(--border-color)',
                   background: 'var(--bg-tertiary)',
                   color: 'var(--text-secondary)',
-                  fontSize: 10,
+                  fontSize: 13,
                 }}
               >
                 Copy
@@ -177,10 +177,10 @@ export default function SetupModal({ isOpen, onClose, connected, sessionCount }:
               style={{
                 background: 'var(--bg-primary)',
                 border: '1px solid var(--border-color)',
-                borderRadius: 4,
-                padding: 12,
-                fontSize: 10,
-                lineHeight: 1.4,
+                borderRadius: 6,
+                padding: 14,
+                fontSize: 12,
+                lineHeight: 1.5,
                 overflowX: 'auto',
                 whiteSpace: 'pre',
                 color: 'var(--text-secondary)',

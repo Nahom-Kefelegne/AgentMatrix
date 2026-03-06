@@ -10,63 +10,40 @@ interface TaskBoardProps {
   sessionName: string;
 }
 
-const STATUS_COLUMN_COLORS: Record<string, string> = {
+const STATUS_COLORS: Record<string, string> = {
   pending: '#ff6b6b',
   in_progress: '#ffd43b',
   completed: '#51cf66',
 };
 
-function TaskCard({
-  task,
-  onAssign,
-}: {
-  task: TaskItem;
-  onAssign?: (task: TaskItem) => void;
-}) {
+function TaskCard({ task, onAssign }: { task: TaskItem; onAssign?: (task: TaskItem) => void }) {
   return (
     <div
       style={{
-        background: 'var(--bg-tertiary)',
-        border: '1px solid var(--border-color)',
-        borderRadius: 4,
-        padding: '8px 10px',
-        marginBottom: 6,
+        background: '#1a1a2a',
+        border: '1px solid #2a2a3e',
+        borderRadius: 8,
+        padding: '12px 14px',
+        marginBottom: 8,
       }}
     >
-      <div
-        style={{
-          fontSize: 11,
-          color: 'var(--text-primary)',
-          marginBottom: 4,
-          wordBreak: 'break-word',
-        }}
-      >
+      <div style={{ fontSize: 14, color: '#eee', marginBottom: 8, wordBreak: 'break-word', fontWeight: 500 }}>
         {task.subject}
       </div>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
         {task.owner && (
-          <span
-            style={{
-              fontSize: 9,
-              padding: '1px 5px',
-              borderRadius: 3,
-              background: 'var(--accent)',
-              color: '#fff',
-            }}
-          >
+          <span style={{
+            fontSize: 12, padding: '3px 8px', borderRadius: 4,
+            background: '#4a9eff', color: '#fff', fontWeight: 600,
+          }}>
             {task.owner}
           </span>
         )}
-        <span
-          style={{
-            fontSize: 9,
-            padding: '1px 5px',
-            borderRadius: 3,
-            background: STATUS_COLUMN_COLORS[task.status] || '#888',
-            color: '#000',
-            textTransform: 'uppercase',
-          }}
-        >
+        <span style={{
+          fontSize: 12, padding: '3px 8px', borderRadius: 4,
+          background: STATUS_COLORS[task.status] || '#888', color: '#000',
+          textTransform: 'uppercase', fontWeight: 600,
+        }}>
           {task.status.replace('_', ' ')}
         </span>
       </div>
@@ -74,14 +51,9 @@ function TaskCard({
         <button
           onClick={() => onAssign(task)}
           style={{
-            marginTop: 6,
-            fontSize: 10,
-            padding: '3px 8px',
-            borderRadius: 3,
-            border: '1px solid var(--border-color)',
-            background: 'var(--bg-secondary)',
-            color: 'var(--accent)',
-            width: '100%',
+            marginTop: 10, fontSize: 13, padding: '6px 12px', borderRadius: 6,
+            border: '1px solid #3a3a4e', background: '#1e1e30',
+            color: '#7aafff', width: '100%', fontWeight: 600, cursor: 'pointer',
           }}
         >
           Assign to agent
@@ -91,47 +63,24 @@ function TaskCard({
   );
 }
 
-function Column({
-  title,
-  color,
-  tasks,
-  onAssign,
-}: {
-  title: string;
-  color: string;
-  tasks: TaskItem[];
-  onAssign: (task: TaskItem) => void;
+function Column({ title, color, tasks, onAssign }: {
+  title: string; color: string; tasks: TaskItem[]; onAssign: (task: TaskItem) => void;
 }) {
   return (
     <div style={{ flex: 1, minWidth: 0 }}>
-      <div
-        style={{
-          fontSize: 10,
-          color: 'var(--text-muted)',
-          textTransform: 'uppercase',
-          marginBottom: 8,
-          display: 'flex',
-          alignItems: 'center',
-          gap: 6,
-        }}
-      >
-        <span
-          style={{
-            width: 6,
-            height: 6,
-            borderRadius: '50%',
-            background: color,
-            display: 'inline-block',
-          }}
-        />
+      <div style={{
+        fontSize: 13, color: '#9a9ab0', textTransform: 'uppercase', letterSpacing: 1,
+        marginBottom: 10, display: 'flex', alignItems: 'center', gap: 8, fontWeight: 600,
+      }}>
+        <span style={{ width: 8, height: 8, borderRadius: '50%', background: color, display: 'inline-block' }} />
         {title} ({tasks.length})
       </div>
-      <div style={{ maxHeight: 'calc(100vh - 200px)', overflowY: 'auto' }}>
+      <div style={{ maxHeight: 'calc(100vh - 220px)', overflowY: 'auto' }}>
         {tasks.map((t) => (
           <TaskCard key={t.id} task={t} onAssign={onAssign} />
         ))}
         {tasks.length === 0 && (
-          <div style={{ fontSize: 10, color: 'var(--text-muted)', padding: 8 }}>
+          <div style={{ fontSize: 14, color: '#555', padding: 12, fontStyle: 'italic' }}>
             No tasks
           </div>
         )}
@@ -164,9 +113,7 @@ export default function TaskBoard({ isOpen, onClose, sessionName }: TaskBoardPro
   }, [selectedListId]);
 
   useEffect(() => {
-    if (isOpen) {
-      fetchTasks();
-    }
+    if (isOpen) fetchTasks();
   }, [isOpen, fetchTasks]);
 
   const handleAssign = useCallback(async (task: TaskItem) => {
@@ -189,15 +136,11 @@ export default function TaskBoard({ isOpen, onClose, sessionName }: TaskBoardPro
 
   const handleNewTask = useCallback(async () => {
     if (!newTaskText.trim()) return;
-    // Spawn an agent with the new task description
     try {
       await fetch('/api/sessions/spawn', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          task: newTaskText.trim(),
-          cwd: '/Users/nkefelegne/Desktop/DEV',
-        }),
+        body: JSON.stringify({ task: newTaskText.trim(), cwd: '/Users/nkefelegne/Desktop/DEV' }),
       });
       setNewTaskText('');
     } catch (err) {
@@ -215,98 +158,49 @@ export default function TaskBoard({ isOpen, onClose, sessionName }: TaskBoardPro
   return (
     <>
       {/* Backdrop */}
-      <div
-        onClick={onClose}
-        style={{
-          position: 'fixed',
-          inset: 0,
-          background: 'rgba(0, 0, 0, 0.4)',
-          zIndex: 46,
-        }}
-      />
+      <div onClick={onClose} style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.4)', zIndex: 46 }} />
       {/* Panel */}
-      <div
-        style={{
-          position: 'fixed',
-          top: 0,
-          left: 0,
-          width: '100vw',
-          maxWidth: 720,
-          height: '100vh',
-          background: 'var(--bg-secondary)',
-          borderRight: '1px solid var(--border-color)',
-          zIndex: 47,
-          display: 'flex',
-          flexDirection: 'column',
-          overflow: 'hidden',
-        }}
-      >
+      <div style={{
+        position: 'fixed', top: 0, left: 0, width: '100vw', maxWidth: 800,
+        height: '100vh', background: '#151520', borderRight: '1px solid #2a2a3e',
+        zIndex: 47, display: 'flex', flexDirection: 'column', overflow: 'hidden',
+      }}>
         {/* Header */}
-        <div
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'space-between',
-            padding: '12px 16px',
-            borderBottom: '1px solid var(--border-color)',
-          }}
-        >
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <span style={{ fontSize: 14, fontWeight: 'bold' }}>Task Board</span>
+        <div style={{
+          display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+          padding: '16px 20px', borderBottom: '1px solid #2a2a3e',
+        }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <span style={{ fontSize: 20, fontWeight: 700, color: '#eee' }}>Task Board</span>
             {sessionName && (
-              <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>
-                ({sessionName})
-              </span>
+              <span style={{ fontSize: 14, color: '#888' }}>({sessionName})</span>
             )}
           </div>
-          <button
-            onClick={onClose}
-            style={{
-              width: 24,
-              height: 24,
-              borderRadius: 4,
-              border: '1px solid var(--border-color)',
-              background: 'var(--bg-tertiary)',
-              color: 'var(--text-secondary)',
-              fontSize: 12,
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-            }}
-          >
-            x
+          <button onClick={onClose} style={{
+            width: 32, height: 32, borderRadius: 6, border: '1px solid #3a3a4e',
+            background: '#1e1e30', color: '#aaa', fontSize: 16,
+            display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer',
+          }}>
+            ✕
           </button>
         </div>
 
         {/* List selector + New task */}
-        <div
-          style={{
-            padding: '8px 16px',
-            borderBottom: '1px solid var(--border-color)',
-            display: 'flex',
-            gap: 8,
-            alignItems: 'center',
-            flexWrap: 'wrap',
-          }}
-        >
+        <div style={{
+          padding: '12px 20px', borderBottom: '1px solid #2a2a3e',
+          display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap',
+        }}>
           {taskLists.length > 0 && (
             <select
               value={selectedListId || ''}
               onChange={(e) => setSelectedListId(e.target.value)}
               style={{
-                background: 'var(--bg-tertiary)',
-                border: '1px solid var(--border-color)',
-                color: 'var(--text-primary)',
-                borderRadius: 4,
-                padding: '4px 8px',
-                fontSize: 11,
-                fontFamily: 'inherit',
+                background: '#1a1a2a', border: '1px solid #2a2a3e', color: '#eee',
+                borderRadius: 6, padding: '8px 12px', fontSize: 14, fontFamily: 'inherit',
               }}
             >
               {taskLists.map((l) => (
-                <option key={l.id} value={l.id}>
-                  {l.id} ({l.tasks.length})
-                </option>
+                <option key={l.id} value={l.id}>{l.name} ({l.tasks.length})</option>
               ))}
             </select>
           )}
@@ -316,89 +210,41 @@ export default function TaskBoard({ isOpen, onClose, sessionName }: TaskBoardPro
             onKeyDown={(e) => e.key === 'Enter' && handleNewTask()}
             placeholder="New task description..."
             style={{
-              flex: 1,
-              minWidth: 120,
-              background: 'var(--bg-tertiary)',
-              border: '1px solid var(--border-color)',
-              color: 'var(--text-primary)',
-              borderRadius: 4,
-              padding: '4px 8px',
-              fontSize: 11,
-              fontFamily: 'inherit',
+              flex: 1, minWidth: 150, background: '#1a1a2a', border: '1px solid #2a2a3e',
+              color: '#eee', borderRadius: 6, padding: '8px 12px', fontSize: 14, fontFamily: 'inherit',
             }}
           />
-          <button
-            onClick={handleNewTask}
-            style={{
-              padding: '4px 12px',
-              borderRadius: 4,
-              border: '1px solid var(--border-color)',
-              background: 'var(--accent)',
-              color: '#fff',
-              fontSize: 11,
-            }}
-          >
+          <button onClick={handleNewTask} style={{
+            padding: '8px 16px', borderRadius: 6, border: 'none',
+            background: '#4a9eff', color: '#fff', fontSize: 14, fontWeight: 600, cursor: 'pointer',
+          }}>
             Spawn
           </button>
         </div>
 
         {/* Columns */}
-        <div
-          style={{
-            flex: 1,
-            display: 'flex',
-            gap: 12,
-            padding: 16,
-            overflowX: 'auto',
-          }}
-        >
+        <div style={{ flex: 1, display: 'flex', gap: 16, padding: 20, overflowX: 'auto' }}>
           {loading ? (
-            <div style={{ color: 'var(--text-muted)', fontSize: 12, padding: 16 }}>
-              Loading tasks...
-            </div>
+            <div style={{ color: '#888', fontSize: 16, padding: 20 }}>Loading tasks...</div>
           ) : taskLists.length === 0 ? (
-            <div style={{ color: 'var(--text-muted)', fontSize: 12, padding: 16 }}>
+            <div style={{ color: '#888', fontSize: 16, padding: 20 }}>
               No task lists found. Tasks are stored in ~/.claude/tasks/
             </div>
           ) : (
             <>
-              <Column
-                title="Pending"
-                color={STATUS_COLUMN_COLORS.pending}
-                tasks={pending}
-                onAssign={handleAssign}
-              />
-              <Column
-                title="In Progress"
-                color={STATUS_COLUMN_COLORS.in_progress}
-                tasks={inProgress}
-                onAssign={handleAssign}
-              />
-              <Column
-                title="Completed"
-                color={STATUS_COLUMN_COLORS.completed}
-                tasks={completed}
-                onAssign={handleAssign}
-              />
+              <Column title="Pending" color={STATUS_COLORS.pending} tasks={pending} onAssign={handleAssign} />
+              <Column title="In Progress" color={STATUS_COLORS.in_progress} tasks={inProgress} onAssign={handleAssign} />
+              <Column title="Completed" color={STATUS_COLORS.completed} tasks={completed} onAssign={handleAssign} />
             </>
           )}
         </div>
 
         {assigning && (
-          <div
-            style={{
-              position: 'absolute',
-              bottom: 16,
-              left: 16,
-              right: 16,
-              background: 'var(--accent)',
-              color: '#fff',
-              padding: '6px 12px',
-              borderRadius: 4,
-              fontSize: 11,
-              textAlign: 'center',
-            }}
-          >
+          <div style={{
+            position: 'absolute', bottom: 20, left: 20, right: 20,
+            background: '#4a9eff', color: '#fff', padding: '10px 16px',
+            borderRadius: 8, fontSize: 14, textAlign: 'center', fontWeight: 600,
+          }}>
             Spawning agent...
           </div>
         )}

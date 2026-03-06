@@ -3,6 +3,7 @@ import { CANVAS_W, CANVAS_H, SCALE, TILE_SIZE, MEETING_POSITIONS } from '@/lib/c
 import { SpriteSheet } from './SpriteSheet';
 import { TileMap } from './TileMap';
 import { CharacterManager } from './CharacterManager';
+import { Character } from './Character';
 import { ConnectionLine } from './ConnectionLine';
 
 export class GameEngine {
@@ -116,11 +117,44 @@ export class GameEngine {
     }
   }
 
+  // === Drag state ===
+  private dragging: Character | null = null;
+  private dragOffsetX = 0;
+  private dragOffsetY = 0;
+
   // Mouse handlers — canvasX/canvasY are in game-space (unscaled) coordinates
   handleMouseMove(canvasX: number, canvasY: number, screenX: number, screenY: number): void {
+    if (this.dragging) {
+      this.dragging.x = canvasX - this.dragOffsetX;
+      this.dragging.y = canvasY - this.dragOffsetY;
+      return;
+    }
     const hit = this.characterManager.hitTest(canvasX, canvasY);
     if (this.onCharacterHover) {
       this.onCharacterHover(hit ? hit.getData() : null, screenX, screenY);
+    }
+  }
+
+  handleMouseDown(canvasX: number, canvasY: number): void {
+    const hit = this.characterManager.hitTest(canvasX, canvasY);
+    if (hit) {
+      this.dragging = hit;
+      this.dragOffsetX = canvasX - hit.x;
+      this.dragOffsetY = canvasY - hit.y;
+      hit.setPath([]); // cancel current movement
+    }
+  }
+
+  handleMouseUp(canvasX: number, canvasY: number): void {
+    if (this.dragging) {
+      // Snap to nearest walkable tile
+      const tileX = Math.round(canvasX / TILE_SIZE);
+      const tileY = Math.round(canvasY / TILE_SIZE);
+      if (this.tileMap.isWalkable(tileX, tileY)) {
+        this.dragging.x = tileX * TILE_SIZE;
+        this.dragging.y = tileY * TILE_SIZE;
+      }
+      this.dragging = null;
     }
   }
 

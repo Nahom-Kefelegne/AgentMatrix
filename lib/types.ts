@@ -110,6 +110,7 @@ export interface TaskItem {
 
 export interface TaskList {
   id: string;
+  name: string;
   path: string;
   tasks: TaskItem[];
 }

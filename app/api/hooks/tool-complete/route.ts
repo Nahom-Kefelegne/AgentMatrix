@@ -6,7 +6,7 @@ import { emitToClients } from '@/lib/state/socketEmitter';
 
 export async function POST(request: Request) {
   try {
-    const payload: ToolCompletePayload = await request.json();
+    const payload = await request.json();
     const summary = payload.tool_name;
 
     addAction(payload.session_id, {

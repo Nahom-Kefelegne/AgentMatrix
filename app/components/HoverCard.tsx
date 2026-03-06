@@ -3,18 +3,15 @@
 import type { CharacterData, Action } from '@/lib/types';
 import { STATUS_COLORS } from '@/lib/constants';
 
-interface StatusBadgeProps {
-  status: string;
-}
-
-function StatusBadge({ status }: StatusBadgeProps) {
+function StatusBadge({ status }: { status: string }) {
   return (
     <span
       style={{
         display: 'inline-block',
-        padding: '1px 6px',
-        borderRadius: 3,
-        fontSize: 10,
+        padding: '2px 8px',
+        borderRadius: 4,
+        fontSize: 12,
+        fontWeight: 600,
         backgroundColor: STATUS_COLORS[status] || STATUS_COLORS.idle,
         color: '#fff',
         textTransform: 'uppercase',
@@ -23,25 +20,6 @@ function StatusBadge({ status }: StatusBadgeProps) {
     >
       {status}
     </span>
-  );
-}
-
-function StatusDot({ status }: { status: string }) {
-  const colorMap: Record<string, string> = {
-    working: '#51cf66',
-    idle: '#888888',
-    meeting: '#4a9eff',
-  };
-  return (
-    <span
-      style={{
-        display: 'inline-block',
-        width: 6,
-        height: 6,
-        borderRadius: '50%',
-        backgroundColor: colorMap[status] || '#888888',
-      }}
-    />
   );
 }
 
@@ -67,16 +45,16 @@ export function ActionList({ actions, max = 3 }: ActionListProps) {
         <li
           key={i}
           style={{
-            fontSize: 10,
-            color: 'var(--text-secondary)',
-            padding: '1px 0',
+            fontSize: 13,
+            color: '#b0b0c0',
+            padding: '2px 0',
             whiteSpace: 'nowrap',
             overflow: 'hidden',
             textOverflow: 'ellipsis',
-            maxWidth: 200,
+            maxWidth: 280,
           }}
         >
-          <span style={{ color: 'var(--accent)' }}>{a.toolName}</span>{' '}
+          <span style={{ color: '#7aafff' }}>{a.toolName}</span>{' '}
           {a.summary}
         </li>
       ))}
@@ -99,38 +77,38 @@ export default function HoverCard({ character, x, y }: HoverCardProps) {
         position: 'fixed',
         left: x + 16,
         top: y + 16,
-        background: 'var(--bg-secondary)',
-        border: '1px solid var(--border-color)',
-        borderRadius: 6,
-        padding: '8px 12px',
+        background: '#151520',
+        border: '1px solid #2a2a3e',
+        borderRadius: 8,
+        padding: '10px 14px',
         zIndex: 40,
         pointerEvents: 'none',
-        minWidth: 180,
-        maxWidth: 260,
+        minWidth: 220,
+        maxWidth: 320,
       }}
     >
-      {/* Name row */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
+      {/* Name */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
         <span
           style={{
-            width: 8,
-            height: 8,
+            width: 10,
+            height: 10,
             borderRadius: '50%',
             backgroundColor: character.color,
             display: 'inline-block',
+            border: '2px solid rgba(255,255,255,0.15)',
           }}
         />
-        <span style={{ fontSize: 12, fontWeight: 'bold', color: 'var(--text-primary)' }}>
+        <span style={{ fontSize: 15, fontWeight: 700, color: '#eee' }}>
           {character.name}
         </span>
       </div>
 
-      {/* Status row */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
-        <StatusDot status={character.status} />
+      {/* Status */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
         <StatusBadge status={character.status} />
         {character.lastActivity && (
-          <span style={{ fontSize: 9, color: 'var(--text-muted)' }}>
+          <span style={{ fontSize: 12, color: '#888' }}>
             {formatTimeAgo(character.lastActivity)}
           </span>
         )}
@@ -138,7 +116,7 @@ export default function HoverCard({ character, x, y }: HoverCardProps) {
 
       {/* Current tool */}
       {character.currentTool && (
-        <div style={{ fontSize: 10, color: 'var(--accent)', marginBottom: 2 }}>
+        <div style={{ fontSize: 14, color: '#7aafff', marginBottom: 4, fontWeight: 600 }}>
           Using: {character.currentTool}
         </div>
       )}
@@ -147,13 +125,14 @@ export default function HoverCard({ character, x, y }: HoverCardProps) {
       {character.lastToolSummary && (
         <div
           style={{
-            fontSize: 10,
-            color: 'var(--text-secondary)',
-            marginBottom: 4,
+            fontSize: 13,
+            color: '#b0b0c0',
+            marginBottom: 6,
             whiteSpace: 'nowrap',
             overflow: 'hidden',
             textOverflow: 'ellipsis',
-            maxWidth: 230,
+            maxWidth: 290,
+            fontFamily: "'Courier New', monospace",
           }}
         >
           {character.lastToolSummary}
@@ -162,7 +141,7 @@ export default function HoverCard({ character, x, y }: HoverCardProps) {
 
       {/* Recent actions */}
       {character.recentActions.length > 0 && (
-        <div style={{ marginTop: 4, borderTop: '1px solid var(--border-color)', paddingTop: 4 }}>
+        <div style={{ marginTop: 6, borderTop: '1px solid #2a2a3e', paddingTop: 6 }}>
           <ActionList actions={character.recentActions} max={2} />
         </div>
       )}

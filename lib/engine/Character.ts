@@ -242,7 +242,7 @@ export class Character {
   /** Render label on a high-resolution overlay canvas for crisp text */
   renderLabelHD(ctx: CanvasRenderingContext2D, scale: number): void {
     const label = this.name;
-    const fontSize = 11;
+    const fontSize = 13;
     ctx.font = `600 ${fontSize}px 'Courier New', Courier, monospace`;
     ctx.textAlign = 'center';
     ctx.textBaseline = 'top';

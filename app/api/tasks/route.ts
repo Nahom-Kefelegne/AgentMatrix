@@ -3,10 +3,36 @@ import fs from 'fs';
 import path from 'path';
 import os from 'os';
 import type { TaskItem, TaskList } from '@/lib/types';
+import { resolveSessionName } from '@/lib/state/sessionName';
+
+const CLAUDE_DIR = path.join(os.homedir(), '.claude');
+const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+
+/** Try to find a friendly name for a task list directory */
+function resolveListName(dirName: string): string {
+  // If it's not a UUID, it's already a readable name (like a team name)
+  if (!UUID_REGEX.test(dirName)) return dirName;
+
+  // Try to find a transcript for this session ID
+  const projectsDir = path.join(CLAUDE_DIR, 'projects');
+  try {
+    const projects = fs.readdirSync(projectsDir);
+    for (const proj of projects) {
+      const transcriptPath = path.join(projectsDir, proj, `${dirName}.jsonl`);
+      if (fs.existsSync(transcriptPath)) {
+        return resolveSessionName(transcriptPath, undefined, dirName);
+      }
+    }
+  } catch {
+    // ignore
+  }
+
+  return `Tasks-${dirName.slice(0, 8)}`;
+}
 
 export async function GET() {
   try {
-    const tasksDir = path.join(os.homedir(), '.claude', 'tasks');
+    const tasksDir = path.join(CLAUDE_DIR, 'tasks');
 
     if (!fs.existsSync(tasksDir)) {
       return NextResponse.json({ taskLists: [] });
@@ -41,8 +67,11 @@ export async function GET() {
         }
       }
 
+      if (tasks.length === 0) continue; // Skip empty lists
+
       taskLists.push({
         id: entry.name,
+        name: resolveListName(entry.name),
         path: listPath,
         tasks,
       });

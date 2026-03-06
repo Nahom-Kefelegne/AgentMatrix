@@ -3,13 +3,13 @@ import type { Point } from './types';
 // ===== Grid & Rendering =====
 
 export const TILE_SIZE = 16;
-export const MAP_COLS = 30;
-export const MAP_ROWS = 20;
+export const MAP_COLS = 38;
+export const MAP_ROWS = 26;
 export const SCALE = 3;
-export const CANVAS_W = MAP_COLS * TILE_SIZE; // 480
-export const CANVAS_H = MAP_ROWS * TILE_SIZE; // 320
-export const DISPLAY_W = CANVAS_W * SCALE;    // 1440
-export const DISPLAY_H = CANVAS_H * SCALE;    // 960
+export const CANVAS_W = MAP_COLS * TILE_SIZE; // 608
+export const CANVAS_H = MAP_ROWS * TILE_SIZE; // 416
+export const DISPLAY_W = CANVAS_W * SCALE;    // 1824
+export const DISPLAY_H = CANVAS_H * SCALE;    // 1248
 
 // ===== Tile Types =====
 
@@ -64,40 +64,42 @@ export const TILE_COLORS: Record<TileType, string> = {
 // ===== Positions =====
 
 export const DESK_POSITIONS: Point[] = [
-  { x: 6, y: 3 },
-  { x: 8, y: 3 },
-  { x: 13, y: 3 },
-  { x: 15, y: 3 },
-  { x: 20, y: 3 },
-  { x: 22, y: 3 },
-  { x: 6, y: 6 },
-  { x: 8, y: 6 },
+  { x: 6, y: 4 },
+  { x: 8, y: 4 },
+  { x: 15, y: 4 },
+  { x: 17, y: 4 },
+  { x: 24, y: 4 },
+  { x: 26, y: 4 },
+  { x: 6, y: 8 },
+  { x: 8, y: 8 },
+  { x: 15, y: 8 },
+  { x: 17, y: 8 },
 ];
 
-// 3 meeting rooms, each with chair positions around a small table
-// Room A (left): rows 10-15, cols 2-8
-// Room B (center): rows 10-15, cols 11-17
-// Room C (right): rows 10-15, cols 20-26
+// 3 meeting rooms, well-spaced across the bottom half
+// Room A (left): rows 14-19, cols 2-10
+// Room B (center): rows 14-19, cols 14-22
+// Room C (right): rows 14-19, cols 26-34
 export const MEETING_ROOMS: { id: string; chairs: Point[] }[] = [
   {
     id: 'room-a',
     chairs: [
-      { x: 3, y: 11 }, { x: 5, y: 11 }, { x: 7, y: 11 },
-      { x: 3, y: 14 }, { x: 5, y: 14 }, { x: 7, y: 14 },
+      { x: 4, y: 15 }, { x: 6, y: 15 }, { x: 8, y: 15 },
+      { x: 4, y: 18 }, { x: 6, y: 18 }, { x: 8, y: 18 },
     ],
   },
   {
     id: 'room-b',
     chairs: [
-      { x: 12, y: 11 }, { x: 14, y: 11 }, { x: 16, y: 11 },
-      { x: 12, y: 14 }, { x: 14, y: 14 }, { x: 16, y: 14 },
+      { x: 16, y: 15 }, { x: 18, y: 15 }, { x: 20, y: 15 },
+      { x: 16, y: 18 }, { x: 18, y: 18 }, { x: 20, y: 18 },
     ],
   },
   {
     id: 'room-c',
     chairs: [
-      { x: 21, y: 11 }, { x: 23, y: 11 }, { x: 25, y: 11 },
-      { x: 21, y: 14 }, { x: 23, y: 14 }, { x: 25, y: 14 },
+      { x: 28, y: 15 }, { x: 30, y: 15 }, { x: 32, y: 15 },
+      { x: 28, y: 18 }, { x: 30, y: 18 }, { x: 32, y: 18 },
     ],
   },
 ];
@@ -106,21 +108,19 @@ export const MEETING_ROOMS: { id: string; chairs: Point[] }[] = [
 export const MEETING_POSITIONS: Point[] = MEETING_ROOMS.flatMap(r => r.chairs);
 
 export const OVERFLOW_POSITIONS: Point[] = [
-  { x: 3, y: 17 },
-  { x: 5, y: 17 },
-  { x: 7, y: 17 },
-  { x: 9, y: 17 },
+  { x: 4, y: 22 },
+  { x: 6, y: 22 },
+  { x: 8, y: 22 },
+  { x: 10, y: 22 },
 ];
 
-export const ENTRANCE_POINT: Point = { x: 10, y: 19 };
+export const ENTRANCE_POINT: Point = { x: 14, y: 25 };
 
-// Window positions (tiles adjacent to windows where characters can stand before "jumping out")
-// Row 0 windows at cols 6, 11, 16, 21 — stand one tile south (row 1)
 export const WINDOW_EXIT_POSITIONS: Point[] = [
-  { x: 6, y: 1 },
-  { x: 11, y: 1 },
-  { x: 16, y: 1 },
-  { x: 21, y: 1 },
+  { x: 8, y: 1 },
+  { x: 14, y: 1 },
+  { x: 22, y: 1 },
+  { x: 28, y: 1 },
 ];
 
 // ===== Character Colors =====
@@ -176,46 +176,61 @@ export const SOCKET_PATH = '/api/socketio';
 //         ~ carpet, E entrance, W waiting, o overflow
 
 const T = TileType;
+const W = T.WALL, F = T.FLOOR, _ = T.WINDOW_WALL, D = T.DESK, C = T.CHAIR;
+const M = T.MEETING_TABLE, m = T.MEETING_CHAIR, R = T.RECEPTION, P = T.PLANT;
+const B = T.BOOKSHELF, K = T.KITCHEN, X = T.CARPET, E = T.ENTRANCE, O = T.OVERFLOW, A = T.WAITING;
 
 export const OFFICE_GRID: TileType[][] = [
   // Row 0: North wall with windows
-  [T.WALL,T.WALL,T.WALL,T.WALL,T.WALL,T.WALL,T.WINDOW_WALL,T.WALL,T.WALL,T.WALL,T.WALL,T.WINDOW_WALL,T.WALL,T.WALL,T.WALL,T.WALL,T.WINDOW_WALL,T.WALL,T.WALL,T.WALL,T.WALL,T.WINDOW_WALL,T.WALL,T.WALL,T.WALL,T.WALL,T.WALL,T.WALL,T.WALL,T.WALL],
-  // Row 1: Border floor with plants
-  [T.WALL,T.PLANT,T.FLOOR,T.FLOOR,T.FLOOR,T.FLOOR,T.FLOOR,T.FLOOR,T.FLOOR,T.FLOOR,T.FLOOR,T.FLOOR,T.FLOOR,T.FLOOR,T.FLOOR,T.FLOOR,T.FLOOR,T.FLOOR,T.FLOOR,T.FLOOR,T.FLOOR,T.FLOOR,T.FLOOR,T.FLOOR,T.FLOOR,T.FLOOR,T.FLOOR,T.FLOOR,T.PLANT,T.WALL],
-  // Row 2: Desk row 1
-  [T.WALL,T.FLOOR,T.FLOOR,T.BOOKSHELF,T.FLOOR,T.FLOOR,T.DESK,T.FLOOR,T.DESK,T.FLOOR,T.FLOOR,T.FLOOR,T.FLOOR,T.DESK,T.FLOOR,T.DESK,T.FLOOR,T.FLOOR,T.FLOOR,T.FLOOR,T.DESK,T.FLOOR,T.DESK,T.FLOOR,T.FLOOR,T.BOOKSHELF,T.FLOOR,T.FLOOR,T.FLOOR,T.WALL],
-  // Row 3: Chair row 1
-  [T.WALL,T.FLOOR,T.FLOOR,T.BOOKSHELF,T.FLOOR,T.FLOOR,T.CHAIR,T.FLOOR,T.CHAIR,T.FLOOR,T.FLOOR,T.FLOOR,T.FLOOR,T.CHAIR,T.FLOOR,T.CHAIR,T.FLOOR,T.FLOOR,T.FLOOR,T.FLOOR,T.CHAIR,T.FLOOR,T.CHAIR,T.FLOOR,T.FLOOR,T.BOOKSHELF,T.FLOOR,T.FLOOR,T.FLOOR,T.WALL],
-  // Row 4: Aisle
-  [T.WALL,T.FLOOR,T.FLOOR,T.FLOOR,T.FLOOR,T.FLOOR,T.FLOOR,T.FLOOR,T.FLOOR,T.FLOOR,T.FLOOR,T.FLOOR,T.FLOOR,T.FLOOR,T.FLOOR,T.FLOOR,T.FLOOR,T.FLOOR,T.FLOOR,T.FLOOR,T.FLOOR,T.FLOOR,T.FLOOR,T.FLOOR,T.FLOOR,T.FLOOR,T.FLOOR,T.FLOOR,T.FLOOR,T.WALL],
-  // Row 5: Desk row 2
-  [T.WALL,T.FLOOR,T.FLOOR,T.FLOOR,T.FLOOR,T.FLOOR,T.DESK,T.FLOOR,T.DESK,T.FLOOR,T.FLOOR,T.FLOOR,T.FLOOR,T.DESK,T.FLOOR,T.DESK,T.FLOOR,T.FLOOR,T.FLOOR,T.FLOOR,T.FLOOR,T.FLOOR,T.FLOOR,T.FLOOR,T.FLOOR,T.FLOOR,T.FLOOR,T.FLOOR,T.FLOOR,T.WALL],
-  // Row 6: Chair row 2 + kitchen
-  [T.WALL,T.FLOOR,T.FLOOR,T.FLOOR,T.FLOOR,T.FLOOR,T.CHAIR,T.FLOOR,T.CHAIR,T.FLOOR,T.FLOOR,T.FLOOR,T.FLOOR,T.CHAIR,T.FLOOR,T.CHAIR,T.FLOOR,T.FLOOR,T.FLOOR,T.FLOOR,T.FLOOR,T.FLOOR,T.KITCHEN,T.FLOOR,T.KITCHEN,T.FLOOR,T.FLOOR,T.FLOOR,T.FLOOR,T.WALL],
-  // Row 7: Kitchen area
-  [T.WALL,T.FLOOR,T.FLOOR,T.FLOOR,T.FLOOR,T.FLOOR,T.FLOOR,T.FLOOR,T.FLOOR,T.FLOOR,T.FLOOR,T.FLOOR,T.FLOOR,T.FLOOR,T.FLOOR,T.FLOOR,T.FLOOR,T.FLOOR,T.FLOOR,T.KITCHEN,T.FLOOR,T.KITCHEN,T.FLOOR,T.KITCHEN,T.FLOOR,T.KITCHEN,T.FLOOR,T.FLOOR,T.FLOOR,T.WALL],
-  // Row 8: Aisle
-  [T.WALL,T.FLOOR,T.FLOOR,T.FLOOR,T.FLOOR,T.FLOOR,T.FLOOR,T.FLOOR,T.FLOOR,T.FLOOR,T.FLOOR,T.FLOOR,T.FLOOR,T.FLOOR,T.FLOOR,T.FLOOR,T.FLOOR,T.FLOOR,T.FLOOR,T.FLOOR,T.FLOOR,T.FLOOR,T.FLOOR,T.FLOOR,T.FLOOR,T.FLOOR,T.FLOOR,T.FLOOR,T.FLOOR,T.WALL],
-  // Row 9: Hallway between desks and meeting rooms
-  [T.WALL,T.FLOOR,T.FLOOR,T.FLOOR,T.FLOOR,T.FLOOR,T.FLOOR,T.FLOOR,T.FLOOR,T.FLOOR,T.FLOOR,T.FLOOR,T.FLOOR,T.FLOOR,T.FLOOR,T.FLOOR,T.FLOOR,T.FLOOR,T.FLOOR,T.FLOOR,T.FLOOR,T.FLOOR,T.FLOOR,T.FLOOR,T.FLOOR,T.FLOOR,T.FLOOR,T.FLOOR,T.FLOOR,T.WALL],
-  // Row 10: Meeting room tops (carpet borders for 3 rooms)
-  [T.WALL,T.CARPET,T.CARPET,T.CARPET,T.CARPET,T.CARPET,T.CARPET,T.CARPET,T.CARPET,T.FLOOR,T.CARPET,T.CARPET,T.CARPET,T.CARPET,T.CARPET,T.CARPET,T.CARPET,T.CARPET,T.FLOOR,T.CARPET,T.CARPET,T.CARPET,T.CARPET,T.CARPET,T.CARPET,T.CARPET,T.CARPET,T.CARPET,T.FLOOR,T.WALL],
-  // Row 11: Meeting chairs top row (3 per room)
-  [T.WALL,T.CARPET,T.FLOOR,T.MEETING_CHAIR,T.FLOOR,T.MEETING_CHAIR,T.FLOOR,T.MEETING_CHAIR,T.CARPET,T.FLOOR,T.CARPET,T.FLOOR,T.MEETING_CHAIR,T.FLOOR,T.MEETING_CHAIR,T.FLOOR,T.MEETING_CHAIR,T.CARPET,T.FLOOR,T.CARPET,T.FLOOR,T.MEETING_CHAIR,T.FLOOR,T.MEETING_CHAIR,T.FLOOR,T.MEETING_CHAIR,T.FLOOR,T.CARPET,T.FLOOR,T.WALL],
-  // Row 12: Meeting tables
-  [T.WALL,T.CARPET,T.FLOOR,T.MEETING_TABLE,T.MEETING_TABLE,T.MEETING_TABLE,T.MEETING_TABLE,T.FLOOR,T.CARPET,T.FLOOR,T.CARPET,T.FLOOR,T.MEETING_TABLE,T.MEETING_TABLE,T.MEETING_TABLE,T.MEETING_TABLE,T.FLOOR,T.CARPET,T.FLOOR,T.CARPET,T.FLOOR,T.MEETING_TABLE,T.MEETING_TABLE,T.MEETING_TABLE,T.MEETING_TABLE,T.FLOOR,T.FLOOR,T.CARPET,T.FLOOR,T.WALL],
-  // Row 13: Meeting tables continued
-  [T.WALL,T.CARPET,T.FLOOR,T.MEETING_TABLE,T.MEETING_TABLE,T.MEETING_TABLE,T.MEETING_TABLE,T.FLOOR,T.CARPET,T.FLOOR,T.CARPET,T.FLOOR,T.MEETING_TABLE,T.MEETING_TABLE,T.MEETING_TABLE,T.MEETING_TABLE,T.FLOOR,T.CARPET,T.FLOOR,T.CARPET,T.FLOOR,T.MEETING_TABLE,T.MEETING_TABLE,T.MEETING_TABLE,T.MEETING_TABLE,T.FLOOR,T.FLOOR,T.CARPET,T.FLOOR,T.WALL],
-  // Row 14: Meeting chairs bottom row
-  [T.WALL,T.CARPET,T.FLOOR,T.MEETING_CHAIR,T.FLOOR,T.MEETING_CHAIR,T.FLOOR,T.MEETING_CHAIR,T.CARPET,T.FLOOR,T.CARPET,T.FLOOR,T.MEETING_CHAIR,T.FLOOR,T.MEETING_CHAIR,T.FLOOR,T.MEETING_CHAIR,T.CARPET,T.FLOOR,T.CARPET,T.FLOOR,T.MEETING_CHAIR,T.FLOOR,T.MEETING_CHAIR,T.FLOOR,T.MEETING_CHAIR,T.FLOOR,T.CARPET,T.FLOOR,T.WALL],
-  // Row 15: Meeting room bottoms
-  [T.WALL,T.CARPET,T.CARPET,T.CARPET,T.CARPET,T.CARPET,T.CARPET,T.CARPET,T.CARPET,T.FLOOR,T.CARPET,T.CARPET,T.CARPET,T.CARPET,T.CARPET,T.CARPET,T.CARPET,T.CARPET,T.FLOOR,T.CARPET,T.CARPET,T.CARPET,T.CARPET,T.CARPET,T.CARPET,T.CARPET,T.CARPET,T.CARPET,T.FLOOR,T.WALL],
-  // Row 16: Hallway
-  [T.WALL,T.FLOOR,T.FLOOR,T.FLOOR,T.FLOOR,T.FLOOR,T.FLOOR,T.FLOOR,T.FLOOR,T.FLOOR,T.FLOOR,T.FLOOR,T.FLOOR,T.FLOOR,T.FLOOR,T.FLOOR,T.FLOOR,T.FLOOR,T.FLOOR,T.FLOOR,T.FLOOR,T.FLOOR,T.FLOOR,T.FLOOR,T.FLOOR,T.FLOOR,T.FLOOR,T.FLOOR,T.FLOOR,T.WALL],
-  // Row 17: Plants + overflow waiting
-  [T.WALL,T.PLANT,T.FLOOR,T.OVERFLOW,T.FLOOR,T.OVERFLOW,T.FLOOR,T.OVERFLOW,T.FLOOR,T.OVERFLOW,T.FLOOR,T.FLOOR,T.FLOOR,T.FLOOR,T.FLOOR,T.FLOOR,T.FLOOR,T.FLOOR,T.FLOOR,T.FLOOR,T.FLOOR,T.FLOOR,T.FLOOR,T.FLOOR,T.FLOOR,T.FLOOR,T.FLOOR,T.FLOOR,T.PLANT,T.WALL],
-  // Row 18: Reception near entrance
-  [T.WALL,T.FLOOR,T.FLOOR,T.FLOOR,T.FLOOR,T.FLOOR,T.FLOOR,T.FLOOR,T.FLOOR,T.FLOOR,T.RECEPTION,T.RECEPTION,T.FLOOR,T.FLOOR,T.FLOOR,T.FLOOR,T.FLOOR,T.FLOOR,T.FLOOR,T.FLOOR,T.FLOOR,T.FLOOR,T.FLOOR,T.FLOOR,T.FLOOR,T.FLOOR,T.FLOOR,T.FLOOR,T.FLOOR,T.WALL],
-  // Row 19: South wall with entrance
-  [T.WALL,T.WALL,T.WALL,T.WALL,T.ENTRANCE,T.ENTRANCE,T.WALL,T.WALL,T.WALL,T.WALL,T.ENTRANCE,T.ENTRANCE,T.WALL,T.WALL,T.WALL,T.WALL,T.WINDOW_WALL,T.WALL,T.WALL,T.WALL,T.WALL,T.WINDOW_WALL,T.WALL,T.WALL,T.WALL,T.WALL,T.WALL,T.WALL,T.WALL,T.WALL],
+  [W,W,W,W,W,W,W,_,W,W,W,W,W,_,W,W,W,W,W,W,W,_,W,W,W,W,W,_,W,W,W,W,W,W,W,W,W,W],
+  // Row 1: Border floor with plants + bookshelves
+  [W,P,F,F,F,F,F,F,F,F,F,F,F,F,F,F,F,F,F,F,F,F,F,F,F,F,F,F,F,F,F,F,F,F,F,F,P,W],
+  // Row 2: Spacer
+  [W,F,F,B,F,F,F,F,F,F,F,F,B,F,F,F,F,F,F,F,F,B,F,F,F,F,F,F,F,F,F,F,B,F,F,F,F,W],
+  // Row 3: Desk row 1
+  [W,F,F,F,F,F,D,F,D,F,F,F,F,F,F,D,F,D,F,F,F,F,F,F,D,F,D,F,F,F,F,F,F,F,K,K,F,W],
+  // Row 4: Chair row 1
+  [W,F,F,F,F,F,C,F,C,F,F,F,F,F,F,C,F,C,F,F,F,F,F,F,C,F,C,F,F,F,F,F,F,K,F,K,F,W],
+  // Row 5: Aisle
+  [W,F,F,F,F,F,F,F,F,F,F,F,F,F,F,F,F,F,F,F,F,F,F,F,F,F,F,F,F,F,F,F,F,F,F,F,F,W],
+  // Row 6: Spacer
+  [W,F,F,F,F,F,F,F,F,F,F,F,F,F,F,F,F,F,F,F,F,F,F,F,F,F,F,F,F,F,F,F,F,F,F,F,F,W],
+  // Row 7: Desk row 2
+  [W,F,F,F,F,F,D,F,D,F,F,F,F,F,F,D,F,D,F,F,F,F,F,F,F,F,F,F,F,F,F,F,F,F,F,F,F,W],
+  // Row 8: Chair row 2
+  [W,F,F,F,F,F,C,F,C,F,F,F,F,F,F,C,F,C,F,F,F,F,F,F,F,F,F,F,F,F,F,F,F,F,F,F,F,W],
+  // Row 9: Aisle
+  [W,F,F,F,F,F,F,F,F,F,F,F,F,F,F,F,F,F,F,F,F,F,F,F,F,F,F,F,F,F,F,F,F,F,F,F,F,W],
+  // Row 10: Spacer
+  [W,F,F,F,F,F,F,F,F,F,F,F,F,F,F,F,F,F,F,F,F,F,F,F,F,F,F,F,F,F,F,F,F,F,F,F,F,W],
+  // Row 11: Spacer + decorations
+  [W,F,F,P,F,F,F,F,F,F,F,F,F,F,F,F,F,F,F,F,F,F,F,F,F,F,F,F,F,F,F,F,F,F,P,F,F,W],
+  // Row 12: Hallway before meeting rooms
+  [W,F,F,F,F,F,F,F,F,F,F,F,F,F,F,F,F,F,F,F,F,F,F,F,F,F,F,F,F,F,F,F,F,F,F,F,F,W],
+  // Row 13: Meeting room tops (carpet borders for 3 rooms)
+  [W,F,X,X,X,X,X,X,X,X,X,F,F,F,X,X,X,X,X,X,X,X,X,F,F,F,X,X,X,X,X,X,X,X,X,F,F,W],
+  // Row 14: Meeting room interior
+  [W,F,X,F,F,F,F,F,F,F,X,F,F,F,X,F,F,F,F,F,F,F,X,F,F,F,X,F,F,F,F,F,F,F,X,F,F,W],
+  // Row 15: Meeting chairs top
+  [W,F,X,F,m,F,m,F,m,F,X,F,F,F,X,F,m,F,m,F,m,F,X,F,F,F,X,F,m,F,m,F,m,F,X,F,F,W],
+  // Row 16: Meeting table
+  [W,F,X,F,M,M,M,M,M,F,X,F,F,F,X,F,M,M,M,M,M,F,X,F,F,F,X,F,M,M,M,M,M,F,X,F,F,W],
+  // Row 17: Meeting table continued
+  [W,F,X,F,M,M,M,M,M,F,X,F,F,F,X,F,M,M,M,M,M,F,X,F,F,F,X,F,M,M,M,M,M,F,X,F,F,W],
+  // Row 18: Meeting chairs bottom
+  [W,F,X,F,m,F,m,F,m,F,X,F,F,F,X,F,m,F,m,F,m,F,X,F,F,F,X,F,m,F,m,F,m,F,X,F,F,W],
+  // Row 19: Meeting room interior
+  [W,F,X,F,F,F,F,F,F,F,X,F,F,F,X,F,F,F,F,F,F,F,X,F,F,F,X,F,F,F,F,F,F,F,X,F,F,W],
+  // Row 20: Meeting room bottoms
+  [W,F,X,X,X,X,X,X,X,X,X,F,F,F,X,X,X,X,X,X,X,X,X,F,F,F,X,X,X,X,X,X,X,X,X,F,F,W],
+  // Row 21: Hallway
+  [W,F,F,F,F,F,F,F,F,F,F,F,F,F,F,F,F,F,F,F,F,F,F,F,F,F,F,F,F,F,F,F,F,F,F,F,F,W],
+  // Row 22: Overflow + waiting
+  [W,P,F,F,O,F,O,F,O,F,O,F,F,F,F,F,F,F,F,F,F,F,F,F,F,F,F,F,F,F,F,F,F,F,F,P,F,W],
+  // Row 23: Reception area
+  [W,F,F,F,F,F,F,F,F,F,F,F,F,R,R,R,F,F,F,F,F,F,F,F,F,F,F,F,F,F,F,F,F,F,F,F,F,W],
+  // Row 24: Near entrance
+  [W,F,F,F,F,F,F,F,F,F,F,F,F,F,F,F,F,F,F,F,F,F,F,F,F,F,F,F,F,F,F,F,F,F,F,F,F,W],
+  // Row 25: South wall with entrance
+  [W,W,W,W,W,W,W,W,W,W,W,W,W,E,E,E,W,W,W,W,W,W,W,W,_,W,W,W,W,_,W,W,W,W,W,W,W,W],
 ];
