@@ -25,6 +25,8 @@ export class Character {
   color: string;
   status: SessionStatus;
   currentTool?: string;
+  lastToolSummary?: string;
+  lastActivity?: number;
   recentActions: Action[] = [];
   teamId?: string;
   isAgent: boolean;
@@ -272,6 +274,8 @@ export class Character {
       color: this.color,
       status: this.status,
       currentTool: this.currentTool,
+      lastToolSummary: this.lastToolSummary,
+      lastActivity: this.lastActivity,
       recentActions: this.recentActions,
       teamId: this.teamId,
       isAgent: this.isAgent,

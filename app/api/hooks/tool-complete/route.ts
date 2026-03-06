@@ -15,8 +15,11 @@ export async function POST(request: Request) {
       timestamp: Date.now(),
     });
 
+    const lastActivity = Date.now();
+
     updateSession(payload.session_id, {
       currentTool: undefined,
+      lastActivity,
     });
 
     emitToClients(SOCKET_EVENTS.TOOL_COMPLETE, {
@@ -31,6 +34,7 @@ export async function POST(request: Request) {
         sessionId: payload.session_id,
         changes: {
           currentTool: undefined,
+          lastActivity,
           recentActions: session.recentActions,
         },
       });

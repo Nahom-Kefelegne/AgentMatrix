@@ -4,6 +4,30 @@ import { getSession, updateSession } from '@/lib/state/sessionStore';
 import { emitToClients } from '@/lib/state/socketEmitter';
 import { resolveSessionName } from '@/lib/state/sessionName';
 
+function buildToolSummary(toolName: string, toolInput?: Record<string, unknown>): string {
+  if (!toolInput) return toolName;
+
+  switch (toolName) {
+    case 'Read':
+      return `Reading ${toolInput.file_path ?? 'file'}`;
+    case 'Edit':
+      return `Editing ${toolInput.file_path ?? 'file'}`;
+    case 'Write':
+      return `Writing ${toolInput.file_path ?? 'file'}`;
+    case 'Bash': {
+      const cmd = String(toolInput.command ?? '');
+      return `Running ${cmd.slice(0, 40)}`;
+    }
+    case 'Grep':
+    case 'Glob':
+      return `Searching ${toolInput.pattern ?? toolInput.glob ?? 'files'}`;
+    case 'Agent':
+      return 'Spawning agent';
+    default:
+      return toolName;
+  }
+}
+
 export async function POST(request: Request) {
   try {
     const payload = await request.json();
@@ -21,9 +45,19 @@ export async function POST(request: Request) {
       }
     }
 
+    const lastToolSummary = buildToolSummary(payload.tool_name, payload.tool_input);
+    const lastActivity = Date.now();
+
     updateSession(payload.session_id, {
       status: 'working',
       currentTool: payload.tool_name,
+      lastToolSummary,
+      lastActivity,
+    });
+
+    emitToClients(SOCKET_EVENTS.SESSION_UPDATE, {
+      sessionId: payload.session_id,
+      changes: { lastToolSummary, lastActivity },
     });
 
     emitToClients(SOCKET_EVENTS.TOOL_START, {

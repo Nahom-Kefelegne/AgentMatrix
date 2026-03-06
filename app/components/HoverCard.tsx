@@ -26,6 +26,32 @@ function StatusBadge({ status }: StatusBadgeProps) {
   );
 }
 
+function StatusDot({ status }: { status: string }) {
+  const colorMap: Record<string, string> = {
+    working: '#51cf66',
+    idle: '#888888',
+    meeting: '#4a9eff',
+  };
+  return (
+    <span
+      style={{
+        display: 'inline-block',
+        width: 6,
+        height: 6,
+        borderRadius: '50%',
+        backgroundColor: colorMap[status] || '#888888',
+      }}
+    />
+  );
+}
+
+function formatTimeAgo(timestamp: number): string {
+  const diff = Math.floor((Date.now() - timestamp) / 1000);
+  if (diff < 60) return `${diff}s ago`;
+  if (diff < 3600) return `${Math.floor(diff / 60)}m ago`;
+  return `${Math.floor(diff / 3600)}h ago`;
+}
+
 interface ActionListProps {
   actions: Action[];
   max?: number;
@@ -79,10 +105,11 @@ export default function HoverCard({ character, x, y }: HoverCardProps) {
         padding: '8px 12px',
         zIndex: 40,
         pointerEvents: 'none',
-        minWidth: 160,
-        maxWidth: 240,
+        minWidth: 180,
+        maxWidth: 260,
       }}
     >
+      {/* Name row */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
         <span
           style={{
@@ -93,17 +120,50 @@ export default function HoverCard({ character, x, y }: HoverCardProps) {
             display: 'inline-block',
           }}
         />
-        <span style={{ fontSize: 12, fontWeight: 'bold' }}>{character.name}</span>
-        <StatusBadge status={character.status} />
+        <span style={{ fontSize: 12, fontWeight: 'bold', color: 'var(--text-primary)' }}>
+          {character.name}
+        </span>
       </div>
+
+      {/* Status row */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
+        <StatusDot status={character.status} />
+        <StatusBadge status={character.status} />
+        {character.lastActivity && (
+          <span style={{ fontSize: 9, color: 'var(--text-muted)' }}>
+            {formatTimeAgo(character.lastActivity)}
+          </span>
+        )}
+      </div>
+
+      {/* Current tool */}
       {character.currentTool && (
-        <div style={{ fontSize: 10, color: 'var(--accent)', marginBottom: 4 }}>
+        <div style={{ fontSize: 10, color: 'var(--accent)', marginBottom: 2 }}>
           Using: {character.currentTool}
         </div>
       )}
+
+      {/* Tool summary */}
+      {character.lastToolSummary && (
+        <div
+          style={{
+            fontSize: 10,
+            color: 'var(--text-secondary)',
+            marginBottom: 4,
+            whiteSpace: 'nowrap',
+            overflow: 'hidden',
+            textOverflow: 'ellipsis',
+            maxWidth: 230,
+          }}
+        >
+          {character.lastToolSummary}
+        </div>
+      )}
+
+      {/* Recent actions */}
       {character.recentActions.length > 0 && (
         <div style={{ marginTop: 4, borderTop: '1px solid var(--border-color)', paddingTop: 4 }}>
-          <ActionList actions={character.recentActions} max={3} />
+          <ActionList actions={character.recentActions} max={2} />
         </div>
       )}
     </div>

@@ -8,6 +8,7 @@ import OfficeCanvas from './components/OfficeCanvas';
 import HoverCard from './components/HoverCard';
 import SidePanel from './components/SidePanel';
 import SetupModal from './components/SetupModal';
+import TaskBoard from './components/TaskBoard';
 
 function OfficeView() {
   const { connected, sessions, onEvent } = useSocketContext();
@@ -16,6 +17,8 @@ function OfficeView() {
   const [hoverPos, setHoverPos] = useState({ x: 0, y: 0 });
   const [selectedChar, setSelectedChar] = useState<CharacterData | null>(null);
   const [showSetup, setShowSetup] = useState(false);
+  const [taskTrackerId, setTaskTrackerId] = useState<string | null>(null);
+  const [showTaskBoard, setShowTaskBoard] = useState(false);
 
   const handleHover = useCallback((char: CharacterData | null, screenX: number, screenY: number) => {
     setHoveredChar(char);
@@ -26,9 +29,19 @@ function OfficeView() {
     setSelectedChar(char);
   }, []);
 
+  const handleSetTaskTracker = useCallback((sessionId: string) => {
+    setTaskTrackerId((prev) => (prev === sessionId ? null : sessionId));
+  }, []);
+
+  const taskTrackerSession = taskTrackerId ? sessions.get(taskTrackerId) : null;
+
   return (
     <>
-      <HeaderBar connected={connected} onSetupClick={() => setShowSetup(true)} />
+      <HeaderBar
+        connected={connected}
+        onSetupClick={() => setShowSetup(true)}
+        onTasksClick={() => setShowTaskBoard(true)}
+      />
       <OfficeCanvas
         sessions={sessions}
         onEvent={onEvent}
@@ -36,12 +49,23 @@ function OfficeView() {
         onClick={handleClick}
       />
       <HoverCard character={hoveredChar} x={hoverPos.x} y={hoverPos.y} />
-      <SidePanel character={selectedChar} onClose={() => setSelectedChar(null)} />
+      <SidePanel
+        character={selectedChar}
+        onClose={() => setSelectedChar(null)}
+        isTaskTracker={selectedChar ? selectedChar.id === taskTrackerId : false}
+        onSetTaskTracker={handleSetTaskTracker}
+      />
       <SetupModal
         isOpen={showSetup}
         onClose={() => setShowSetup(false)}
         connected={connected}
         sessionCount={sessions.size}
+      />
+      <TaskBoard
+        isOpen={showTaskBoard}
+        onClose={() => setShowTaskBoard(false)}
+        sessionId={taskTrackerId}
+        sessionName={taskTrackerSession?.name || 'All Tasks'}
       />
     </>
   );

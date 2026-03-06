@@ -34,6 +34,8 @@ export interface SessionData {
   deskPosition: Point;
   spawnPosition: Point;
   currentTool?: string;
+  lastToolSummary?: string;
+  lastActivity?: number;
   recentActions: Action[];
   agents: AgentData[];
   teamId?: string;
@@ -49,6 +51,8 @@ export interface CharacterData {
   color: string;
   status: SessionStatus;
   currentTool?: string;
+  lastToolSummary?: string;
+  lastActivity?: number;
   recentActions: Action[];
   teamId?: string;
   isAgent: boolean;
@@ -90,6 +94,25 @@ export interface AgentStopPayload extends HookPayload {
 }
 
 export interface StopPayload extends HookPayload {}
+
+// ===== Task Types =====
+
+export interface TaskItem {
+  id: string;
+  subject: string;
+  description: string;
+  status: 'pending' | 'in_progress' | 'completed' | 'deleted';
+  owner?: string;
+  activeForm?: string;
+  blocks: string[];
+  blockedBy: string[];
+}
+
+export interface TaskList {
+  id: string;
+  path: string;
+  tasks: TaskItem[];
+}
 
 // ===== Socket Events =====
 

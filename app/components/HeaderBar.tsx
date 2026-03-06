@@ -22,9 +22,10 @@ function ConnectionDot({ connected }: ConnectionDotProps) {
 interface HeaderBarProps {
   connected: boolean;
   onSetupClick: () => void;
+  onTasksClick: () => void;
 }
 
-export default function HeaderBar({ connected, onSetupClick }: HeaderBarProps) {
+export default function HeaderBar({ connected, onSetupClick, onTasksClick }: HeaderBarProps) {
   return (
     <header
       style={{
@@ -50,6 +51,24 @@ export default function HeaderBar({ connected, onSetupClick }: HeaderBarProps) {
         </span>
       </div>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+        <button
+          onClick={onTasksClick}
+          style={{
+            width: 28,
+            height: 28,
+            borderRadius: 4,
+            border: '1px solid var(--border-color)',
+            background: 'var(--bg-tertiary)',
+            color: 'var(--text-secondary)',
+            fontSize: 13,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+          }}
+          title="Tasks"
+        >
+          {'\u2630'}
+        </button>
         <button
           onClick={onSetupClick}
           style={{

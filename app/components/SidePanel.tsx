@@ -91,6 +91,16 @@ function SessionInfo({ character }: SessionInfoProps) {
           </div>
         </div>
       )}
+      {character.lastToolSummary && (
+        <div style={{ marginBottom: 8 }}>
+          <span style={{ fontSize: 10, color: 'var(--text-muted)', textTransform: 'uppercase' }}>
+            Last Action
+          </span>
+          <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginTop: 2 }}>
+            {character.lastToolSummary}
+          </div>
+        </div>
+      )}
       {character.isAgent && character.parentName && (
         <div style={{ marginBottom: 8 }}>
           <span style={{ fontSize: 10, color: 'var(--text-muted)', textTransform: 'uppercase' }}>
@@ -114,9 +124,11 @@ function SessionInfo({ character }: SessionInfoProps) {
 interface SidePanelProps {
   character: CharacterData | null;
   onClose: () => void;
+  isTaskTracker?: boolean;
+  onSetTaskTracker?: (sessionId: string) => void;
 }
 
-export default function SidePanel({ character, onClose }: SidePanelProps) {
+export default function SidePanel({ character, onClose, isTaskTracker, onSetTaskTracker }: SidePanelProps) {
   const isOpen = character !== null;
 
   return (
@@ -169,6 +181,30 @@ export default function SidePanel({ character, onClose }: SidePanelProps) {
                   Recent Actions
                 </span>
                 <ActionList actions={character.recentActions} max={10} />
+              </div>
+            )}
+            {/* Task Tracker button */}
+            {onSetTaskTracker && (
+              <div style={{ padding: '12px 16px', borderTop: '1px solid var(--border-color)' }}>
+                <button
+                  onClick={() => onSetTaskTracker(character.id)}
+                  style={{
+                    width: '100%',
+                    padding: '8px 12px',
+                    borderRadius: 4,
+                    border: '1px solid var(--border-color)',
+                    background: isTaskTracker ? 'var(--accent)' : 'var(--bg-tertiary)',
+                    color: isTaskTracker ? '#fff' : 'var(--text-secondary)',
+                    fontSize: 12,
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    gap: 6,
+                  }}
+                >
+                  {isTaskTracker && <span>{'\u2713'}</span>}
+                  {isTaskTracker ? 'Task Tracker' : 'Set as Task Tracker'}
+                </button>
               </div>
             )}
           </>

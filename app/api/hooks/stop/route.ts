@@ -11,11 +11,12 @@ export async function POST(request: Request) {
     updateSession(payload.session_id, {
       status: 'idle',
       currentTool: undefined,
+      lastToolSummary: undefined,
     });
 
     emitToClients(SOCKET_EVENTS.SESSION_UPDATE, {
       sessionId: payload.session_id,
-      changes: { status: 'idle', currentTool: undefined },
+      changes: { status: 'idle', currentTool: undefined, lastToolSummary: undefined },
     });
 
     return NextResponse.json({ ok: true });

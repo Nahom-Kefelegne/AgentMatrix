@@ -169,6 +169,8 @@ export class GameEngine {
     if (changes.recentActions !== undefined) char.recentActions = changes.recentActions;
     if (changes.teamId !== undefined) char.teamId = changes.teamId;
     if (changes.name !== undefined) char.name = changes.name;
+    if (changes.lastToolSummary !== undefined) char.lastToolSummary = changes.lastToolSummary;
+    if (changes.lastActivity !== undefined) char.lastActivity = changes.lastActivity;
   }
 
   startMeeting(teamId: string, participantIds: string[]): void {
