@@ -36,15 +36,15 @@ export function resolveSessionName(
     try {
       const stat = statSync(transcriptPath);
 
-      // Check last 100KB for recent /rename commands
-      const tailStart = Math.max(0, stat.size - 100_000);
+      // Check last 500KB for recent /rename commands
+      const tailStart = Math.max(0, stat.size - 500_000);
       const tail = readChunk(transcriptPath, tailStart, 100_000);
 
-      // Look for "Session and agent renamed to: newName" — full confirmation message
-      const renamedTo = tail.match(/Session and agent renamed to: ([a-zA-Z0-9_-]+)/g);
+      // Look for rename — handles "renamed to: name" and "renamed to: \nname" (escaped newline in JSONL)
+      const renamedTo = tail.match(/Session and agent renamed to:[\\n ]*([a-zA-Z0-9_-]+)/g);
       if (renamedTo && renamedTo.length > 0) {
         const last = renamedTo[renamedTo.length - 1];
-        const nameMatch = last.match(/Session and agent renamed to: ([a-zA-Z0-9_-]+)/);
+        const nameMatch = last.match(/renamed to:[\\n ]*([a-zA-Z0-9_-]+)/);
         if (nameMatch) return nameMatch[1];
       }
 
