@@ -31,7 +31,7 @@ app.prepare().then(() => {
   });
 
   // Scan for active Claude sessions on startup and every 10s
-  startSessionScanner((added, removed) => {
+  startSessionScanner((added, removed, updated) => {
     for (const session of added) {
       console.log(`[scanner] Discovered session: ${session.name} (${session.id.slice(0, 8)}...)`);
       io.emit(SOCKET_EVENTS.SESSION_START, session);
@@ -39,6 +39,13 @@ app.prepare().then(() => {
     for (const sessionId of removed) {
       console.log(`[scanner] Session ended: ${sessionId.slice(0, 8)}...`);
       io.emit(SOCKET_EVENTS.SESSION_END, { sessionId });
+    }
+    for (const u of updated) {
+      console.log(`[scanner] Updated name: ${u.name} (${u.sessionId.slice(0, 8)}...)`);
+      io.emit(SOCKET_EVENTS.SESSION_UPDATE, {
+        sessionId: u.sessionId,
+        changes: { name: u.name },
+      });
     }
   });
 

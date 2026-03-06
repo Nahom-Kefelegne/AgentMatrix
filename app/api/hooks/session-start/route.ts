@@ -9,9 +9,18 @@ import { resolveSessionName } from '@/lib/state/sessionName';
 export async function POST(request: Request) {
   try {
     const payload = await request.json();
-
     // Skip if scanner already added this session
     if (getSession(payload.session_id)) {
+      // But update the name if we can resolve a better one
+      const session = getSession(payload.session_id)!;
+      const betterName = resolveSessionName(payload.transcript_path, payload.cwd, payload.session_id);
+      if (betterName !== session.name && !betterName.startsWith('Session-')) {
+        session.name = betterName;
+        emitToClients(SOCKET_EVENTS.SESSION_UPDATE, {
+          sessionId: payload.session_id,
+          changes: { name: betterName },
+        });
+      }
       return NextResponse.json({ ok: true });
     }
 

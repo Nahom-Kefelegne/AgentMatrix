@@ -10,7 +10,7 @@ import {
   ENTRANCE_POINT,
   CHARACTER_COLORS,
 } from '../constants';
-import { addSession, removeSession, getSession, getAllSessions, getNextDeskIndex } from './sessionStore';
+import { addSession, removeSession, getSession, updateSession, getAllSessions, getNextDeskIndex } from './sessionStore';
 import { resolveSessionName } from './sessionName';
 
 const CLAUDE_PROJECTS_DIR = join(homedir(), '.claude', 'projects');
@@ -107,10 +107,11 @@ function createSessionFromProcess(proc: ActiveProcess): SessionData | null {
   };
 }
 
-/** Scan for active sessions and sync with store. Returns new/removed session IDs. */
+/** Scan for active sessions and sync with store. Returns new/removed/updated sessions. */
 export function scanActiveSessions(): {
   added: SessionData[];
   removed: string[];
+  updated: { sessionId: string; name: string }[];
 } {
   const activeProcesses = getActiveProcesses();
   const activeIds = new Set(activeProcesses.map(p => p.sessionId));
@@ -119,14 +120,37 @@ export function scanActiveSessions(): {
 
   const added: SessionData[] = [];
   const removed: string[] = [];
+  const updated: { sessionId: string; name: string }[] = [];
 
-  // Add new sessions
+  // Add new sessions or update names for existing ones
   for (const proc of activeProcesses) {
     if (!currentIds.has(proc.sessionId)) {
       const session = createSessionFromProcess(proc);
       if (session) {
         addSession(session);
         added.push(session);
+      }
+    } else if (proc.resumeName) {
+      const existing = getSession(proc.sessionId);
+      if (existing && existing.name !== proc.resumeName) {
+        updateSession(proc.sessionId, { name: proc.resumeName });
+        updated.push({ sessionId: proc.sessionId, name: proc.resumeName });
+      }
+    }
+  }
+
+  // Re-check names for all existing sessions (picks up /rename from CLI)
+  for (const proc of activeProcesses) {
+    if (currentIds.has(proc.sessionId) && !proc.resumeName) {
+      const existing = getSession(proc.sessionId);
+      if (!existing) continue;
+      const transcriptPath = findTranscriptPath(proc.sessionId);
+      if (transcriptPath) {
+        const resolvedName = resolveSessionName(transcriptPath, existing.cwd, proc.sessionId);
+        if (resolvedName !== existing.name && !resolvedName.startsWith('Session-')) {
+          updateSession(proc.sessionId, { name: resolvedName });
+          updated.push({ sessionId: proc.sessionId, name: resolvedName });
+        }
       }
     }
   }
@@ -139,26 +163,26 @@ export function scanActiveSessions(): {
     }
   }
 
-  return { added, removed };
+  return { added, removed, updated };
 }
 
 let scanTimer: ReturnType<typeof setInterval> | null = null;
 
-/** Start periodic scanning. Calls onChange with added/removed sessions. */
+/** Start periodic scanning. Calls onChange with added/removed/updated sessions. */
 export function startSessionScanner(
-  onChange: (added: SessionData[], removed: string[]) => void,
+  onChange: (added: SessionData[], removed: string[], updated: { sessionId: string; name: string }[]) => void,
 ): void {
   // Initial scan
   const initial = scanActiveSessions();
-  if (initial.added.length > 0 || initial.removed.length > 0) {
-    onChange(initial.added, initial.removed);
+  if (initial.added.length > 0 || initial.removed.length > 0 || initial.updated.length > 0) {
+    onChange(initial.added, initial.removed, initial.updated);
   }
 
   // Periodic scan
   scanTimer = setInterval(() => {
     const result = scanActiveSessions();
-    if (result.added.length > 0 || result.removed.length > 0) {
-      onChange(result.added, result.removed);
+    if (result.added.length > 0 || result.removed.length > 0 || result.updated.length > 0) {
+      onChange(result.added, result.removed, result.updated);
     }
   }, SCAN_INTERVAL_MS);
 }
