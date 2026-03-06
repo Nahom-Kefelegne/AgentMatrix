@@ -47,6 +47,11 @@ export class Character {
   private exitDone = false;
   get pendingRemoval(): boolean { return this.exitDone; }
 
+  // Chat bubble
+  private bubbleText: string | null = null;
+  private bubbleTimer = 0;
+  private static readonly BUBBLE_DURATION = 2.0; // seconds
+
   private spriteSheet: SpriteSheet;
   private charIndex: number;
 
@@ -100,6 +105,14 @@ export class Character {
   update(dt: number): void {
     if (this.exitDone) return;
 
+    // Tick chat bubble
+    if (this.bubbleTimer > 0) {
+      this.bubbleTimer -= dt;
+      if (this.bubbleTimer <= 0) {
+        this.bubbleText = null;
+      }
+    }
+
     if (this.path.length > 0) {
       this.moveAlongPath(dt);
       this.animTimer += dt;
@@ -120,6 +133,13 @@ export class Character {
         this.bobTimer += dt;
       }
     }
+  }
+
+  /** Show a chat bubble above the character */
+  showBubble(text: string): void {
+    // Shorten to max 15 chars
+    this.bubbleText = text.length > 15 ? text.slice(0, 14) + '…' : text;
+    this.bubbleTimer = Character.BUBBLE_DURATION;
   }
 
   /** Walk to exit and disappear */
@@ -261,6 +281,49 @@ export class Character {
     ctx.arc(dotX, dotY, 2, 0, Math.PI * 2);
     ctx.fill();
     ctx.restore();
+  }
+
+  /** Render chat bubble on the HD overlay */
+  renderBubbleHD(ctx: CanvasRenderingContext2D, scale: number): void {
+    if (!this.bubbleText) return;
+
+    const fontSize = 10;
+    ctx.font = `${fontSize}px 'Courier New', monospace`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'bottom';
+
+    const bx = (this.x + TILE_SIZE / 2) * scale;
+    const by = (this.y - 4) * scale;
+
+    const metrics = ctx.measureText(this.bubbleText);
+    const padX = 6;
+    const padY = 4;
+    const w = metrics.width + padX * 2;
+    const h = fontSize + padY * 2;
+
+    // Fade out in last 0.5s
+    const alpha = this.bubbleTimer < 0.5 ? this.bubbleTimer / 0.5 : 1;
+    ctx.globalAlpha = alpha;
+
+    // Bubble background
+    ctx.fillStyle = '#fff';
+    ctx.beginPath();
+    ctx.roundRect(bx - w / 2, by - h, w, h, 4);
+    ctx.fill();
+
+    // Bubble tail (small triangle)
+    ctx.beginPath();
+    ctx.moveTo(bx - 4, by);
+    ctx.lineTo(bx + 4, by);
+    ctx.lineTo(bx, by + 5);
+    ctx.closePath();
+    ctx.fill();
+
+    // Text
+    ctx.fillStyle = '#222';
+    ctx.fillText(this.bubbleText, bx, by - padY);
+
+    ctx.globalAlpha = 1;
   }
 
   getBounds(): { x: number; y: number; w: number; h: number } {

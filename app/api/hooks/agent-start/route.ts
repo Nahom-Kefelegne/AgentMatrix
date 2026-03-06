@@ -7,7 +7,8 @@ import { emitToClients } from '@/lib/state/socketEmitter';
 
 export async function POST(request: Request) {
   try {
-    const payload: AgentStartPayload = await request.json();
+    const payload = await request.json();
+    console.log('[agent-start] PAYLOAD:', JSON.stringify(payload, null, 2));
     const parentSessionId = payload.parent_session_id || payload.session_id;
     const parentSession = getSession(parentSessionId);
 

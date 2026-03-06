@@ -1,5 +1,5 @@
-import type { SessionData, Point } from '@/lib/types';
-import { ENTRANCE_POINT, TILE_SIZE } from '@/lib/constants';
+import type { SessionData, AgentData, Point } from '@/lib/types';
+import { ENTRANCE_POINT, MEETING_ROOMS, TILE_SIZE } from '@/lib/constants';
 import { Character } from './Character';
 import { SpriteSheet } from './SpriteSheet';
 import { TileMap } from './TileMap';
@@ -7,6 +7,11 @@ import { TileMap } from './TileMap';
 export class CharacterManager {
   private characters = new Map<string, Character>();
   private nextCharIndex = 0;
+
+  // Track which meeting room is assigned to which team
+  private teamRooms = new Map<string, number>(); // teamId → room index
+  // Track reserved chairs so agents don't overlap (teamId → set of "x,y" keys)
+  private reservedChairs = new Map<string, Set<string>>();
 
   spawn(session: SessionData, spriteSheet: SpriteSheet, tileMap: TileMap): Character {
     const charIndex = this.nextCharIndex;
@@ -28,25 +33,109 @@ export class CharacterManager {
     char.teamId = session.teamId;
 
     // Path to desk
-    const desk = session.deskPosition;
-    char.moveTo(desk.x, desk.y, tileMap);
+    char.moveTo(session.deskPosition.x, session.deskPosition.y, tileMap);
 
     this.characters.set(session.id, char);
     return char;
   }
 
+  /** Spawn an agent character directly into a meeting room */
+  spawnAgent(
+    agent: AgentData,
+    parentSessionId: string,
+    teamId: string,
+    spriteSheet: SpriteSheet,
+    tileMap: TileMap,
+  ): Character {
+    const charIndex = this.nextCharIndex;
+    this.nextCharIndex = (this.nextCharIndex + 1) % Math.max(spriteSheet.characterCount, 6);
+
+    // Assign a meeting room for this team
+    const roomIndex = this.getOrAssignRoom(teamId);
+    const room = MEETING_ROOMS[roomIndex];
+    const chair = this.reserveChair(teamId, room.chairs);
+
+    const char = new Character(
+      agent.id,
+      agent.name,
+      agent.color,
+      spriteSheet,
+      ENTRANCE_POINT.x,
+      ENTRANCE_POINT.y,
+      charIndex,
+      true, // isAgent
+      undefined, // parentName resolved later
+    );
+
+    char.status = 'meeting';
+    char.teamId = teamId;
+
+    // Walk to meeting room chair
+    char.moveTo(chair.x, chair.y, tileMap);
+
+    this.characters.set(agent.id, char);
+    return char;
+  }
+
+  /** Move the parent session character to the meeting room too */
+  moveParentToMeeting(parentId: string, teamId: string, tileMap: TileMap): void {
+    const char = this.characters.get(parentId);
+    if (!char) return;
+    // Don't move if already in a meeting for this team
+    if (char.teamId === teamId && char.status === 'meeting') return;
+
+    const roomIndex = this.getOrAssignRoom(teamId);
+    const room = MEETING_ROOMS[roomIndex];
+    const chair = this.reserveChair(teamId, room.chairs);
+
+    char.status = 'meeting';
+    char.teamId = teamId;
+    char.moveTo(chair.x, chair.y, tileMap);
+  }
+
+  private getOrAssignRoom(teamId: string): number {
+    if (this.teamRooms.has(teamId)) {
+      return this.teamRooms.get(teamId)!;
+    }
+    // Find first unoccupied room
+    const usedRooms = new Set(this.teamRooms.values());
+    for (let i = 0; i < MEETING_ROOMS.length; i++) {
+      if (!usedRooms.has(i)) {
+        this.teamRooms.set(teamId, i);
+        return i;
+      }
+    }
+    // All rooms taken — reuse room 0
+    this.teamRooms.set(teamId, 0);
+    return 0;
+  }
+
+  /** Reserve the next available chair for a team */
+  private reserveChair(teamId: string, chairs: Point[]): Point {
+    if (!this.reservedChairs.has(teamId)) {
+      this.reservedChairs.set(teamId, new Set());
+    }
+    const reserved = this.reservedChairs.get(teamId)!;
+    const chair = chairs.find(p => !reserved.has(`${p.x},${p.y}`)) || chairs[0];
+    reserved.add(`${chair.x},${chair.y}`);
+    return chair;
+  }
+
+  /** Release a meeting room when a team disbands */
+  releaseRoom(teamId: string): void {
+    this.teamRooms.delete(teamId);
+    this.reservedChairs.delete(teamId);
+  }
+
   despawn(sessionId: string, tileMap: TileMap): void {
     const char = this.characters.get(sessionId);
     if (!char) return;
-
     char.startExit(ENTRANCE_POINT.x, ENTRANCE_POINT.y, tileMap);
   }
 
   updateAll(dt: number): void {
     for (const [id, char] of this.characters) {
       char.update(dt);
-
-      // Remove characters after jump animation completes
       if (char.pendingRemoval) {
         this.characters.delete(id);
       }
@@ -60,7 +149,6 @@ export class CharacterManager {
   }
 
   renderAll(ctx: CanvasRenderingContext2D): void {
-    // Y-sorted rendering for depth
     const sorted = [...this.characters.values()].sort((a, b) => a.y - b.y);
     for (const char of sorted) {
       char.render(ctx);
@@ -76,6 +164,12 @@ export class CharacterManager {
   renderLabelsHD(ctx: CanvasRenderingContext2D, scale: number): void {
     for (const char of this.characters.values()) {
       char.renderLabelHD(ctx, scale);
+    }
+  }
+
+  renderBubblesHD(ctx: CanvasRenderingContext2D, scale: number): void {
+    for (const char of this.characters.values()) {
+      char.renderBubbleHD(ctx, scale);
     }
   }
 
@@ -110,7 +204,7 @@ export class CharacterManager {
       const char = this.characters.get(id);
       const session = sessions.get(id);
       if (!char || !session) continue;
-      char.status = session.status === 'meeting' ? 'idle' : session.status;
+      char.status = 'idle';
       char.moveTo(session.deskPosition.x, session.deskPosition.y, tileMap);
     }
   }

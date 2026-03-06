@@ -1,4 +1,4 @@
-import type { SessionData, CharacterData, Point } from '@/lib/types';
+import type { SessionData, AgentData, CharacterData, Point } from '@/lib/types';
 import { CANVAS_W, CANVAS_H, SCALE, TILE_SIZE, MEETING_POSITIONS } from '@/lib/constants';
 import { SpriteSheet } from './SpriteSheet';
 import { TileMap } from './TileMap';
@@ -108,6 +108,7 @@ export class GameEngine {
     // Crisp text overlay (display resolution)
     if (this.overlayCtx && this.overlayCanvas) {
       this.overlayCtx.clearRect(0, 0, this.overlayCanvas.width, this.overlayCanvas.height);
+      this.characterManager.renderBubblesHD(this.overlayCtx, SCALE);
       this.characterManager.renderLabelsHD(this.overlayCtx, SCALE);
     } else {
       // Fallback: render on game canvas (will be pixelated)
@@ -173,12 +174,28 @@ export class GameEngine {
     if (changes.lastActivity !== undefined) char.lastActivity = changes.lastActivity;
   }
 
+  spawnAgent(sessionId: string, agent: AgentData, teamId: string): void {
+    if (this.characterManager.getCharacter(agent.id)) return;
+    this.characterManager.spawnAgent(agent, sessionId, teamId, this.spriteSheet, this.tileMap);
+    // Also move the parent to the meeting room
+    this.characterManager.moveParentToMeeting(sessionId, teamId, this.tileMap);
+  }
+
+  removeAgent(sessionId: string, agentId: string): void {
+    this.characterManager.despawn(agentId, this.tileMap);
+  }
+
   startMeeting(teamId: string, participantIds: string[]): void {
     this.characterManager.moveToMeeting(participantIds, MEETING_POSITIONS, this.tileMap);
   }
 
   endMeeting(participantIds: string[]): void {
     this.characterManager.returnToDesks(participantIds, this.sessions, this.tileMap);
+  }
+
+  showChatBubble(characterId: string, text: string): void {
+    const char = this.characterManager.getCharacter(characterId);
+    if (char) char.showBubble(text);
   }
 
   drawConnectionLine(fromId: string, toId: string): void {

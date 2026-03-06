@@ -3,7 +3,7 @@
 import React, { useEffect, useRef, useCallback } from 'react';
 import { CANVAS_W, CANVAS_H, DISPLAY_W, DISPLAY_H, SCALE } from '@/lib/constants';
 import { SOCKET_EVENTS } from '@/lib/types';
-import type { SessionData, CharacterData } from '@/lib/types';
+import type { SessionData, AgentData, CharacterData } from '@/lib/types';
 import type { SocketEventHandler } from '@/lib/hooks/useSocket';
 
 interface OfficeCanvasProps {
@@ -44,17 +44,42 @@ export default function OfficeCanvas({ sessions, onEvent, onHover, onClick }: Of
       }
       case SOCKET_EVENTS.SESSION_UPDATE: {
         const data = handler.data as { sessionId: string; changes: Partial<SessionData> };
-        engine.updateCharacter(data.sessionId, data.changes);
+        // Don't let session updates override 'meeting' status
+        const meetingChar = engine.getCharacterManager().getCharacter(data.sessionId);
+        if (meetingChar?.status === 'meeting' && data.changes.status && data.changes.status !== 'meeting') {
+          const { status, ...rest } = data.changes;
+          engine.updateCharacter(data.sessionId, rest);
+        } else {
+          engine.updateCharacter(data.sessionId, data.changes);
+        }
         break;
       }
       case SOCKET_EVENTS.TOOL_START: {
         const data = handler.data as { sessionId: string; toolName: string };
-        engine.updateCharacter(data.sessionId, { currentTool: data.toolName, status: 'working' });
+        // Don't override 'meeting' status with 'working' — they stay in the meeting
+        const charData = engine.getCharacterManager().getCharacter(data.sessionId);
+        const newStatus = charData?.status === 'meeting' ? 'meeting' : 'working';
+        engine.updateCharacter(data.sessionId, { currentTool: data.toolName, status: newStatus });
+        // Show chat bubble if in meeting
+        if (charData?.status === 'meeting') {
+          engine.showChatBubble(data.sessionId, data.toolName);
+        }
         break;
       }
       case SOCKET_EVENTS.TOOL_COMPLETE: {
         const data = handler.data as { sessionId: string; toolName: string; summary: string };
         engine.updateCharacter(data.sessionId, { currentTool: undefined });
+        break;
+      }
+      case SOCKET_EVENTS.AGENT_START: {
+        const data = handler.data as { sessionId: string; agent: AgentData };
+        const teamId = data.agent.teamName || `team-${data.sessionId.slice(0, 6)}`;
+        engine.spawnAgent(data.sessionId, data.agent, teamId);
+        break;
+      }
+      case SOCKET_EVENTS.AGENT_STOP: {
+        const data = handler.data as { sessionId: string; agentId: string };
+        engine.removeAgent(data.sessionId, data.agentId);
         break;
       }
       case SOCKET_EVENTS.MEETING_START: {
@@ -63,8 +88,9 @@ export default function OfficeCanvas({ sessions, onEvent, onHover, onClick }: Of
         break;
       }
       case SOCKET_EVENTS.MEETING_MESSAGE: {
-        const data = handler.data as { fromId: string; toId: string };
+        const data = handler.data as { fromId: string; toId: string; summary?: string };
         engine.drawConnectionLine(data.fromId, data.toId);
+        engine.showChatBubble(data.fromId, data.summary || '...');
         break;
       }
     }
