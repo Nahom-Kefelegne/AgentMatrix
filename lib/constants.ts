@@ -5,11 +5,11 @@ import type { Point } from './types';
 export const TILE_SIZE = 16;
 export const MAP_COLS = 38;
 export const MAP_ROWS = 26;
-export const SCALE = 3;
+export const SCALE = 2.5;
 export const CANVAS_W = MAP_COLS * TILE_SIZE; // 608
 export const CANVAS_H = MAP_ROWS * TILE_SIZE; // 416
-export const DISPLAY_W = CANVAS_W * SCALE;    // 1824
-export const DISPLAY_H = CANVAS_H * SCALE;    // 1248
+export const DISPLAY_W = Math.round(CANVAS_W * SCALE); // 1520
+export const DISPLAY_H = Math.round(CANVAS_H * SCALE); // 1040
 
 // ===== Tile Types =====
 

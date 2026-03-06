@@ -17,12 +17,12 @@ function HeaderButton({ onClick, label, title, badge }: {
       onClick={onClick}
       title={title}
       style={{
-        padding: '6px 14px',
+        padding: '8px 16px',
         borderRadius: 6,
         border: '1px solid #3a3a4e',
         background: '#1e1e30',
         color: '#c8c8d8',
-        fontSize: 14,
+        fontSize: 16,
         fontWeight: 600,
         fontFamily: 'inherit',
         display: 'flex',
@@ -77,7 +77,7 @@ export default function HeaderBar({
             border: '2px solid rgba(255,255,255,0.15)',
           }}
         />
-        <span style={{ fontSize: 18, fontWeight: 700, letterSpacing: 1, color: '#eee' }}>
+        <span style={{ fontSize: 22, fontWeight: 700, letterSpacing: 1, color: '#eee' }}>
           Agent Matrix
         </span>
       </div>
