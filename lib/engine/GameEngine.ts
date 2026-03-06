@@ -185,6 +185,19 @@ export class GameEngine {
     this.characterManager.despawn(agentId, this.tileMap);
   }
 
+  returnToDeskAfterMeeting(sessionId: string): void {
+    const session = this.sessions.get(sessionId);
+    const char = this.characterManager.getCharacter(sessionId);
+    if (!char || !session) return;
+    // Release the meeting room
+    if (char.teamId) {
+      this.characterManager.releaseRoom(char.teamId);
+    }
+    char.status = 'idle';
+    char.teamId = undefined;
+    char.moveTo(session.deskPosition.x, session.deskPosition.y, this.tileMap);
+  }
+
   startMeeting(teamId: string, participantIds: string[]): void {
     this.characterManager.moveToMeeting(participantIds, MEETING_POSITIONS, this.tileMap);
   }

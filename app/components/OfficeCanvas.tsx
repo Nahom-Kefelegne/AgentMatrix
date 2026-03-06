@@ -44,9 +44,16 @@ export default function OfficeCanvas({ sessions, onEvent, onHover, onClick }: Of
       }
       case SOCKET_EVENTS.SESSION_UPDATE: {
         const data = handler.data as { sessionId: string; changes: Partial<SessionData> };
-        // Don't let session updates override 'meeting' status
-        const meetingChar = engine.getCharacterManager().getCharacter(data.sessionId);
-        if (meetingChar?.status === 'meeting' && data.changes.status && data.changes.status !== 'meeting') {
+        const charBefore = engine.getCharacterManager().getCharacter(data.sessionId);
+        const wasInMeeting = charBefore?.status === 'meeting';
+        const goingIdle = data.changes.status === 'idle';
+
+        if (wasInMeeting && goingIdle) {
+          // Meeting ended — allow status change and move parent back to desk
+          engine.updateCharacter(data.sessionId, data.changes);
+          engine.returnToDeskAfterMeeting(data.sessionId);
+        } else if (wasInMeeting && data.changes.status && data.changes.status !== 'meeting') {
+          // Don't let other status changes override meeting
           const { status, ...rest } = data.changes;
           engine.updateCharacter(data.sessionId, rest);
         } else {

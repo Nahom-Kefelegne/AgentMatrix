@@ -1,8 +1,24 @@
 import type { SessionData, Action, AgentData } from '@/lib/types';
 import { DESK_POSITIONS, OVERFLOW_POSITIONS, MAX_RECENT_ACTIONS } from '@/lib/constants';
 
-const sessions = new Map<string, SessionData>();
-const deskAssignments = new Map<number, string>(); // deskIndex -> sessionId
+// Persist all state on globalThis to survive Next.js dev hot reloads
+const g = globalThis as Record<string, unknown>;
+if (!g.__sessions) g.__sessions = new Map<string, SessionData>();
+if (!g.__deskAssignments) g.__deskAssignments = new Map<number, string>();
+if (!g.__exitedAgentTypes) g.__exitedAgentTypes = new Set<string>();
+const sessions = g.__sessions as Map<string, SessionData>;
+const deskAssignments = g.__deskAssignments as Map<number, string>;
+const exitedAgentTypes = g.__exitedAgentTypes as Set<string>;
+
+export function markAgentTypeExited(parentSessionId: string, agentType: string): void {
+  const key = `${parentSessionId}:${agentType}`;
+  exitedAgentTypes.add(key);
+  setTimeout(() => exitedAgentTypes.delete(key), 30_000);
+}
+
+export function isAgentTypeExited(parentSessionId: string, agentType: string): boolean {
+  return exitedAgentTypes.has(`${parentSessionId}:${agentType}`);
+}
 
 export function getAllSessions(): SessionData[] {
   return Array.from(sessions.values());

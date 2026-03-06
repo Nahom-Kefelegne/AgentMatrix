@@ -1,24 +1,32 @@
 import { NextResponse } from 'next/server';
-import type { AgentStartPayload, AgentData } from '@/lib/types';
+import type { AgentData } from '@/lib/types';
 import { SOCKET_EVENTS } from '@/lib/types';
 import { CHARACTER_COLORS, MEETING_POSITIONS } from '@/lib/constants';
-import { addAgent, getSession, getAllSessions } from '@/lib/state/sessionStore';
+import { addAgent, getSession, getAllSessions, isAgentTypeExited } from '@/lib/state/sessionStore';
 import { emitToClients } from '@/lib/state/socketEmitter';
 
 export async function POST(request: Request) {
   try {
     const payload = await request.json();
-    console.log('[agent-start] PAYLOAD:', JSON.stringify(payload, null, 2));
     const parentSessionId = payload.parent_session_id || payload.session_id;
-    const parentSession = getSession(parentSessionId);
+    const agentType = payload.agent_type || '';
+    const agentName = payload.agent_name || agentType || `Agent-${payload.agent_id.slice(0, 6)}`;
 
+    // Skip if this agent type was recently stopped for this parent (shutdown handshake re-fires)
+    const blocked = agentType && isAgentTypeExited(parentSessionId, agentType);
+    console.log(`[agent-start] type=${agentType} parent=${parentSessionId.slice(0,8)} blocked=${blocked}`);
+    if (blocked) {
+      return NextResponse.json({ ok: true });
+    }
+
+    const parentSession = getSession(parentSessionId);
     const colorIndex = getAllSessions().reduce((sum, s) => sum + s.agents.length, 0) % CHARACTER_COLORS.length;
     const agentIndex = parentSession ? parentSession.agents.length : 0;
     const position = MEETING_POSITIONS[agentIndex % MEETING_POSITIONS.length];
 
     const agent: AgentData = {
       id: payload.agent_id,
-      name: payload.agent_name || `Agent ${payload.agent_id.slice(0, 6)}`,
+      name: agentName,
       parentSessionId,
       teamName: payload.team_name,
       color: CHARACTER_COLORS[colorIndex],
