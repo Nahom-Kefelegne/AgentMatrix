@@ -141,6 +141,7 @@ export const CHARACTER_COLORS = [
 // ===== Animation =====
 
 export const CHARACTER_SPEED = 120; // pixels per second (~7.5 tiles/sec)
+export const SPRITE_SCALE = 1.4; // draw sprites 40% bigger than tile size
 export const ANIM_FRAME_DURATION = 0.15; // seconds per frame
 export const WALK_FRAMES = 4;
 export const CONNECTION_LINE_LIFETIME = 2.5; // seconds

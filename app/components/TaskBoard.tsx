@@ -169,12 +169,23 @@ function FolderPicker({ value, onChange }: { value: string; onChange: (path: str
   );
 }
 
-/** Modal that appears when assigning a task — lets user add context before spawning */
-function AssignModal({ task, onSpawn, onCancel }: {
+/** Modal that appears when assigning a task — existing session or new agent */
+function AssignModal({ task, onSpawn, onReassign, onCancel }: {
   task: TaskItem;
   onSpawn: (prompt: string, cwd: string, name: string) => void;
+  onReassign: (task: TaskItem, sessionName: string) => void;
   onCancel: () => void;
 }) {
+  const [mode, setMode] = useState<'existing' | 'new'>('existing');
+  const [sessions, setSessions] = useState<{ id: string; name: string }[]>([]);
+  const [selectedSession, setSelectedSession] = useState('');
+
+  useEffect(() => {
+    fetch('/api/sessions/active').then(r => r.json()).then(data => {
+      setSessions(data.sessions || []);
+      if (data.sessions?.length > 0) setSelectedSession(data.sessions[0].name);
+    }).catch(() => {});
+  }, []);
   const defaultPrompt = task.subject + (task.description && task.description !== task.subject
     ? '\n\n' + task.description : '');
   const [prompt, setPrompt] = useState(defaultPrompt);
@@ -190,7 +201,7 @@ function AssignModal({ task, onSpawn, onCancel }: {
       }} />
       <div style={{
         position: 'fixed', top: '50%', left: '50%', transform: 'translate(-50%, -50%)',
-        width: 520, background: '#151520', border: '1px solid #2a2a3e', borderRadius: 12,
+        width: 540, maxHeight: '80vh', background: '#151520', border: '1px solid #2a2a3e', borderRadius: 12,
         zIndex: 101, display: 'flex', flexDirection: 'column', overflow: 'hidden',
       }}>
         {/* Header */}
@@ -203,52 +214,98 @@ function AssignModal({ task, onSpawn, onCancel }: {
             width: 28, height: 28, borderRadius: 6, border: '1px solid #3a3a4e',
             background: '#1e1e30', color: '#aaa', fontSize: 14,
             display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer',
-          }}>
-            ✕
-          </button>
+          }}>✕</button>
+        </div>
+
+        {/* Task preview */}
+        <div style={{ padding: '12px 20px', borderBottom: '1px solid #2a2a3e' }}>
+          <div style={{ fontSize: 15, color: '#eee', fontWeight: 600 }}>{task.subject}</div>
+        </div>
+
+        {/* Mode tabs */}
+        <div style={{ display: 'flex', borderBottom: '1px solid #2a2a3e' }}>
+          {(['existing', 'new'] as const).map(m => (
+            <button key={m} onClick={() => setMode(m)} style={{
+              flex: 1, padding: '12px 0', fontSize: 15, fontWeight: 600, cursor: 'pointer',
+              color: mode === m ? '#eee' : '#666', background: 'none',
+              borderTop: 'none', borderLeft: 'none', borderRight: 'none',
+              borderBottomWidth: 2, borderBottomStyle: 'solid',
+              borderBottomColor: mode === m ? '#4a9eff' : 'transparent',
+            }}>
+              {m === 'existing' ? 'Existing Session' : 'New Agent'}
+            </button>
+          ))}
         </div>
 
         {/* Body */}
-        <div style={{ padding: '16px 20px', display: 'flex', flexDirection: 'column', gap: 14 }}>
-          {/* Session name */}
-          <div>
-            <label style={{ fontSize: 13, color: '#9a9ab0', fontWeight: 600, display: 'block', marginBottom: 4 }}>
-              Session Name
-            </label>
-            <input
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              style={{
-                width: '100%', background: '#1a1a2a', border: '1px solid #2a2a3e',
-                color: '#eee', borderRadius: 6, padding: '8px 12px', fontSize: 14, fontFamily: 'inherit',
-              }}
-            />
-          </div>
-
-          {/* Instructions */}
-          <div>
-            <label style={{ fontSize: 13, color: '#9a9ab0', fontWeight: 600, display: 'block', marginBottom: 4 }}>
-              Instructions for Agent
-            </label>
-            <textarea
-              value={prompt}
-              onChange={(e) => setPrompt(e.target.value)}
-              rows={6}
-              style={{
-                width: '100%', background: '#1a1a2a', border: '1px solid #2a2a3e',
-                color: '#eee', borderRadius: 6, padding: '10px 12px', fontSize: 14,
-                fontFamily: 'inherit', resize: 'vertical', lineHeight: 1.5,
-              }}
-            />
-          </div>
-
-          {/* Working directory — folder browser */}
-          <div>
-            <label style={{ fontSize: 13, color: '#9a9ab0', fontWeight: 600, display: 'block', marginBottom: 4 }}>
-              Working Directory
-            </label>
-            <FolderPicker value={cwd} onChange={setCwd} />
-          </div>
+        <div style={{ padding: '16px 20px', display: 'flex', flexDirection: 'column', gap: 14, overflowY: 'auto' }}>
+          {mode === 'existing' ? (
+            <>
+              <div>
+                <label style={{ fontSize: 14, color: '#b0b0c8', fontWeight: 600, display: 'block', marginBottom: 6 }}>
+                  Assign to Session
+                </label>
+                {sessions.length === 0 ? (
+                  <div style={{ fontSize: 14, color: '#777', fontStyle: 'italic', padding: 10 }}>
+                    No active sessions found
+                  </div>
+                ) : (
+                  <select
+                    value={selectedSession}
+                    onChange={(e) => setSelectedSession(e.target.value)}
+                    style={{
+                      width: '100%', background: '#1e1e30', border: '1px solid #33334a',
+                      color: '#eee', borderRadius: 6, padding: '10px 14px', fontSize: 15, fontFamily: 'inherit',
+                    }}
+                  >
+                    {sessions.map(s => (
+                      <option key={s.id} value={s.name}>{s.name}</option>
+                    ))}
+                  </select>
+                )}
+              </div>
+              <div style={{ fontSize: 13, color: '#888' }}>
+                The task will be assigned to this session. If the session uses TaskList, it will pick up the task automatically.
+              </div>
+            </>
+          ) : (
+            <>
+              <div>
+                <label style={{ fontSize: 14, color: '#b0b0c8', fontWeight: 600, display: 'block', marginBottom: 6 }}>
+                  Session Name
+                </label>
+                <input
+                  value={name}
+                  onChange={(e) => setName(e.target.value)}
+                  style={{
+                    width: '100%', background: '#1e1e30', border: '1px solid #33334a',
+                    color: '#eee', borderRadius: 6, padding: '10px 14px', fontSize: 15, fontFamily: 'inherit',
+                  }}
+                />
+              </div>
+              <div>
+                <label style={{ fontSize: 14, color: '#b0b0c8', fontWeight: 600, display: 'block', marginBottom: 6 }}>
+                  Instructions for Agent
+                </label>
+                <textarea
+                  value={prompt}
+                  onChange={(e) => setPrompt(e.target.value)}
+                  rows={5}
+                  style={{
+                    width: '100%', background: '#1e1e30', border: '1px solid #33334a',
+                    color: '#eee', borderRadius: 6, padding: '10px 14px', fontSize: 14,
+                    fontFamily: 'inherit', resize: 'vertical', lineHeight: 1.5,
+                  }}
+                />
+              </div>
+              <div>
+                <label style={{ fontSize: 14, color: '#b0b0c8', fontWeight: 600, display: 'block', marginBottom: 6 }}>
+                  Working Directory
+                </label>
+                <FolderPicker value={cwd} onChange={setCwd} />
+              </div>
+            </>
+          )}
         </div>
 
         {/* Footer */}
@@ -262,12 +319,26 @@ function AssignModal({ task, onSpawn, onCancel }: {
           }}>
             Cancel
           </button>
-          <button onClick={() => onSpawn(prompt, cwd, name)} style={{
-            padding: '8px 20px', borderRadius: 6, border: 'none',
-            background: '#4a9eff', color: '#fff', fontSize: 14, fontWeight: 600, cursor: 'pointer',
-          }}>
-            Spawn Agent
-          </button>
+          {mode === 'existing' ? (
+            <button
+              onClick={() => selectedSession && onReassign(task, selectedSession)}
+              disabled={!selectedSession}
+              style={{
+                padding: '8px 20px', borderRadius: 6, border: 'none',
+                background: '#51cf66', color: '#fff', fontSize: 14, fontWeight: 600, cursor: 'pointer',
+                opacity: selectedSession ? 1 : 0.5,
+              }}
+            >
+              Assign
+            </button>
+          ) : (
+            <button onClick={() => onSpawn(prompt, cwd, name)} style={{
+              padding: '8px 20px', borderRadius: 6, border: 'none',
+              background: '#4a9eff', color: '#fff', fontSize: 14, fontWeight: 600, cursor: 'pointer',
+            }}>
+              Spawn Agent
+            </button>
+          )}
         </div>
       </div>
     </>
@@ -369,6 +440,101 @@ function TaskFormModal({ task, onSave, onCancel, title: modalTitle }: {
             padding: '8px 20px', borderRadius: 6, border: 'none',
             background: '#4a9eff', color: '#fff', fontSize: 14, fontWeight: 600, cursor: 'pointer',
           }}>Save</button>
+        </div>
+      </div>
+    </>
+  );
+}
+
+/** Modal to reassign a task to an existing active session */
+function ReassignModal({ task, onReassign, onCancel }: {
+  task: TaskItem;
+  onReassign: (task: TaskItem, sessionName: string) => void;
+  onCancel: () => void;
+}) {
+  const [sessions, setSessions] = useState<{ id: string; name: string }[]>([]);
+  const [selected, setSelected] = useState('');
+
+  useEffect(() => {
+    // Fetch active sessions from the socket state via a simple API
+    fetch('/api/sessions/active').then(r => r.json()).then(data => {
+      setSessions(data.sessions || []);
+      if (data.sessions?.length > 0) setSelected(data.sessions[0].name);
+    }).catch(() => {});
+  }, []);
+
+  return (
+    <>
+      <div onClick={onCancel} style={{
+        position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', zIndex: 100,
+      }} />
+      <div style={{
+        position: 'fixed', top: '50%', left: '50%', transform: 'translate(-50%, -50%)',
+        width: 460, background: '#151520', border: '1px solid #2a2a3e', borderRadius: 12,
+        zIndex: 101, display: 'flex', flexDirection: 'column', overflow: 'hidden',
+      }}>
+        <div style={{
+          padding: '16px 20px', borderBottom: '1px solid #2a2a3e',
+          display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+        }}>
+          <span style={{ fontSize: 18, fontWeight: 700, color: '#eee' }}>Reassign Task</span>
+          <button onClick={onCancel} style={{
+            width: 28, height: 28, borderRadius: 6, border: '1px solid #3a3a4e',
+            background: '#1e1e30', color: '#aaa', fontSize: 14,
+            display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer',
+          }}>✕</button>
+        </div>
+        <div style={{ padding: '16px 20px', display: 'flex', flexDirection: 'column', gap: 14 }}>
+          <div>
+            <label style={{ fontSize: 14, color: '#b0b0c8', fontWeight: 600, display: 'block', marginBottom: 6 }}>
+              Task
+            </label>
+            <div style={{
+              fontSize: 15, color: '#eee', padding: '8px 12px',
+              background: '#1e1e30', border: '1px solid #33334a', borderRadius: 6,
+            }}>
+              {task.subject}
+            </div>
+          </div>
+          <div>
+            <label style={{ fontSize: 14, color: '#b0b0c8', fontWeight: 600, display: 'block', marginBottom: 6 }}>
+              Assign to Session
+            </label>
+            {sessions.length === 0 ? (
+              <div style={{ fontSize: 14, color: '#777', fontStyle: 'italic' }}>No active sessions</div>
+            ) : (
+              <select
+                value={selected}
+                onChange={(e) => setSelected(e.target.value)}
+                style={{
+                  width: '100%', background: '#1e1e30', border: '1px solid #33334a',
+                  color: '#eee', borderRadius: 6, padding: '10px 14px', fontSize: 15, fontFamily: 'inherit',
+                }}
+              >
+                {sessions.map(s => (
+                  <option key={s.id} value={s.name}>{s.name}</option>
+                ))}
+              </select>
+            )}
+          </div>
+        </div>
+        <div style={{
+          padding: '12px 20px', borderTop: '1px solid #2a2a3e',
+          display: 'flex', justifyContent: 'flex-end', gap: 10,
+        }}>
+          <button onClick={onCancel} style={{
+            padding: '8px 16px', borderRadius: 6, border: '1px solid #3a3a4e',
+            background: '#1e1e30', color: '#aaa', fontSize: 14, fontWeight: 600, cursor: 'pointer',
+          }}>Cancel</button>
+          <button
+            onClick={() => selected && onReassign(task, selected)}
+            disabled={!selected}
+            style={{
+              padding: '8px 20px', borderRadius: 6, border: 'none',
+              background: '#51cf66', color: '#fff', fontSize: 14, fontWeight: 600, cursor: 'pointer',
+              opacity: selected ? 1 : 0.5,
+            }}
+          >Reassign</button>
         </div>
       </div>
     </>
@@ -480,6 +646,25 @@ export default function TaskBoard({ isOpen, onClose, sessionName }: TaskBoardPro
     }
   }, [editingTask, selectedListId, fetchTasks]);
 
+  const handleReassign = useCallback(async (task: TaskItem, sessionName: string) => {
+    if (!selectedListId) return;
+    try {
+      await fetch('/api/tasks/update', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          listId: selectedListId,
+          taskId: task.id,
+          changes: { owner: sessionName, status: 'in_progress' },
+        }),
+      });
+      setReassigningTask(null);
+      fetchTasks();
+    } catch (err) {
+      console.error('Failed to reassign task:', err);
+    }
+  }, [selectedListId, fetchTasks]);
+
   const selectedList = taskLists.find((l) => l.id === selectedListId);
   const pending = selectedList?.tasks.filter((t) => t.status === 'pending') || [];
   const inProgress = selectedList?.tasks.filter((t) => t.status === 'in_progress') || [];
@@ -584,6 +769,7 @@ export default function TaskBoard({ isOpen, onClose, sessionName }: TaskBoardPro
         <AssignModal
           task={assigningTask}
           onSpawn={handleSpawn}
+          onReassign={handleReassign}
           onCancel={() => setAssigningTask(null)}
         />
       )}
@@ -606,6 +792,7 @@ export default function TaskBoard({ isOpen, onClose, sessionName }: TaskBoardPro
           onCancel={() => setEditingTask(null)}
         />
       )}
+
     </>
   );
 }

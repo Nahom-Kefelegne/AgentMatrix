@@ -173,6 +173,12 @@ export class CharacterManager {
     }
   }
 
+  renderEmojisHD(ctx: CanvasRenderingContext2D, scale: number): void {
+    for (const char of this.characters.values()) {
+      char.renderEmojiHD(ctx, scale);
+    }
+  }
+
   renderBubblesHD(ctx: CanvasRenderingContext2D, scale: number): void {
     for (const char of this.characters.values()) {
       char.renderBubbleHD(ctx, scale);

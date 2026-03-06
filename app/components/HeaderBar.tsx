@@ -83,7 +83,7 @@ export default function HeaderBar({
       </div>
       <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
         <HeaderButton onClick={onSessionsClick} label="Sessions" title="Browse active sessions" badge={sessionCount} />
-        <HeaderButton onClick={onResumeClick} label="Resume" title="Resume a past session" />
+        <HeaderButton onClick={onResumeClick} label="Resume Session" title="Resume a past session" />
         <HeaderButton onClick={onTasksClick} label="Tasks" title="View task board" />
         <HeaderButton onClick={onSetupClick} label="Setup" title="Hook configuration" />
       </div>

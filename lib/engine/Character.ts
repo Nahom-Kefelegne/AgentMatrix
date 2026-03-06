@@ -4,6 +4,7 @@ import {
   CHARACTER_SPEED,
   ANIM_FRAME_DURATION,
   WALK_FRAMES,
+  SPRITE_SCALE,
   Direction,
   STATUS_COLORS,
 } from '@/lib/constants';
@@ -58,6 +59,12 @@ export class Character {
   private bubbleText: string | null = null;
   private bubbleTimer = 0;
   private static readonly BUBBLE_DURATION = 2.0; // seconds
+
+  // Status emoji indicator (floats above head, bobs)
+  private statusEmoji: string | null = null;
+  private emojiTimer = 0;
+  private emojiPersistent = false; // true = stays until cleared
+  private static readonly EMOJI_DURATION = 5.0;
 
   private spriteSheet: SpriteSheet;
   private charIndex: number;
@@ -120,6 +127,18 @@ export class Character {
       }
     }
 
+    // Tick emoji indicator
+    if (this.emojiTimer > 0) {
+      this.emojiTimer -= dt;
+      if (this.emojiTimer <= 0) {
+        if (this.emojiPersistent) {
+          this.emojiTimer = Character.EMOJI_DURATION; // loop
+        } else {
+          this.statusEmoji = null;
+        }
+      }
+    }
+
     // Fired animation phases
     if (this.fired) {
       this.firedTimer += dt;
@@ -168,6 +187,20 @@ export class Character {
         this.bobTimer += dt;
       }
     }
+  }
+
+  /** Show a floating emoji indicator above the character */
+  showEmoji(emoji: string, persistent = false): void {
+    this.statusEmoji = emoji;
+    this.emojiPersistent = persistent;
+    this.emojiTimer = Character.EMOJI_DURATION;
+  }
+
+  /** Clear the emoji (e.g., when they start working again) */
+  clearEmoji(): void {
+    this.statusEmoji = null;
+    this.emojiTimer = 0;
+    this.emojiPersistent = false;
   }
 
   /** Show a chat bubble above the character */
@@ -244,15 +277,22 @@ export class Character {
     if (this.spriteSheet.isReady) {
       const block = this.spriteSheet.getCharacterFrame(this.charIndex);
       const dirInfo = DIR_INFO[this.direction];
+      const drawW = Math.round(TILE_SIZE * SPRITE_SCALE);
+      const drawH = Math.round(17 * SPRITE_SCALE); // 17 = sprite frame height
+      // Center the bigger sprite on the tile position
+      const offsetX = (TILE_SIZE - drawW) / 2;
+      const offsetY = TILE_SIZE - drawH; // anchor at feet
       this.spriteSheet.drawCharFrame(
         ctx,
         block.blockX,
         block.blockY,
         dirInfo.row,
         this.animFrame,
-        this.x,
-        drawY,
+        this.x + offsetX,
+        drawY + offsetY,
         dirInfo.flip,
+        drawW,
+        drawH,
       );
     } else {
       // Fallback: colored circle
@@ -269,6 +309,27 @@ export class Character {
       ctx.fillRect(this.x + 5, drawY + 6, 2, 2);
       ctx.fillRect(this.x + 10, drawY + 6, 2, 2);
       ctx.restore();
+    }
+
+    // Draw flashing laptop/monitor when working and not moving
+    if (this.status === 'working' && !this.isMoving && !this.fired) {
+      const monX = this.x + 1;
+      const monY = this.y + TILE_SIZE - 7;
+      // Monitor body
+      ctx.fillStyle = '#333';
+      ctx.fillRect(monX, monY, 10, 7);
+      // Screen with flashing colors
+      const screenColors = ['#3a7aff', '#4ade80', '#f59e0b', '#8b5cf6'];
+      const colorIdx = Math.floor(this.bobTimer * 4) % screenColors.length;
+      ctx.fillStyle = screenColors[colorIdx];
+      ctx.fillRect(monX + 1, monY + 1, 8, 4);
+      // Text lines on screen
+      ctx.fillStyle = 'rgba(255,255,255,0.6)';
+      ctx.fillRect(monX + 2, monY + 2, 4, 1);
+      ctx.fillRect(monX + 2, monY + 4, 6, 1);
+      // Monitor stand
+      ctx.fillStyle = '#555';
+      ctx.fillRect(monX + 4, monY + 7, 2, 1);
     }
 
     // Draw cardboard box when fired (packing or walking phase)
@@ -356,12 +417,12 @@ export class Character {
   renderStatusDot(ctx: CanvasRenderingContext2D): void {
     const dotColor = STATUS_COLORS[this.status] ?? STATUS_COLORS.idle;
     const dotX = this.x + TILE_SIZE / 2;
-    const dotY = this.y - 2;
+    const dotY = this.y - 6;
 
     ctx.save();
     ctx.fillStyle = dotColor;
     ctx.beginPath();
-    ctx.arc(dotX, dotY, 2, 0, Math.PI * 2);
+    ctx.arc(dotX, dotY, 3, 0, Math.PI * 2);
     ctx.fill();
     ctx.restore();
   }
@@ -405,6 +466,30 @@ export class Character {
     // Text
     ctx.fillStyle = '#222';
     ctx.fillText(this.bubbleText, bx, by - padY);
+
+    ctx.globalAlpha = 1;
+  }
+
+  /** Render floating emoji on the HD overlay */
+  renderEmojiHD(ctx: CanvasRenderingContext2D, scale: number): void {
+    if (!this.statusEmoji) return;
+
+    const x = (this.x + TILE_SIZE / 2) * scale;
+    const baseY = (this.y - 14) * scale;
+    // Gentle bob up and down
+    const bob = Math.sin((Character.EMOJI_DURATION - this.emojiTimer) * 3) * 4;
+    const y = baseY + bob;
+
+    // For persistent emojis, don't fade. For timed ones, fade in last 1s.
+    if (!this.emojiPersistent) {
+      const alpha = this.emojiTimer < 1.0 ? this.emojiTimer : 1;
+      ctx.globalAlpha = alpha;
+    }
+
+    ctx.font = '24px serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(this.statusEmoji, x, y);
 
     ctx.globalAlpha = 1;
   }

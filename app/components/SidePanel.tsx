@@ -24,6 +24,28 @@ function SectionLabel({ children }: { children: React.ReactNode }) {
   );
 }
 
+function CopyCliButton({ cwd, name }: { cwd?: string; name: string }) {
+  const [copied, setCopied] = useState(false);
+  const cmd = `cd ${cwd || '~'} && agency claude --dangerously-skip-permissions --resume ${name}`;
+  return (
+    <button
+      onClick={() => {
+        navigator.clipboard.writeText(cmd);
+        setCopied(true);
+        setTimeout(() => setCopied(false), 2000);
+      }}
+      style={{
+        width: '100%', padding: '10px 14px', borderRadius: 6,
+        border: '1px solid #33334a', background: '#1e1e30',
+        color: copied ? '#51cf66' : '#aaa', fontSize: 14, fontWeight: 600,
+        cursor: 'pointer',
+      }}
+    >
+      {copied ? '✓ CLI Command Copied!' : 'Copy CLI Command'}
+    </button>
+  );
+}
+
 interface SidePanelProps {
   character: CharacterData | null;
   onClose: () => void;
@@ -552,6 +574,11 @@ export default function SidePanel({ character, onClose, isTaskTracker, onSetTask
                       </div>
                     </div>
                   )}
+
+                  {/* Copy CLI command */}
+                  <div style={{ marginBottom: 20 }}>
+                    <CopyCliButton cwd={sessionCwd} name={character.name} />
+                  </div>
 
                   {/* Status */}
                   <div style={{ marginBottom: 20 }}>

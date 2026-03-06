@@ -72,6 +72,8 @@ export class SpriteSheet {
     destX: number,
     destY: number,
     flip = false,
+    drawW = FRAME_W,
+    drawH = FRAME_H,
   ): void {
     if (!this.image) return;
 
@@ -80,19 +82,19 @@ export class SpriteSheet {
 
     if (flip) {
       ctx.save();
-      ctx.translate(destX + FRAME_W, destY);
+      ctx.translate(destX + drawW, destY);
       ctx.scale(-1, 1);
       ctx.drawImage(
         this.image,
         srcX, srcY, FRAME_W, FRAME_H,
-        0, 0, FRAME_W, FRAME_H,
+        0, 0, drawW, drawH,
       );
       ctx.restore();
     } else {
       ctx.drawImage(
         this.image,
         srcX, srcY, FRAME_W, FRAME_H,
-        destX, destY, FRAME_W, FRAME_H,
+        destX, destY, drawW, drawH,
       );
     }
   }

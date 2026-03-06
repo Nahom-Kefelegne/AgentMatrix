@@ -91,6 +91,7 @@ function OfficeView() {
         onEvent={onEvent}
         onHover={handleHover}
         onClick={handleClick}
+        scrollToId={selectedChar?.id}
       />
       <HoverCard character={hoveredChar} x={hoverPos.x} y={hoverPos.y} />
       <SidePanel

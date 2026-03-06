@@ -11,9 +11,10 @@ interface OfficeCanvasProps {
   onEvent: (cb: (handler: SocketEventHandler) => void) => () => void;
   onHover: (char: CharacterData | null, screenX: number, screenY: number) => void;
   onClick: (char: CharacterData | null) => void;
+  scrollToId?: string | null;
 }
 
-export default function OfficeCanvas({ sessions, onEvent, onHover, onClick }: OfficeCanvasProps) {
+export default function OfficeCanvas({ sessions, onEvent, onHover, onClick, scrollToId }: OfficeCanvasProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const overlayRef = useRef<HTMLCanvasElement>(null);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -29,12 +30,20 @@ export default function OfficeCanvas({ sessions, onEvent, onHover, onClick }: Of
     switch (handler.event) {
       case SOCKET_EVENTS.STATE_SNAPSHOT: {
         const snapshot = handler.data as SessionData[];
-        snapshot.forEach(session => engine.spawnCharacter(session));
+        snapshot.forEach(session => {
+          engine.spawnCharacter(session);
+          if (session.status === 'idle') {
+            engine.showEmoji(session.id, '💤', true);
+          }
+        });
         break;
       }
       case SOCKET_EVENTS.SESSION_START: {
         const session = handler.data as SessionData;
         engine.spawnCharacter(session);
+        if (session.status === 'idle') {
+          engine.showEmoji(session.id, '💤', true);
+        }
         break;
       }
       case SOCKET_EVENTS.SESSION_END: {
@@ -54,15 +63,18 @@ export default function OfficeCanvas({ sessions, onEvent, onHover, onClick }: Of
         const goingIdle = data.changes.status === 'idle';
 
         if (wasInMeeting && goingIdle) {
-          // Meeting ended — allow status change and move parent back to desk
           engine.updateCharacter(data.sessionId, data.changes);
           engine.returnToDeskAfterMeeting(data.sessionId);
+          engine.showEmoji(data.sessionId, '✅');
         } else if (wasInMeeting && data.changes.status && data.changes.status !== 'meeting') {
-          // Don't let other status changes override meeting
           const { status, ...rest } = data.changes;
           engine.updateCharacter(data.sessionId, rest);
         } else {
           engine.updateCharacter(data.sessionId, data.changes);
+          // Show zzz when session goes idle (persistent until they work again)
+          if (data.changes.status === 'idle') {
+            engine.showEmoji(data.sessionId, '💤', true);
+          }
         }
         break;
       }
@@ -77,11 +89,13 @@ export default function OfficeCanvas({ sessions, onEvent, onHover, onClick }: Of
         if (targetChar) {
           const newStatus = targetChar.status === 'meeting' ? 'meeting' : 'working';
           engine.updateCharacter(targetChar.id, { currentTool: data.toolName, status: newStatus });
+          engine.clearEmoji(targetChar.id); // clear idle indicator when working
           if (targetChar.status === 'meeting') {
             engine.showChatBubble(targetChar.id, data.toolName);
           }
         } else {
           engine.updateCharacter(data.sessionId, { currentTool: data.toolName, status: 'working' });
+          engine.clearEmoji(data.sessionId);
         }
         break;
       }
@@ -170,6 +184,9 @@ export default function OfficeCanvas({ sessions, onEvent, onHover, onClick }: Of
       // Also spawn from current sessions state as fallback
       sessions.forEach(session => {
         engine.spawnCharacter(session);
+        if (session.status === 'idle') {
+          engine.showEmoji(session.id, '💤', true);
+        }
       });
     })();
 
@@ -180,6 +197,13 @@ export default function OfficeCanvas({ sessions, onEvent, onHover, onClick }: Of
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Highlight selected character
+  useEffect(() => {
+    if (engineRef.current && engineReadyRef.current && engineRef.current.highlightCharacter) {
+      engineRef.current.highlightCharacter(scrollToId || null);
+    }
+  }, [scrollToId]);
 
   const getCanvasCoords = useCallback((e: React.MouseEvent<HTMLCanvasElement>) => {
     const overlay = overlayRef.current;

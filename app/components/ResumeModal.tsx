@@ -113,6 +113,7 @@ export default function ResumeModal({ isOpen, onClose }: ResumeModalProps) {
   const [sessions, setSessions] = useState<SessionInfo[]>([]);
   const [loading, setLoading] = useState(false);
   const [copied, setCopied] = useState<string | null>(null);
+  const [search, setSearch] = useState('');
 
   const loadSessions = useCallback(async (path: string) => {
     setLoading(true);
@@ -148,7 +149,9 @@ export default function ResumeModal({ isOpen, onClose }: ResumeModalProps) {
 
   if (!isOpen) return null;
 
-  const inactiveSessions = sessions.filter(s => !s.active);
+  const inactiveSessions = sessions.filter(s => !s.active &&
+    (!search || s.name.toLowerCase().includes(search.toLowerCase()) || s.slug.toLowerCase().includes(search.toLowerCase()))
+  );
 
   return (
     <>
@@ -179,6 +182,20 @@ export default function ResumeModal({ isOpen, onClose }: ResumeModalProps) {
             Project Directory
           </label>
           <FolderPicker value={cwd} onChange={handleCwdChange} />
+        </div>
+
+        {/* Search */}
+        <div style={{ padding: '10px 24px', borderBottom: '1px solid #2a2a3e' }}>
+          <input
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Search sessions..."
+            style={{
+              width: '100%', background: '#1e1e30', border: '1px solid #33334a',
+              color: '#eee', borderRadius: 6, padding: '10px 14px', fontSize: 15,
+              fontFamily: 'inherit',
+            }}
+          />
         </div>
 
         {/* Session list */}

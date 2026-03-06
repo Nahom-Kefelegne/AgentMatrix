@@ -109,6 +109,27 @@ export class GameEngine {
     // Crisp text overlay (display resolution)
     if (this.overlayCtx && this.overlayCanvas) {
       this.overlayCtx.clearRect(0, 0, this.overlayCanvas.width, this.overlayCanvas.height);
+
+      // Highlight selected character
+      if (this.highlightedId) {
+        const hChar = this.characterManager.getCharacter(this.highlightedId);
+        if (hChar) {
+          const hx = (hChar.x + TILE_SIZE / 2) * SCALE;
+          const hy = (hChar.y + TILE_SIZE / 2) * SCALE;
+          const hr = TILE_SIZE * SCALE * 0.8;
+          this.overlayCtx.save();
+          this.overlayCtx.strokeStyle = '#4a9eff';
+          this.overlayCtx.lineWidth = 3;
+          this.overlayCtx.shadowColor = '#4a9eff';
+          this.overlayCtx.shadowBlur = 12;
+          this.overlayCtx.beginPath();
+          this.overlayCtx.arc(hx, hy, hr, 0, Math.PI * 2);
+          this.overlayCtx.stroke();
+          this.overlayCtx.restore();
+        }
+      }
+
+      this.characterManager.renderEmojisHD(this.overlayCtx, SCALE);
       this.characterManager.renderBubblesHD(this.overlayCtx, SCALE);
       this.characterManager.renderLabelsHD(this.overlayCtx, SCALE);
     } else {
@@ -272,6 +293,16 @@ export class GameEngine {
     this.characterManager.returnToDesks(participantIds, this.sessions, this.tileMap);
   }
 
+  showEmoji(characterId: string, emoji: string, persistent = false): void {
+    const char = this.characterManager.getCharacter(characterId);
+    if (char) char.showEmoji(emoji, persistent);
+  }
+
+  clearEmoji(characterId: string): void {
+    const char = this.characterManager.getCharacter(characterId);
+    if (char) char.clearEmoji();
+  }
+
   showChatBubble(characterId: string, text: string): void {
     const char = this.characterManager.getCharacter(characterId);
     if (char) char.showBubble(text);
@@ -292,6 +323,12 @@ export class GameEngine {
     };
 
     this.connectionLines.push(new ConnectionLine(from, to, fromChar.color));
+  }
+
+  private highlightedId: string | null = null;
+
+  highlightCharacter(characterId: string | null): void {
+    this.highlightedId = characterId;
   }
 
   getCharacterManager(): CharacterManager {
