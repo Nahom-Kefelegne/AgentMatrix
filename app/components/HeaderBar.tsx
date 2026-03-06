@@ -2,11 +2,16 @@
 
 interface HeaderBarProps {
   connected: boolean;
+  sessionCount: number;
   onSetupClick: () => void;
   onTasksClick: () => void;
+  onResumeClick: () => void;
+  onSessionsClick: () => void;
 }
 
-function HeaderButton({ onClick, label, title }: { onClick: () => void; label: string; title: string }) {
+function HeaderButton({ onClick, label, title, badge }: {
+  onClick: () => void; label: string; title: string; badge?: number;
+}) {
   return (
     <button
       onClick={onClick}
@@ -24,14 +29,25 @@ function HeaderButton({ onClick, label, title }: { onClick: () => void; label: s
         alignItems: 'center',
         gap: 6,
         cursor: 'pointer',
+        position: 'relative',
       }}
     >
       {label}
+      {badge !== undefined && badge > 0 && (
+        <span style={{
+          background: '#4a9eff', color: '#fff', fontSize: 11, fontWeight: 700,
+          borderRadius: 10, padding: '1px 6px', minWidth: 18, textAlign: 'center',
+        }}>
+          {badge}
+        </span>
+      )}
     </button>
   );
 }
 
-export default function HeaderBar({ connected, onSetupClick, onTasksClick }: HeaderBarProps) {
+export default function HeaderBar({
+  connected, sessionCount, onSetupClick, onTasksClick, onResumeClick, onSessionsClick,
+}: HeaderBarProps) {
   return (
     <header
       style={{
@@ -66,6 +82,8 @@ export default function HeaderBar({ connected, onSetupClick, onTasksClick }: Hea
         </span>
       </div>
       <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+        <HeaderButton onClick={onSessionsClick} label="Sessions" title="Browse active sessions" badge={sessionCount} />
+        <HeaderButton onClick={onResumeClick} label="Resume" title="Resume a past session" />
         <HeaderButton onClick={onTasksClick} label="Tasks" title="View task board" />
         <HeaderButton onClick={onSetupClick} label="Setup" title="Hook configuration" />
       </div>

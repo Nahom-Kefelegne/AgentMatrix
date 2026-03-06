@@ -8,7 +8,7 @@
   --text-muted: #555555;
   --border-color: #2a2a3a;
   --accent: #4a9eff;
-  --header-height: 40px;
+  --header-height: 52px;
 }
 
 * {
@@ -46,4 +46,16 @@ button {
   border: none;
   background: none;
   color: inherit;
+}
+
+input::placeholder,
+textarea::placeholder {
+  color: #777 !important;
+  opacity: 1;
+}
+
+select,
+input,
+textarea {
+  color: #eee;
 }

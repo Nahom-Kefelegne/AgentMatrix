@@ -1,5 +1,8 @@
 import { NextResponse } from 'next/server';
 import { spawn } from 'child_process';
+import { openSync } from 'fs';
+import { join } from 'path';
+import { tmpdir } from 'os';
 
 export async function POST(request: Request) {
   try {
@@ -9,22 +12,27 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Missing task or cwd' }, { status: 400 });
     }
 
-    const args = ['-p', task, '--dangerously-skip-permissions'];
+    const sessionName = name || `task-${Date.now()}`;
+    // Use --print for non-interactive mode, skip permissions
+    const args = ['--print', '--dangerously-skip-permissions', task];
 
-    // If a name is provided, use --resume so the session is resumable by name
-    if (name) {
-      args.push('--resume', name);
-    }
+    const logFile = join(tmpdir(), `claude-spawn-${sessionName}.log`);
+    const out = openSync(logFile, 'a');
+
+    // Strip CLAUDECODE env to prevent "nested session" error
+    const env = { ...process.env };
+    delete env.CLAUDECODE;
 
     const child = spawn('claude', args, {
       cwd,
       detached: true,
-      stdio: ['ignore', 'ignore', 'ignore'],
+      stdio: ['ignore', out, out],
+      env,
     });
 
     child.unref();
 
-    return NextResponse.json({ ok: true, name: name || null });
+    return NextResponse.json({ ok: true, name: sessionName, logFile });
   } catch (error) {
     console.error('[sessions/spawn]', error);
     return NextResponse.json({ error: 'Internal error' }, { status: 500 });

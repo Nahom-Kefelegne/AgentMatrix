@@ -66,7 +66,21 @@ function parseTranscriptMeta(transcriptPath: string): { cwd?: string; slug?: str
     const content = readFileSync(transcriptPath, 'utf-8');
     const firstLine = content.split('\n')[0];
     const data = JSON.parse(firstLine);
-    return { cwd: data.cwd, slug: data.slug };
+    let cwd = data.cwd;
+
+    // If no cwd in transcript, derive from project directory name
+    // e.g. /.../.claude/projects/-Users-nkefelegne-Desktop-DEV-teams-modular-packages/xxx.jsonl
+    // → /Users/nkefelegne/Desktop/DEV/teams-modular-packages
+    if (!cwd) {
+      const parts = transcriptPath.split('/');
+      const projectsIdx = parts.indexOf('projects');
+      if (projectsIdx >= 0 && projectsIdx + 1 < parts.length) {
+        const dirName = parts[projectsIdx + 1]; // e.g. -Users-nkefelegne-Desktop-DEV
+        cwd = dirName.replace(/^-/, '/').replace(/-/g, '/');
+      }
+    }
+
+    return { cwd, slug: data.slug };
   } catch {
     return {};
   }
@@ -130,11 +144,25 @@ export function scanActiveSessions(): {
         addSession(session);
         added.push(session);
       }
-    } else if (proc.resumeName) {
+    } else {
       const existing = getSession(proc.sessionId);
-      if (existing && existing.name !== proc.resumeName) {
+      if (!existing) continue;
+
+      // Update resume name if available
+      if (proc.resumeName && existing.name !== proc.resumeName) {
         updateSession(proc.sessionId, { name: proc.resumeName });
         updated.push({ sessionId: proc.sessionId, name: proc.resumeName });
+      }
+
+      // Fill in missing cwd
+      if (!existing.cwd) {
+        const transcriptPath = findTranscriptPath(proc.sessionId);
+        if (transcriptPath) {
+          const meta = parseTranscriptMeta(transcriptPath);
+          if (meta.cwd) {
+            updateSession(proc.sessionId, { cwd: meta.cwd });
+          }
+        }
       }
     }
   }

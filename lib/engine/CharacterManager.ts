@@ -133,6 +133,12 @@ export class CharacterManager {
     char.startExit(ENTRANCE_POINT.x, ENTRANCE_POINT.y, tileMap);
   }
 
+  fire(sessionId: string, tileMap: TileMap): void {
+    const char = this.characters.get(sessionId);
+    if (!char) return;
+    char.startFired(ENTRANCE_POINT.x, ENTRANCE_POINT.y, tileMap);
+  }
+
   updateAll(dt: number): void {
     for (const [id, char] of this.characters) {
       char.update(dt);

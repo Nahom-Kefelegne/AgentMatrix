@@ -47,6 +47,13 @@ export class Character {
   private exitDone = false;
   get pendingRemoval(): boolean { return this.exitDone; }
 
+  // Fired animation
+  private fired = false;
+  private firedTimer = 0;
+  private firedPhase: 'shocked' | 'packing' | 'walking' = 'shocked';
+  private static readonly SHOCKED_DURATION = 1.0;
+  private static readonly PACKING_DURATION = 1.5;
+
   // Chat bubble
   private bubbleText: string | null = null;
   private bubbleTimer = 0;
@@ -113,6 +120,34 @@ export class Character {
       }
     }
 
+    // Fired animation phases
+    if (this.fired) {
+      this.firedTimer += dt;
+      if (this.firedPhase === 'shocked') {
+        // Stand still, looking shocked
+        if (this.firedTimer >= Character.SHOCKED_DURATION) {
+          this.firedPhase = 'packing';
+          this.firedTimer = 0;
+          this.showBubble('...');
+        }
+      } else if (this.firedPhase === 'packing') {
+        // Bob up and down like packing
+        this.bobTimer += dt * 6;
+        if (this.firedTimer >= Character.PACKING_DURATION) {
+          this.firedPhase = 'walking';
+          this.firedTimer = 0;
+          this.bobTimer = 0;
+          // Now walk to exit
+          if (this._firedTileMap) {
+            this.exiting = true;
+            this.moveTo(this._firedExitX, this._firedExitY, this._firedTileMap);
+          }
+        }
+      }
+      // 'walking' phase falls through to normal path movement below
+      if (this.firedPhase !== 'walking') return;
+    }
+
     if (this.path.length > 0) {
       this.moveAlongPath(dt);
       this.animTimer += dt;
@@ -144,10 +179,27 @@ export class Character {
 
   /** Walk to exit and disappear */
   startExit(tileX: number, tileY: number, tileMap: TileMap): void {
-    if (this.exiting) return;
+    if (this.exiting || this.fired) return;
     this.exiting = true;
     this.moveTo(tileX, tileY, tileMap);
   }
+
+  /** Start the fired animation — shocked → packing → sad walk out */
+  startFired(exitTileX: number, exitTileY: number, tileMap: TileMap): void {
+    if (this.fired || this.exiting) return;
+    this.fired = true;
+    this.firedTimer = 0;
+    this.firedPhase = 'shocked';
+    this.setPath([]); // stop current movement
+    this.status = 'idle';
+    this.showBubble('!!');
+    this._firedExitX = exitTileX;
+    this._firedExitY = exitTileY;
+    this._firedTileMap = tileMap;
+  }
+  private _firedExitX = 0;
+  private _firedExitY = 0;
+  private _firedTileMap: TileMap | null = null;
 
   private moveAlongPath(dt: number): void {
     const target = this.path[0];
@@ -176,9 +228,18 @@ export class Character {
   }
 
   render(ctx: CanvasRenderingContext2D): void {
-    const drawY = this.status === 'working' && !this.isMoving
-      ? this.y + Math.sin(this.bobTimer * 3) * 0.5
-      : this.y;
+    let drawY = this.y;
+
+    if (this.fired && this.firedPhase === 'packing') {
+      // Frantic bobbing while "packing"
+      drawY = this.y + Math.sin(this.bobTimer) * 1.5;
+    } else if (this.fired && this.firedPhase === 'shocked') {
+      // Slight shake
+      const shake = Math.sin(this.firedTimer * 20) * 0.5;
+      drawY = this.y + shake;
+    } else if (this.status === 'working' && !this.isMoving) {
+      drawY = this.y + Math.sin(this.bobTimer * 3) * 0.5;
+    }
 
     if (this.spriteSheet.isReady) {
       const block = this.spriteSheet.getCharacterFrame(this.charIndex);
@@ -208,6 +269,28 @@ export class Character {
       ctx.fillRect(this.x + 5, drawY + 6, 2, 2);
       ctx.fillRect(this.x + 10, drawY + 6, 2, 2);
       ctx.restore();
+    }
+
+    // Draw cardboard box when fired (packing or walking phase)
+    if (this.fired && (this.firedPhase === 'packing' || this.firedPhase === 'walking')) {
+      const boxX = this.x + TILE_SIZE - 2;
+      const boxY = drawY + 6;
+      // Box body
+      ctx.fillStyle = '#b8860b';
+      ctx.fillRect(boxX, boxY, 7, 6);
+      // Box flaps (open during packing, closed during walking)
+      ctx.fillStyle = '#cd9b1d';
+      if (this.firedPhase === 'packing') {
+        // Open flaps
+        ctx.fillRect(boxX - 1, boxY - 1, 3, 2);
+        ctx.fillRect(boxX + 5, boxY - 1, 3, 2);
+      } else {
+        // Closed flaps
+        ctx.fillRect(boxX, boxY - 1, 7, 2);
+      }
+      // Box tape
+      ctx.fillStyle = '#8b7355';
+      ctx.fillRect(boxX + 3, boxY, 1, 6);
     }
   }
 

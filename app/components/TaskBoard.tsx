@@ -16,21 +16,25 @@ const STATUS_COLORS: Record<string, string> = {
   completed: '#51cf66',
 };
 
-function TaskCard({ task, onAssign }: { task: TaskItem; onAssign?: (task: TaskItem) => void }) {
+function TaskCard({ task, onAssign, onEdit }: {
+  task: TaskItem;
+  onAssign?: (task: TaskItem) => void;
+  onEdit?: (task: TaskItem) => void;
+}) {
   return (
-    <div
-      style={{
-        background: '#1a1a2a',
-        border: '1px solid #2a2a3e',
-        borderRadius: 8,
-        padding: '12px 14px',
-        marginBottom: 8,
-      }}
-    >
+    <div style={{
+      background: '#1e1e30', border: '1px solid #33334a', borderRadius: 8,
+      padding: '12px 14px', marginBottom: 8,
+    }}>
       <div style={{ fontSize: 14, color: '#eee', marginBottom: 8, wordBreak: 'break-word', fontWeight: 500 }}>
         {task.subject}
       </div>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+      {task.description && task.description !== task.subject && (
+        <div style={{ fontSize: 13, color: '#888', marginBottom: 8, wordBreak: 'break-word' }}>
+          {task.description.slice(0, 120)}
+        </div>
+      )}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', marginBottom: 10 }}>
         {task.owner && (
           <span style={{
             fontSize: 12, padding: '3px 8px', borderRadius: 4,
@@ -47,24 +51,334 @@ function TaskCard({ task, onAssign }: { task: TaskItem; onAssign?: (task: TaskIt
           {task.status.replace('_', ' ')}
         </span>
       </div>
-      {onAssign && task.status !== 'completed' && (
-        <button
-          onClick={() => onAssign(task)}
-          style={{
-            marginTop: 10, fontSize: 13, padding: '6px 12px', borderRadius: 6,
-            border: '1px solid #3a3a4e', background: '#1e1e30',
-            color: '#7aafff', width: '100%', fontWeight: 600, cursor: 'pointer',
-          }}
-        >
-          Assign to agent
-        </button>
+      <div style={{ display: 'flex', gap: 8 }}>
+        {onEdit && (
+          <button
+            onClick={() => onEdit(task)}
+            style={{
+              flex: 1, fontSize: 13, padding: '6px 12px', borderRadius: 6,
+              border: '1px solid #3a3a4e', background: '#1e1e30',
+              color: '#aaa', fontWeight: 600, cursor: 'pointer',
+            }}
+          >
+            Edit
+          </button>
+        )}
+        {onAssign && task.status !== 'completed' && (
+          <button
+            onClick={() => onAssign(task)}
+            style={{
+              flex: 1, fontSize: 13, padding: '6px 12px', borderRadius: 6,
+              border: '1px solid #3a3a4e', background: '#1e1e30',
+              color: '#7aafff', fontWeight: 600, cursor: 'pointer',
+            }}
+          >
+            Assign
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/** Folder browser component */
+function FolderPicker({ value, onChange }: { value: string; onChange: (path: string) => void }) {
+  const [dirs, setDirs] = useState<{ name: string; path: string }[]>([]);
+  const [open, setOpen] = useState(false);
+
+  const loadDirs = useCallback(async (parentPath: string) => {
+    try {
+      const res = await fetch(`/api/dirs?path=${encodeURIComponent(parentPath)}`);
+      const data = await res.json();
+      setDirs(data.dirs || []);
+    } catch {
+      setDirs([]);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (open) loadDirs(value);
+  }, [open, value, loadDirs]);
+
+  const goUp = () => {
+    const parent = value.split('/').slice(0, -1).join('/') || '/';
+    onChange(parent);
+    loadDirs(parent);
+  };
+
+  return (
+    <div style={{ position: 'relative' }}>
+      <div
+        onClick={() => setOpen(!open)}
+        style={{
+          width: '100%', background: '#1a1a2a', border: '1px solid #2a2a3e',
+          color: '#eee', borderRadius: 6, padding: '8px 12px', fontSize: 14,
+          fontFamily: 'inherit', cursor: 'pointer', display: 'flex',
+          justifyContent: 'space-between', alignItems: 'center',
+        }}
+      >
+        <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{value}</span>
+        <span style={{ color: '#888', fontSize: 12 }}>{open ? '▲' : '▼'}</span>
+      </div>
+      {open && (
+        <div style={{
+          position: 'absolute', bottom: '100%', left: 0, right: 0, zIndex: 110,
+          background: '#1a1a2a', border: '1px solid #2a2a3e', borderRadius: 6,
+          marginBottom: 4, maxHeight: 250, overflowY: 'auto',
+        }}>
+          <div
+            onClick={goUp}
+            style={{
+              padding: '8px 12px', fontSize: 14, color: '#7aafff', cursor: 'pointer',
+              borderBottom: '1px solid #222235',
+            }}
+          >
+            <span>↑</span>{' '}<span>Parent Directory</span>
+          </div>
+          {dirs.map(d => (
+            <div
+              key={d.path}
+              onClick={() => { onChange(d.path); loadDirs(d.path); }}
+              style={{
+                padding: '8px 12px', fontSize: 14, color: '#c8c8d8', cursor: 'pointer',
+                borderBottom: '1px solid #222235',
+              }}
+              onMouseEnter={(e) => (e.currentTarget.style.background = '#222235')}
+              onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
+            >
+              📁 {d.name}
+            </div>
+          ))}
+          {dirs.length === 0 && (
+            <div style={{ padding: '8px 12px', fontSize: 13, color: '#555', fontStyle: 'italic' }}>
+              No subdirectories
+            </div>
+          )}
+          <div
+            onClick={() => setOpen(false)}
+            style={{
+              padding: '8px 12px', fontSize: 13, color: '#51cf66', cursor: 'pointer',
+              borderTop: '1px solid #2a2a3e', fontWeight: 600, textAlign: 'center',
+            }}
+          >
+            ✓ Select this folder
+          </div>
+        </div>
       )}
     </div>
   );
 }
 
-function Column({ title, color, tasks, onAssign }: {
-  title: string; color: string; tasks: TaskItem[]; onAssign: (task: TaskItem) => void;
+/** Modal that appears when assigning a task — lets user add context before spawning */
+function AssignModal({ task, onSpawn, onCancel }: {
+  task: TaskItem;
+  onSpawn: (prompt: string, cwd: string, name: string) => void;
+  onCancel: () => void;
+}) {
+  const defaultPrompt = task.subject + (task.description && task.description !== task.subject
+    ? '\n\n' + task.description : '');
+  const [prompt, setPrompt] = useState(defaultPrompt);
+  const [cwd, setCwd] = useState('/Users/nkefelegne/Desktop/DEV');
+  const [name, setName] = useState(
+    task.subject.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 30)
+  );
+
+  return (
+    <>
+      <div onClick={onCancel} style={{
+        position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', zIndex: 100,
+      }} />
+      <div style={{
+        position: 'fixed', top: '50%', left: '50%', transform: 'translate(-50%, -50%)',
+        width: 520, background: '#151520', border: '1px solid #2a2a3e', borderRadius: 12,
+        zIndex: 101, display: 'flex', flexDirection: 'column', overflow: 'hidden',
+      }}>
+        {/* Header */}
+        <div style={{
+          padding: '16px 20px', borderBottom: '1px solid #2a2a3e',
+          display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+        }}>
+          <span style={{ fontSize: 18, fontWeight: 700, color: '#eee' }}>Assign Task</span>
+          <button onClick={onCancel} style={{
+            width: 28, height: 28, borderRadius: 6, border: '1px solid #3a3a4e',
+            background: '#1e1e30', color: '#aaa', fontSize: 14,
+            display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer',
+          }}>
+            ✕
+          </button>
+        </div>
+
+        {/* Body */}
+        <div style={{ padding: '16px 20px', display: 'flex', flexDirection: 'column', gap: 14 }}>
+          {/* Session name */}
+          <div>
+            <label style={{ fontSize: 13, color: '#9a9ab0', fontWeight: 600, display: 'block', marginBottom: 4 }}>
+              Session Name
+            </label>
+            <input
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              style={{
+                width: '100%', background: '#1a1a2a', border: '1px solid #2a2a3e',
+                color: '#eee', borderRadius: 6, padding: '8px 12px', fontSize: 14, fontFamily: 'inherit',
+              }}
+            />
+          </div>
+
+          {/* Instructions */}
+          <div>
+            <label style={{ fontSize: 13, color: '#9a9ab0', fontWeight: 600, display: 'block', marginBottom: 4 }}>
+              Instructions for Agent
+            </label>
+            <textarea
+              value={prompt}
+              onChange={(e) => setPrompt(e.target.value)}
+              rows={6}
+              style={{
+                width: '100%', background: '#1a1a2a', border: '1px solid #2a2a3e',
+                color: '#eee', borderRadius: 6, padding: '10px 12px', fontSize: 14,
+                fontFamily: 'inherit', resize: 'vertical', lineHeight: 1.5,
+              }}
+            />
+          </div>
+
+          {/* Working directory — folder browser */}
+          <div>
+            <label style={{ fontSize: 13, color: '#9a9ab0', fontWeight: 600, display: 'block', marginBottom: 4 }}>
+              Working Directory
+            </label>
+            <FolderPicker value={cwd} onChange={setCwd} />
+          </div>
+        </div>
+
+        {/* Footer */}
+        <div style={{
+          padding: '12px 20px', borderTop: '1px solid #2a2a3e',
+          display: 'flex', justifyContent: 'flex-end', gap: 10,
+        }}>
+          <button onClick={onCancel} style={{
+            padding: '8px 16px', borderRadius: 6, border: '1px solid #3a3a4e',
+            background: '#1e1e30', color: '#aaa', fontSize: 14, fontWeight: 600, cursor: 'pointer',
+          }}>
+            Cancel
+          </button>
+          <button onClick={() => onSpawn(prompt, cwd, name)} style={{
+            padding: '8px 20px', borderRadius: 6, border: 'none',
+            background: '#4a9eff', color: '#fff', fontSize: 14, fontWeight: 600, cursor: 'pointer',
+          }}>
+            Spawn Agent
+          </button>
+        </div>
+      </div>
+    </>
+  );
+}
+
+/** Modal for creating or editing a task */
+function TaskFormModal({ task, onSave, onCancel, title: modalTitle }: {
+  task?: TaskItem;
+  onSave: (subject: string, description: string, status: string) => void;
+  onCancel: () => void;
+  title: string;
+}) {
+  const [subject, setSubject] = useState(task?.subject || '');
+  const [description, setDescription] = useState(task?.description || '');
+  const [status, setStatus] = useState(task?.status || 'pending');
+
+  return (
+    <>
+      <div onClick={onCancel} style={{
+        position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', zIndex: 100,
+      }} />
+      <div style={{
+        position: 'fixed', top: '50%', left: '50%', transform: 'translate(-50%, -50%)',
+        width: 480, background: '#151520', border: '1px solid #2a2a3e', borderRadius: 12,
+        zIndex: 101, display: 'flex', flexDirection: 'column', overflow: 'hidden',
+      }}>
+        <div style={{
+          padding: '16px 20px', borderBottom: '1px solid #2a2a3e',
+          display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+        }}>
+          <span style={{ fontSize: 18, fontWeight: 700, color: '#eee' }}>{modalTitle}</span>
+          <button onClick={onCancel} style={{
+            width: 28, height: 28, borderRadius: 6, border: '1px solid #3a3a4e',
+            background: '#1e1e30', color: '#aaa', fontSize: 14,
+            display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer',
+          }}>✕</button>
+        </div>
+        <div style={{ padding: '16px 20px', display: 'flex', flexDirection: 'column', gap: 14 }}>
+          <div>
+            <label style={{ fontSize: 13, color: '#9a9ab0', fontWeight: 600, display: 'block', marginBottom: 4 }}>
+              Subject
+            </label>
+            <input
+              value={subject}
+              onChange={(e) => setSubject(e.target.value)}
+              placeholder="Task subject..."
+              style={{
+                width: '100%', background: '#1a1a2a', border: '1px solid #2a2a3e',
+                color: '#eee', borderRadius: 6, padding: '8px 12px', fontSize: 14, fontFamily: 'inherit',
+              }}
+            />
+          </div>
+          <div>
+            <label style={{ fontSize: 13, color: '#9a9ab0', fontWeight: 600, display: 'block', marginBottom: 4 }}>
+              Description
+            </label>
+            <textarea
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
+              rows={4}
+              placeholder="Detailed description..."
+              style={{
+                width: '100%', background: '#1a1a2a', border: '1px solid #2a2a3e',
+                color: '#eee', borderRadius: 6, padding: '10px 12px', fontSize: 14,
+                fontFamily: 'inherit', resize: 'vertical', lineHeight: 1.5,
+              }}
+            />
+          </div>
+          {task && (
+            <div>
+              <label style={{ fontSize: 13, color: '#9a9ab0', fontWeight: 600, display: 'block', marginBottom: 4 }}>
+                Status
+              </label>
+              <select
+                value={status}
+                onChange={(e) => setStatus(e.target.value)}
+                style={{
+                  width: '100%', background: '#1a1a2a', border: '1px solid #2a2a3e',
+                  color: '#eee', borderRadius: 6, padding: '8px 12px', fontSize: 14, fontFamily: 'inherit',
+                }}
+              >
+                <option value="pending">Pending</option>
+                <option value="in_progress">In Progress</option>
+                <option value="completed">Completed</option>
+              </select>
+            </div>
+          )}
+        </div>
+        <div style={{
+          padding: '12px 20px', borderTop: '1px solid #2a2a3e',
+          display: 'flex', justifyContent: 'flex-end', gap: 10,
+        }}>
+          <button onClick={onCancel} style={{
+            padding: '8px 16px', borderRadius: 6, border: '1px solid #3a3a4e',
+            background: '#1e1e30', color: '#aaa', fontSize: 14, fontWeight: 600, cursor: 'pointer',
+          }}>Cancel</button>
+          <button onClick={() => onSave(subject, description, status)} style={{
+            padding: '8px 20px', borderRadius: 6, border: 'none',
+            background: '#4a9eff', color: '#fff', fontSize: 14, fontWeight: 600, cursor: 'pointer',
+          }}>Save</button>
+        </div>
+      </div>
+    </>
+  );
+}
+
+function Column({ title, color, tasks, onAssign, onEdit }: {
+  title: string; color: string; tasks: TaskItem[];
+  onAssign: (task: TaskItem) => void;
+  onEdit: (task: TaskItem) => void;
 }) {
   return (
     <div style={{ flex: 1, minWidth: 0 }}>
@@ -77,12 +391,10 @@ function Column({ title, color, tasks, onAssign }: {
       </div>
       <div style={{ maxHeight: 'calc(100vh - 220px)', overflowY: 'auto' }}>
         {tasks.map((t) => (
-          <TaskCard key={t.id} task={t} onAssign={onAssign} />
+          <TaskCard key={t.id} task={t} onAssign={onAssign} onEdit={onEdit} />
         ))}
         {tasks.length === 0 && (
-          <div style={{ fontSize: 14, color: '#555', padding: 12, fontStyle: 'italic' }}>
-            No tasks
-          </div>
+          <div style={{ fontSize: 14, color: '#555', padding: 12, fontStyle: 'italic' }}>No tasks</div>
         )}
       </div>
     </div>
@@ -93,8 +405,10 @@ export default function TaskBoard({ isOpen, onClose, sessionName }: TaskBoardPro
   const [taskLists, setTaskLists] = useState<TaskList[]>([]);
   const [selectedListId, setSelectedListId] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
-  const [newTaskText, setNewTaskText] = useState('');
-  const [assigning, setAssigning] = useState(false);
+  const [assigningTask, setAssigningTask] = useState<TaskItem | null>(null);
+  const [editingTask, setEditingTask] = useState<TaskItem | null>(null);
+  const [creatingTask, setCreatingTask] = useState(false);
+  const [spawning, setSpawning] = useState(false);
 
   const fetchTasks = useCallback(async () => {
     setLoading(true);
@@ -116,37 +430,55 @@ export default function TaskBoard({ isOpen, onClose, sessionName }: TaskBoardPro
     if (isOpen) fetchTasks();
   }, [isOpen, fetchTasks]);
 
-  const handleAssign = useCallback(async (task: TaskItem) => {
-    setAssigning(true);
+  const handleSpawn = useCallback(async (prompt: string, cwd: string, name: string) => {
+    setSpawning(true);
     try {
       await fetch('/api/sessions/spawn', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          task: task.subject + (task.description ? ': ' + task.description : ''),
-          cwd: '/Users/nkefelegne/Desktop/DEV',
-        }),
+        body: JSON.stringify({ task: prompt, cwd, name }),
       });
+      setAssigningTask(null);
     } catch (err) {
       console.error('Failed to spawn session:', err);
     } finally {
-      setAssigning(false);
+      setSpawning(false);
     }
   }, []);
 
-  const handleNewTask = useCallback(async () => {
-    if (!newTaskText.trim()) return;
+  const handleCreateSave = useCallback(async (subject: string, description: string) => {
+    if (!subject.trim() || !selectedListId) return;
     try {
-      await fetch('/api/sessions/spawn', {
+      await fetch('/api/tasks/create', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ task: newTaskText.trim(), cwd: '/Users/nkefelegne/Desktop/DEV' }),
+        body: JSON.stringify({ listId: selectedListId, subject, description }),
       });
-      setNewTaskText('');
+      setCreatingTask(false);
+      fetchTasks();
     } catch (err) {
       console.error('Failed to create task:', err);
     }
-  }, [newTaskText]);
+  }, [selectedListId, fetchTasks]);
+
+  const handleEditSave = useCallback(async (subject: string, description: string, status: string) => {
+    if (!editingTask || !selectedListId) return;
+    try {
+      await fetch('/api/tasks/update', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          listId: selectedListId,
+          taskId: editingTask.id,
+          changes: { subject, description, status },
+        }),
+      });
+      setEditingTask(null);
+      fetchTasks();
+    } catch (err) {
+      console.error('Failed to update task:', err);
+    }
+  }, [editingTask, selectedListId, fetchTasks]);
 
   const selectedList = taskLists.find((l) => l.id === selectedListId);
   const pending = selectedList?.tasks.filter((t) => t.status === 'pending') || [];
@@ -159,10 +491,11 @@ export default function TaskBoard({ isOpen, onClose, sessionName }: TaskBoardPro
     <>
       {/* Backdrop */}
       <div onClick={onClose} style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.4)', zIndex: 46 }} />
+
       {/* Panel */}
       <div style={{
-        position: 'fixed', top: 0, left: 0, width: '100vw', maxWidth: 800,
-        height: '100vh', background: '#151520', borderRight: '1px solid #2a2a3e',
+        position: 'fixed', top: 'var(--header-height)', left: 0, width: '100vw', maxWidth: 800,
+        height: 'calc(100vh - var(--header-height))', background: '#151520', borderRight: '1px solid #2a2a3e',
         zIndex: 47, display: 'flex', flexDirection: 'column', overflow: 'hidden',
       }}>
         {/* Header */}
@@ -204,21 +537,17 @@ export default function TaskBoard({ isOpen, onClose, sessionName }: TaskBoardPro
               ))}
             </select>
           )}
-          <input
-            value={newTaskText}
-            onChange={(e) => setNewTaskText(e.target.value)}
-            onKeyDown={(e) => e.key === 'Enter' && handleNewTask()}
-            placeholder="New task description..."
-            style={{
-              flex: 1, minWidth: 150, background: '#1a1a2a', border: '1px solid #2a2a3e',
-              color: '#eee', borderRadius: 6, padding: '8px 12px', fontSize: 14, fontFamily: 'inherit',
-            }}
-          />
-          <button onClick={handleNewTask} style={{
+          <button onClick={() => setCreatingTask(true)} style={{
             padding: '8px 16px', borderRadius: 6, border: 'none',
             background: '#4a9eff', color: '#fff', fontSize: 14, fontWeight: 600, cursor: 'pointer',
           }}>
-            Spawn
+            + Add Task
+          </button>
+          <button onClick={() => fetchTasks()} style={{
+            padding: '8px 16px', borderRadius: 6, border: '1px solid #3a3a4e',
+            background: '#1e1e30', color: '#aaa', fontSize: 14, fontWeight: 600, cursor: 'pointer',
+          }}>
+            ↻ Refresh
           </button>
         </div>
 
@@ -232,14 +561,14 @@ export default function TaskBoard({ isOpen, onClose, sessionName }: TaskBoardPro
             </div>
           ) : (
             <>
-              <Column title="Pending" color={STATUS_COLORS.pending} tasks={pending} onAssign={handleAssign} />
-              <Column title="In Progress" color={STATUS_COLORS.in_progress} tasks={inProgress} onAssign={handleAssign} />
-              <Column title="Completed" color={STATUS_COLORS.completed} tasks={completed} onAssign={handleAssign} />
+              <Column title="Pending" color={STATUS_COLORS.pending} tasks={pending} onAssign={setAssigningTask} onEdit={setEditingTask} />
+              <Column title="In Progress" color={STATUS_COLORS.in_progress} tasks={inProgress} onAssign={setAssigningTask} onEdit={setEditingTask} />
+              <Column title="Completed" color={STATUS_COLORS.completed} tasks={completed} onAssign={setAssigningTask} onEdit={setEditingTask} />
             </>
           )}
         </div>
 
-        {assigning && (
+        {spawning && (
           <div style={{
             position: 'absolute', bottom: 20, left: 20, right: 20,
             background: '#4a9eff', color: '#fff', padding: '10px 16px',
@@ -249,6 +578,34 @@ export default function TaskBoard({ isOpen, onClose, sessionName }: TaskBoardPro
           </div>
         )}
       </div>
+
+      {/* Assign modal */}
+      {assigningTask && (
+        <AssignModal
+          task={assigningTask}
+          onSpawn={handleSpawn}
+          onCancel={() => setAssigningTask(null)}
+        />
+      )}
+
+      {/* Create task modal */}
+      {creatingTask && (
+        <TaskFormModal
+          title="Create Task"
+          onSave={(subject, description) => handleCreateSave(subject, description)}
+          onCancel={() => setCreatingTask(false)}
+        />
+      )}
+
+      {/* Edit task modal */}
+      {editingTask && (
+        <TaskFormModal
+          title="Edit Task"
+          task={editingTask}
+          onSave={handleEditSave}
+          onCancel={() => setEditingTask(null)}
+        />
+      )}
     </>
   );
 }

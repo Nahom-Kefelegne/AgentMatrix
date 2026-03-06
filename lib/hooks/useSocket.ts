@@ -144,6 +144,11 @@ export function useSocket() {
       emitEvent(SOCKET_EVENTS.MEETING_MESSAGE, data);
     });
 
+    // @ts-expect-error custom event not in typed interface
+    socket.on('session:fired', (data: { sessionId: string }) => {
+      emitEvent('session:fired', data);
+    });
+
     return () => {
       socket.disconnect();
       socketRef.current = null;

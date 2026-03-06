@@ -42,6 +42,11 @@ export default function OfficeCanvas({ sessions, onEvent, onHover, onClick }: Of
         engine.removeCharacter(data.sessionId);
         break;
       }
+      case 'session:fired': {
+        const data = handler.data as { sessionId: string };
+        engine.fireCharacter(data.sessionId);
+        break;
+      }
       case SOCKET_EVENTS.SESSION_UPDATE: {
         const data = handler.data as { sessionId: string; changes: Partial<SessionData> };
         const charBefore = engine.getCharacterManager().getCharacter(data.sessionId);

@@ -1,5 +1,5 @@
 import type { SessionData, AgentData, CharacterData, Point } from '@/lib/types';
-import { CANVAS_W, CANVAS_H, SCALE, TILE_SIZE, MEETING_POSITIONS } from '@/lib/constants';
+import { CANVAS_W, CANVAS_H, SCALE, TILE_SIZE, MEETING_POSITIONS, TileType } from '@/lib/constants';
 import { SpriteSheet } from './SpriteSheet';
 import { TileMap } from './TileMap';
 import { CharacterManager } from './CharacterManager';
@@ -147,12 +147,37 @@ export class GameEngine {
 
   handleMouseUp(canvasX: number, canvasY: number): void {
     if (this.dragging) {
-      // Snap to nearest walkable tile
-      const tileX = Math.round(canvasX / TILE_SIZE);
-      const tileY = Math.round(canvasY / TILE_SIZE);
-      if (this.tileMap.isWalkable(tileX, tileY)) {
-        this.dragging.x = tileX * TILE_SIZE;
-        this.dragging.y = tileY * TILE_SIZE;
+      const dropTileX = Math.floor(canvasX / TILE_SIZE);
+      const dropTileY = Math.floor(canvasY / TILE_SIZE);
+
+      // Search nearby tiles (5x5 area) for the nearest chair
+      const SEARCH_RADIUS = 2;
+      let nearestChair: { x: number; y: number; dist: number } | null = null;
+
+      for (let dy = -SEARCH_RADIUS; dy <= SEARCH_RADIUS; dy++) {
+        for (let dx = -SEARCH_RADIUS; dx <= SEARCH_RADIUS; dx++) {
+          const tx = dropTileX + dx;
+          const ty = dropTileY + dy;
+          const tile = this.tileMap.getTile(tx, ty);
+          if (tile === TileType.CHAIR || tile === TileType.MEETING_CHAIR) {
+            const dist = dx * dx + dy * dy;
+            if (!nearestChair || dist < nearestChair.dist) {
+              nearestChair = { x: tx, y: ty, dist };
+            }
+          }
+        }
+      }
+
+      if (nearestChair) {
+        this.dragging.x = nearestChair.x * TILE_SIZE;
+        this.dragging.y = nearestChair.y * TILE_SIZE;
+        this.dragging.setPath([]);
+      } else {
+        // No chair nearby — walk back to desk
+        const session = this.sessions.get(this.dragging.id);
+        if (session) {
+          this.dragging.moveTo(session.deskPosition.x, session.deskPosition.y, this.tileMap);
+        }
       }
       this.dragging = null;
     }
@@ -184,9 +209,16 @@ export class GameEngine {
 
   removeCharacter(sessionId: string): void {
     const char = this.characterManager.getCharacter(sessionId);
-    if (!char) return; // already removed or never existed
+    if (!char) return;
     this.sessions.delete(sessionId);
     this.characterManager.despawn(sessionId, this.tileMap);
+  }
+
+  fireCharacter(sessionId: string): void {
+    const char = this.characterManager.getCharacter(sessionId);
+    if (!char) return;
+    this.sessions.delete(sessionId);
+    this.characterManager.fire(sessionId, this.tileMap);
   }
 
   updateCharacter(sessionId: string, changes: Partial<SessionData>): void {

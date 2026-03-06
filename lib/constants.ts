@@ -140,7 +140,7 @@ export const CHARACTER_COLORS = [
 
 // ===== Animation =====
 
-export const CHARACTER_SPEED = 48; // pixels per second (3 tiles/sec)
+export const CHARACTER_SPEED = 120; // pixels per second (~7.5 tiles/sec)
 export const ANIM_FRAME_DURATION = 0.15; // seconds per frame
 export const WALK_FRAMES = 4;
 export const CONNECTION_LINE_LIFETIME = 2.5; // seconds
