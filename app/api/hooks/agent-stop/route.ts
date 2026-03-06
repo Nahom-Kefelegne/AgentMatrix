@@ -1,12 +1,11 @@
 import { NextResponse } from 'next/server';
 import { SOCKET_EVENTS } from '@/lib/types';
-import { removeAgent, getSession, markAgentTypeExited } from '@/lib/state/sessionStore';
+import { removeAgent, removeAgentByName, getSession, markAgentTypeExited, getAgentName } from '@/lib/state/sessionStore';
 import { emitToClients } from '@/lib/state/socketEmitter';
 
 export async function POST(request: Request) {
   try {
     const payload = await request.json();
-    console.log('[agent-stop] PAYLOAD:', JSON.stringify(payload));
     const parentSessionId = payload.parent_session_id || payload.session_id;
     const agentType = payload.agent_type || '';
 
@@ -15,11 +14,19 @@ export async function POST(request: Request) {
       markAgentTypeExited(parentSessionId, agentType);
     }
 
-    removeAgent(parentSessionId, payload.agent_id);
+    // Resolve the agent's character name and ID
+    const agentName = getAgentName(payload.agent_id) || agentType;
 
+    // Try removing by ID first, then by name
+    removeAgent(parentSessionId, payload.agent_id);
+    const characterId = removeAgentByName(parentSessionId, agentName);
+
+    // Emit stop with the character ID the client knows about
+    const emitAgentId = characterId || payload.agent_id;
     emitToClients(SOCKET_EVENTS.AGENT_STOP, {
       sessionId: parentSessionId,
-      agentId: payload.agent_id,
+      agentId: emitAgentId,
+      agentName: agentName,
     });
 
     // If all agents are gone, end the meeting

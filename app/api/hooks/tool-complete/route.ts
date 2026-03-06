@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import type { ToolCompletePayload } from '@/lib/types';
 import { SOCKET_EVENTS } from '@/lib/types';
-import { addAction, updateSession, getSession } from '@/lib/state/sessionStore';
+import { addAction, updateSession, getSession, getAgentName } from '@/lib/state/sessionStore';
 import { emitToClients } from '@/lib/state/socketEmitter';
 
 export async function POST(request: Request) {
@@ -22,8 +22,11 @@ export async function POST(request: Request) {
       lastActivity,
     });
 
+    const agentName = payload.agent_id ? getAgentName(payload.agent_id) : null;
+
     emitToClients(SOCKET_EVENTS.TOOL_COMPLETE, {
       sessionId: payload.session_id,
+      agentName: agentName || null,
       toolName: payload.tool_name,
       summary,
     });

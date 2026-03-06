@@ -62,20 +62,35 @@ export default function OfficeCanvas({ sessions, onEvent, onHover, onClick }: Of
         break;
       }
       case SOCKET_EVENTS.TOOL_START: {
-        const data = handler.data as { sessionId: string; toolName: string };
-        // Don't override 'meeting' status with 'working' — they stay in the meeting
-        const charData = engine.getCharacterManager().getCharacter(data.sessionId);
-        const newStatus = charData?.status === 'meeting' ? 'meeting' : 'working';
-        engine.updateCharacter(data.sessionId, { currentTool: data.toolName, status: newStatus });
-        // Show chat bubble if in meeting
-        if (charData?.status === 'meeting') {
-          engine.showChatBubble(data.sessionId, data.toolName);
+        const data = handler.data as { sessionId: string; agentName?: string | null; toolName: string };
+        // Find the character: by agent name if it's an agent, otherwise by session ID
+        const cm = engine.getCharacterManager();
+        const targetChar = data.agentName
+          ? cm.findByName(data.agentName)
+          : cm.getCharacter(data.sessionId);
+
+        if (targetChar) {
+          const newStatus = targetChar.status === 'meeting' ? 'meeting' : 'working';
+          engine.updateCharacter(targetChar.id, { currentTool: data.toolName, status: newStatus });
+          if (targetChar.status === 'meeting') {
+            engine.showChatBubble(targetChar.id, data.toolName);
+          }
+        } else {
+          engine.updateCharacter(data.sessionId, { currentTool: data.toolName, status: 'working' });
         }
         break;
       }
       case SOCKET_EVENTS.TOOL_COMPLETE: {
-        const data = handler.data as { sessionId: string; toolName: string; summary: string };
-        engine.updateCharacter(data.sessionId, { currentTool: undefined });
+        const data = handler.data as { sessionId: string; agentName?: string | null; toolName: string; summary: string };
+        const cm2 = engine.getCharacterManager();
+        const completeChar = data.agentName
+          ? cm2.findByName(data.agentName)
+          : cm2.getCharacter(data.sessionId);
+        if (completeChar) {
+          engine.updateCharacter(completeChar.id, { currentTool: undefined });
+        } else {
+          engine.updateCharacter(data.sessionId, { currentTool: undefined });
+        }
         break;
       }
       case SOCKET_EVENTS.AGENT_START: {
@@ -85,8 +100,14 @@ export default function OfficeCanvas({ sessions, onEvent, onHover, onClick }: Of
         break;
       }
       case SOCKET_EVENTS.AGENT_STOP: {
-        const data = handler.data as { sessionId: string; agentId: string };
-        engine.removeAgent(data.sessionId, data.agentId);
+        const data = handler.data as { sessionId: string; agentId: string; agentName?: string };
+        // Try by ID first, then by name
+        const cm3 = engine.getCharacterManager();
+        const stopChar = cm3.getCharacter(data.agentId)
+          || (data.agentName ? cm3.findByName(data.agentName) : undefined);
+        if (stopChar) {
+          engine.removeAgent(data.sessionId, stopChar.id);
+        }
         break;
       }
       case SOCKET_EVENTS.MEETING_START: {

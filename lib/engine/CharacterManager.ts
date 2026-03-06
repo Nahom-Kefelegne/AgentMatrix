@@ -213,6 +213,14 @@ export class CharacterManager {
     return this.characters.get(id);
   }
 
+  /** Find a character by name (useful for agents where IDs change) */
+  findByName(name: string): Character | undefined {
+    for (const char of this.characters.values()) {
+      if (char.name === name) return char;
+    }
+    return undefined;
+  }
+
   get all(): Map<string, Character> {
     return this.characters;
   }

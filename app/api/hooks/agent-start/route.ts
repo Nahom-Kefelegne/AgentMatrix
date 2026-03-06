@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server';
 import type { AgentData } from '@/lib/types';
 import { SOCKET_EVENTS } from '@/lib/types';
 import { CHARACTER_COLORS, MEETING_POSITIONS } from '@/lib/constants';
-import { addAgent, getSession, getAllSessions, isAgentTypeExited } from '@/lib/state/sessionStore';
+import { addAgent, getSession, getAllSessions, isAgentTypeExited, registerAgentId } from '@/lib/state/sessionStore';
 import { emitToClients } from '@/lib/state/socketEmitter';
 
 export async function POST(request: Request) {
@@ -13,9 +13,7 @@ export async function POST(request: Request) {
     const agentName = payload.agent_name || agentType || `Agent-${payload.agent_id.slice(0, 6)}`;
 
     // Skip if this agent type was recently stopped for this parent (shutdown handshake re-fires)
-    const blocked = agentType && isAgentTypeExited(parentSessionId, agentType);
-    console.log(`[agent-start] type=${agentType} parent=${parentSessionId.slice(0,8)} blocked=${blocked}`);
-    if (blocked) {
+    if (agentType && isAgentTypeExited(parentSessionId, agentType)) {
       return NextResponse.json({ ok: true });
     }
 
@@ -36,6 +34,7 @@ export async function POST(request: Request) {
     };
 
     addAgent(parentSessionId, agent);
+    registerAgentId(payload.agent_id, agentName);
 
     emitToClients(SOCKET_EVENTS.AGENT_START, {
       sessionId: parentSessionId,

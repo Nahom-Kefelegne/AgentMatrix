@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { SOCKET_EVENTS } from '@/lib/types';
-import { getSession, updateSession } from '@/lib/state/sessionStore';
+import { getSession, updateSession, getAgentName } from '@/lib/state/sessionStore';
 import { emitToClients } from '@/lib/state/socketEmitter';
 import { resolveSessionName } from '@/lib/state/sessionName';
 
@@ -31,7 +31,6 @@ function buildToolSummary(toolName: string, toolInput?: Record<string, unknown>)
 export async function POST(request: Request) {
   try {
     const payload = await request.json();
-
     // Try to resolve a better name if current one is just the cwd folder
     const session = getSession(payload.session_id);
     if (session && payload.transcript_path) {
@@ -60,8 +59,12 @@ export async function POST(request: Request) {
       changes: { lastToolSummary, lastActivity },
     });
 
+    // Resolve agent name so the client can find the right character
+    const agentName = payload.agent_id ? getAgentName(payload.agent_id) : null;
+
     emitToClients(SOCKET_EVENTS.TOOL_START, {
       sessionId: payload.session_id,
+      agentName: agentName || null,
       toolName: payload.tool_name,
       toolInput: payload.tool_input ? JSON.stringify(payload.tool_input).slice(0, 200) : undefined,
     });

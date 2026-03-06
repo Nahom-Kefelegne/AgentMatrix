@@ -6,9 +6,19 @@ const g = globalThis as Record<string, unknown>;
 if (!g.__sessions) g.__sessions = new Map<string, SessionData>();
 if (!g.__deskAssignments) g.__deskAssignments = new Map<number, string>();
 if (!g.__exitedAgentTypes) g.__exitedAgentTypes = new Set<string>();
+if (!g.__agentIdToName) g.__agentIdToName = new Map<string, string>();
 const sessions = g.__sessions as Map<string, SessionData>;
 const deskAssignments = g.__deskAssignments as Map<number, string>;
 const exitedAgentTypes = g.__exitedAgentTypes as Set<string>;
+const agentIdToName = g.__agentIdToName as Map<string, string>;
+
+export function registerAgentId(agentId: string, name: string): void {
+  agentIdToName.set(agentId, name);
+}
+
+export function getAgentName(agentId: string): string | undefined {
+  return agentIdToName.get(agentId);
+}
 
 export function markAgentTypeExited(parentSessionId: string, agentType: string): void {
   const key = `${parentSessionId}:${agentType}`;
@@ -72,6 +82,18 @@ export function removeAgent(sessionId: string, agentId: string): void {
   if (session) {
     session.agents = session.agents.filter((a) => a.id !== agentId);
   }
+}
+
+export function removeAgentByName(sessionId: string, name: string): string | undefined {
+  const session = sessions.get(sessionId);
+  if (session) {
+    const agent = session.agents.find((a) => a.name === name);
+    if (agent) {
+      session.agents = session.agents.filter((a) => a.name !== name);
+      return agent.id;
+    }
+  }
+  return undefined;
 }
 
 export function getNextDeskIndex(): number {
