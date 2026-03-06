@@ -22,6 +22,18 @@ cd AgentMatrix
 npm install
 ```
 
+### Automated setup with Claude
+
+Once cloned, you can have Claude set everything up for you:
+
+```bash
+cd AgentMatrix
+claude
+# Then ask: "Read the README and set up Agent Matrix for my environment"
+```
+
+Claude will read the README, configure the hooks in your settings, and get everything running.
+
 ### 2. Configure Claude Code hooks
 
 Add the following `hooks` section to your `~/.claude/settings.json`. If you already have settings in this file, merge the `hooks` key into your existing config — don't replace the whole file.
@@ -267,7 +279,20 @@ AgentMatrix/
 
 - Node.js 18+
 - Claude Code CLI with hooks support
-- macOS (process scanner uses `ps aux` with macOS conventions)
+- macOS or Linux (process scanner uses `ps aux`)
+
+### Platform Support
+
+| Platform | Status | Notes |
+|----------|--------|-------|
+| macOS | Full support | Primary development platform |
+| Linux / Devbox | Full support | Recommended for remote setups |
+| WSL | Full support | Best option for Windows users |
+| Windows native | Partial | Hooks work, but process scanner needs `ps aux` — use WSL instead |
+
+### Recommended: Run on a Devbox
+
+For the best experience, especially in team settings, run Agent Matrix on a devbox or remote machine where all your Claude Code sessions run. This way the process scanner can discover all sessions in one place, and you can access the dashboard from any browser.
 
 ## Credits
 
