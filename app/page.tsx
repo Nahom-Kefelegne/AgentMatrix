@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useCallback, useRef } from 'react';
-import type { CharacterData, SessionData } from '@/lib/types';
+import type { CharacterData } from '@/lib/types';
 import { SocketProvider, useSocketContext } from './components/SocketProvider';
 import HeaderBar from './components/HeaderBar';
 import OfficeCanvas from './components/OfficeCanvas';
@@ -12,15 +12,7 @@ import TaskBoard from './components/TaskBoard';
 import ResumeModal from './components/ResumeModal';
 import DashboardView from './components/DashboardView';
 import SessionDialog from './components/SessionDialog';
-import FloatingSprite from './components/FloatingSprite';
-
-interface SpriteInfo {
-  dataURL: string;
-  startX: number;
-  startY: number;
-  name: string;
-  color: string;
-}
+import SpawnModal from './components/SpawnModal';
 
 function OfficeView() {
   const { connected, sessions, onEvent } = useSocketContext();
@@ -32,9 +24,8 @@ function OfficeView() {
   const [taskTrackerId, setTaskTrackerId] = useState<string | null>(null);
   const [showTaskBoard, setShowTaskBoard] = useState(false);
   const [showResume, setShowResume] = useState(false);
+  const [showSpawn, setShowSpawn] = useState(false);
   const [viewMode, setViewMode] = useState<'office' | 'dashboard'>('office');
-  const [floatingSprite, setFloatingSprite] = useState<SpriteInfo | null>(null);
-  const [spriteAnimated, setSpriteAnimated] = useState(false);
   const canvasRef = useRef<OfficeCanvasHandle>(null);
 
   const handleHover = useCallback((char: CharacterData | null, screenX: number, screenY: number) => {
@@ -43,66 +34,15 @@ function OfficeView() {
   }, []);
 
   const handleClick = useCallback((char: CharacterData | null) => {
-    if (!char) {
-      setSelectedSessionId(null);
-      setFloatingSprite(null);
-      setSpriteAnimated(false);
-      return;
-    }
-
-    // Get sprite screen info from the engine
-    const info = canvasRef.current?.getCharacterScreenInfo(char.id);
-    if (info) {
-      setFloatingSprite({
-        dataURL: info.spriteDataURL,
-        startX: info.screenX,
-        startY: info.screenY,
-        name: info.name,
-        color: info.color,
-      });
-      setSpriteAnimated(false);
-      // Trigger animation on next frame
-      requestAnimationFrame(() => {
-        requestAnimationFrame(() => setSpriteAnimated(true));
-      });
-    } else {
-      setFloatingSprite(null);
-    }
-
-    setSelectedSessionId(char.id);
+    setSelectedSessionId(char?.id ?? null);
   }, []);
 
-  // Clear floating sprite when dialog closes
   const handleCloseDialog = useCallback(() => {
-    setSpriteAnimated(false);
-    // Wait for reverse animation then clear
-    setTimeout(() => {
-      setSelectedSessionId(null);
-      setFloatingSprite(null);
-    }, 300);
+    setSelectedSessionId(null);
   }, []);
 
   const handleSetTaskTracker = useCallback((sessionId: string) => {
     setTaskTrackerId((prev) => (prev === sessionId ? null : sessionId));
-  }, []);
-
-  // Navigate to a session by index, updating sprite + dialog
-  const navigateToSession = useCallback((sessionId: string) => {
-    const info = canvasRef.current?.getCharacterScreenInfo(sessionId);
-    if (info) {
-      setFloatingSprite({
-        dataURL: info.spriteDataURL,
-        startX: info.screenX,
-        startY: info.screenY,
-        name: info.name,
-        color: info.color,
-      });
-      setSpriteAnimated(false);
-      requestAnimationFrame(() => {
-        requestAnimationFrame(() => setSpriteAnimated(true));
-      });
-    }
-    setSelectedSessionId(sessionId);
   }, []);
 
   const sessionList = Array.from(sessions.values());
@@ -113,27 +53,21 @@ function OfficeView() {
   const handlePrevSession = useCallback(() => {
     if (sessionList.length === 0) return;
     const idx = (currentSessionIndex - 1 + sessionList.length) % sessionList.length;
-    navigateToSession(sessionList[idx].id);
-  }, [sessionList, currentSessionIndex, navigateToSession]);
+    setSelectedSessionId(sessionList[idx].id);
+  }, [sessionList, currentSessionIndex]);
 
   const handleNextSession = useCallback(() => {
     if (sessionList.length === 0) return;
     const idx = (currentSessionIndex + 1) % sessionList.length;
-    navigateToSession(sessionList[idx].id);
-  }, [sessionList, currentSessionIndex, navigateToSession]);
+    setSelectedSessionId(sessionList[idx].id);
+  }, [sessionList, currentSessionIndex]);
 
   const handleSessionsCycle = useCallback(() => {
     if (sessionList.length === 0) return;
-    navigateToSession(sessionList[0].id);
-  }, [sessionList, navigateToSession]);
+    setSelectedSessionId(sessionList[0].id);
+  }, [sessionList]);
 
   const taskTrackerSession = taskTrackerId ? sessions.get(taskTrackerId) : null;
-
-  // Dialog left edge in px (dialog is 900px centered)
-  const dialogLeftEdge = typeof window !== 'undefined'
-    ? (window.innerWidth - 900) / 2
-    : 200;
-  const spriteCenterY = typeof window !== 'undefined' ? window.innerHeight / 2 : 300;
 
   return (
     <>
@@ -143,6 +77,7 @@ function OfficeView() {
         onSetupClick={() => setShowSetup(true)}
         onTasksClick={() => setShowTaskBoard(true)}
         onResumeClick={() => setShowResume(true)}
+        onNewSessionClick={() => setShowSpawn(true)}
         onSessionsClick={handleSessionsCycle}
         viewMode={viewMode}
         onToggleView={() => setViewMode(m => m === 'office' ? 'dashboard' : 'office')}
@@ -169,43 +104,13 @@ function OfficeView() {
         />
       )}
 
-      {/* Darkened backdrop for office view when dialog is open */}
-      {viewMode === 'office' && selectedSessionId && (
-        <div
-          onClick={handleCloseDialog}
-          style={{
-            position: 'fixed',
-            inset: 0,
-            background: 'rgba(0, 0, 0, 0.55)',
-            zIndex: 90,
-            transition: 'opacity 0.3s ease',
-            opacity: spriteAnimated ? 1 : 0,
-          }}
-        />
-      )}
-
-      {/* Floating sprite animation (office view only) */}
-      {viewMode === 'office' && floatingSprite && selectedSessionId && (
-        <FloatingSprite
-          dataURL={floatingSprite.dataURL}
-          name={floatingSprite.name}
-          color={floatingSprite.color}
-          startX={floatingSprite.startX}
-          startY={floatingSprite.startY}
-          boundaryRight={dialogLeftEdge}
-          targetY={spriteCenterY}
-          animated={spriteAnimated}
-        />
-      )}
-
       {/* Session dialog — used in both views */}
       <SessionDialog
         sessionId={selectedSessionId}
         sessions={sessions}
-        onClose={viewMode === 'office' ? handleCloseDialog : () => setSelectedSessionId(null)}
+        onClose={handleCloseDialog}
         isTaskTracker={selectedSessionId ? selectedSessionId === taskTrackerId : false}
         onSetTaskTracker={handleSetTaskTracker}
-        noBackdrop={viewMode === 'office'}
         onPrev={handlePrevSession}
         onNext={handleNextSession}
         sessionIndex={currentSessionIndex}
@@ -227,6 +132,14 @@ function OfficeView() {
       <ResumeModal
         isOpen={showResume}
         onClose={() => setShowResume(false)}
+        onResumeInApp={(sessionId) => {
+          // Open the session dialog with Console tab — the user can then open Console
+          setSelectedSessionId(sessionId);
+        }}
+      />
+      <SpawnModal
+        isOpen={showSpawn}
+        onClose={() => setShowSpawn(false)}
       />
     </>
   );

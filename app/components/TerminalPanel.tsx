@@ -7,16 +7,19 @@ interface TerminalPanelProps {
   sessionId: string;
   sessionName: string;
   cwd?: string;
+  visible?: boolean;
 }
 
-export default function TerminalPanel({ sessionId, sessionName, cwd }: TerminalPanelProps) {
+export default function TerminalPanel({ sessionId, sessionName, cwd, visible }: TerminalPanelProps) {
   const { socketRef } = useSocketContext();
   const containerRef = useRef<HTMLDivElement>(null);
   const termRef = useRef<any>(null);
   const fitRef = useRef<any>(null);
   const [status, setStatus] = useState<'idle' | 'connecting' | 'connected' | 'exited'>('idle');
+  const [started, setStarted] = useState(false);
 
   useEffect(() => {
+    if (!started) return;
     const container = containerRef.current;
     const socket = socketRef.current;
     if (!container || !socket) return;
@@ -43,33 +46,34 @@ export default function TerminalPanel({ sessionId, sessionName, cwd }: TerminalP
 
       terminal = new Terminal({
         theme: {
-          background: '#0a0a14',
-          foreground: '#d0d0e0',
+          background: '#0c0c18',
+          foreground: '#e8e8f0',
           cursor: '#4a9eff',
-          cursorAccent: '#0a0a14',
-          selectionBackground: '#4a9eff40',
-          black: '#1a1a2e',
+          cursorAccent: '#0c0c18',
+          selectionBackground: '#4a9eff50',
+          black: '#222238',
           red: '#ff6b6b',
           green: '#51cf66',
           yellow: '#ffd43b',
           blue: '#4a9eff',
           magenta: '#cc5de8',
           cyan: '#20c997',
-          white: '#d0d0e0',
-          brightBlack: '#555',
+          white: '#e8e8f0',
+          brightBlack: '#888',
           brightRed: '#ff8787',
           brightGreen: '#69db7c',
           brightYellow: '#ffe066',
           brightBlue: '#74c0fc',
           brightMagenta: '#da77f2',
           brightCyan: '#38d9a9',
-          brightWhite: '#f0f0f0',
+          brightWhite: '#ffffff',
         },
-        fontSize: 15,
-        fontFamily: "'Courier New', 'Menlo', 'Monaco', monospace",
-        lineHeight: 1.3,
+        fontSize: 16,
+        fontFamily: "'Menlo', 'Monaco', 'Courier New', monospace",
+        lineHeight: 1.4,
         cursorBlink: true,
         scrollback: 5000,
+        scrollOnUserInput: true,
       });
 
       fitAddon = new FitAddon();
@@ -110,16 +114,22 @@ export default function TerminalPanel({ sessionId, sessionName, cwd }: TerminalP
       setStatus('connecting');
       socket.emit('terminal:spawn', { sessionId });
 
-      // Handle resize
-      const resizeObserver = new ResizeObserver(() => {
-        if (fitAddon && terminal) {
+      // Handle resize — debounce to avoid flicker
+      let resizeTimer: ReturnType<typeof setTimeout> | null = null;
+      const doFit = () => {
+        if (!fitAddon || !terminal) return;
+        try {
           fitAddon.fit();
           socket.emit('terminal:resize', {
             sessionId,
             cols: terminal.cols,
             rows: terminal.rows,
           });
-        }
+        } catch {}
+      };
+      const resizeObserver = new ResizeObserver(() => {
+        if (resizeTimer) clearTimeout(resizeTimer);
+        resizeTimer = setTimeout(doFit, 50);
       });
       resizeObserver.observe(container);
 
@@ -139,7 +149,49 @@ export default function TerminalPanel({ sessionId, sessionName, cwd }: TerminalP
         termRef.current = null;
       }
     };
-  }, [sessionId, socketRef]);
+  }, [sessionId, socketRef, started]);
+
+  // Re-fit when tab becomes visible
+  useEffect(() => {
+    if (visible && fitRef.current && termRef.current) {
+      // Small delay to let CSS layout settle
+      const timer = setTimeout(() => {
+        try {
+          fitRef.current.fit();
+          termRef.current?.focus();
+        } catch {}
+      }, 100);
+      return () => clearTimeout(timer);
+    }
+  }, [visible]);
+
+  if (!started) {
+    return (
+      <div style={{
+        display: 'flex', flexDirection: 'column', height: '100%',
+        alignItems: 'center', justifyContent: 'center', gap: 16,
+      }}>
+        <div style={{ fontSize: 16, color: '#aaa' }}>
+          Open a terminal for <span style={{ color: '#8ab4e0', fontWeight: 600 }}>{sessionName}</span>
+        </div>
+        {cwd && (
+          <div style={{ fontSize: 14, color: '#666', fontFamily: "'Courier New', monospace" }}>{cwd}</div>
+        )}
+        <div style={{ display: 'flex', gap: 10 }}>
+          <button onClick={() => setStarted(true)} style={{
+            padding: '10px 24px', borderRadius: 8, border: 'none',
+            background: '#4a9eff', color: '#fff', fontSize: 15, fontWeight: 600,
+            cursor: 'pointer', fontFamily: 'inherit',
+          }}>
+            Fork &amp; Connect
+          </button>
+        </div>
+        <div style={{ fontSize: 13, color: '#555', maxWidth: 350, textAlign: 'center', lineHeight: 1.5 }}>
+          This will fork the session and open an interactive terminal. The original session is not affected.
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div style={{
@@ -180,6 +232,14 @@ export default function TerminalPanel({ sessionId, sessionName, cwd }: TerminalP
         )}
       </div>
 
+      {/* Hide xterm scrollbar */}
+      <style>{`
+        .xterm-viewport::-webkit-scrollbar { width: 6px; }
+        .xterm-viewport::-webkit-scrollbar-track { background: transparent; }
+        .xterm-viewport::-webkit-scrollbar-thumb { background: #333; border-radius: 3px; }
+        .xterm-viewport::-webkit-scrollbar-thumb:hover { background: #555; }
+      `}</style>
+
       {/* xterm container */}
       <div
         ref={containerRef}
@@ -189,8 +249,8 @@ export default function TerminalPanel({ sessionId, sessionName, cwd }: TerminalP
           minHeight: 0,
           borderRadius: 8,
           overflow: 'hidden',
-          background: '#0a0a14',
-          border: '1px solid #222238',
+          background: '#0c0c18',
+          border: '1px solid #1e1e30',
         }}
       />
     </div>

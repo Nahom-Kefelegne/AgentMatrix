@@ -3,13 +3,81 @@ import { PtyManager } from './pty/PtyManager';
 import { getSession } from '../lib/state/sessionStore';
 
 /**
- * Bridge for raw terminal I/O between xterm.js in the browser and PTY sessions.
- * Unlike promptBridge (which strips ANSI and parses output), this passes raw data.
+ * Bridge for terminal I/O between xterm.js and PTY sessions.
+ * Handles: spawning new sessions, resuming existing ones, raw I/O, resize.
  */
 export function setupTerminalBridge(io: SocketIOServer, ptyManager: PtyManager): void {
   io.on('connection', (socket) => {
-    // Spawn a PTY for a session and start streaming raw data
-    socket.on('terminal:spawn', ({ sessionId }) => {
+
+    // Launch a brand new Claude session
+    socket.on('terminal:new', (opts: {
+      cwd: string;
+      name?: string;
+      permissionMode?: string;
+      model?: string;
+      effort?: string;
+      allowedTools?: string;
+      systemPrompt?: string;
+    }) => {
+      try {
+        // Generate a temporary ID for the PTY (scanner will pick up the real session)
+        const tempId = `new-${Date.now()}`;
+        console.log(`[terminal:new] cwd=${opts.cwd} name=${opts.name || '(none)'}`);
+
+        const ptySession = ptyManager.spawnNew(tempId, {
+          cwd: opts.cwd,
+          name: opts.name,
+          permissionMode: opts.permissionMode,
+          model: opts.model,
+          effort: opts.effort,
+          allowedTools: opts.allowedTools,
+          systemPrompt: opts.systemPrompt,
+        });
+
+        // Stream output
+        ptyManager.onOutput(tempId, (data) => {
+          socket.emit('terminal:data', { sessionId: tempId, data });
+        });
+
+        socket.emit('terminal:spawned', { sessionId: tempId });
+      } catch (err) {
+        console.error('[terminal:new]', err);
+        socket.emit('terminal:exit', { sessionId: 'new', exitCode: -1 });
+      }
+    });
+
+    // Resume an existing session (no fork — continues the same session)
+    socket.on('terminal:resume', ({ sessionId }: { sessionId: string }) => {
+      try {
+        const session = getSession(sessionId);
+        const name = session?.name || sessionId;
+
+        // If PTY already exists, re-attach
+        if (ptyManager.hasPty(sessionId)) {
+          console.log(`[terminal:resume] Re-attaching to ${name}`);
+          ptyManager.onOutput(sessionId, (data) => {
+            socket.emit('terminal:data', { sessionId, data });
+          });
+          return;
+        }
+
+        console.log(`[terminal:resume] Resuming ${name} (no fork)`);
+        ptyManager.spawnResume(sessionId, {
+          cwd: session?.cwd,
+          resumeId: sessionId,
+        });
+
+        ptyManager.onOutput(sessionId, (data) => {
+          socket.emit('terminal:data', { sessionId, data });
+        });
+      } catch (err) {
+        console.error('[terminal:resume]', err);
+        socket.emit('terminal:exit', { sessionId, exitCode: -1 });
+      }
+    });
+
+    // Legacy: spawn with fork (kept for backward compat, used by Console tab on active sessions)
+    socket.on('terminal:spawn', ({ sessionId }: { sessionId: string }) => {
       try {
         const session = getSession(sessionId);
         if (!session) {
@@ -17,57 +85,39 @@ export function setupTerminalBridge(io: SocketIOServer, ptyManager: PtyManager):
           return;
         }
 
-        // If PTY already exists, just re-subscribe this socket
         if (ptyManager.hasPty(sessionId)) {
-          console.log(`[terminal] Re-attaching to existing PTY for ${session.name}`);
           ptyManager.onOutput(sessionId, (data) => {
             socket.emit('terminal:data', { sessionId, data });
           });
-          const existing = ptyManager.getSession(sessionId);
-          if (existing?.needsConsent) {
-            socket.emit('terminal:consent', { sessionId });
-          }
           return;
         }
 
-        console.log(`[terminal] Spawning PTY for ${session.name} in ${session.cwd}`);
-        ptyManager.spawn(sessionId, {
+        console.log(`[terminal:spawn] Forking ${session.name}`);
+        ptyManager.spawnResume(sessionId, {
           cwd: session.cwd,
-          resumeName: session.name,
+          resumeId: sessionId,
+          fork: true,
         });
 
-        // Stream raw PTY output to this socket
         ptyManager.onOutput(sessionId, (data) => {
           socket.emit('terminal:data', { sessionId, data });
         });
-
-        // Notify if consent is needed
-        const ptySession = ptyManager.getSession(sessionId);
-        if (ptySession) {
-          ptySession.onConsent = () => {
-            io.emit('terminal:consent', { sessionId });
-          };
-          // If already needs consent, emit immediately
-          if (ptySession.needsConsent) {
-            io.emit('terminal:consent', { sessionId });
-          }
-        }
       } catch (err) {
         console.error('[terminal:spawn]', err);
         socket.emit('terminal:exit', { sessionId, exitCode: -1 });
       }
     });
 
-    // Forward keystrokes from xterm.js to PTY
-    socket.on('terminal:input', ({ sessionId, data }) => {
+    // Forward keystrokes
+    socket.on('terminal:input', ({ sessionId, data }: { sessionId: string; data: string }) => {
       const ptySession = ptyManager.getSession(sessionId);
       if (ptySession && ptySession.status !== 'closed') {
         ptySession.pty.write(data);
       }
     });
 
-    // Handle terminal resize
-    socket.on('terminal:resize', ({ sessionId, cols, rows }) => {
+    // Handle resize
+    socket.on('terminal:resize', ({ sessionId, cols, rows }: { sessionId: string; cols: number; rows: number }) => {
       const ptySession = ptyManager.getSession(sessionId);
       if (ptySession && ptySession.status !== 'closed') {
         ptySession.pty.resize(cols, rows);

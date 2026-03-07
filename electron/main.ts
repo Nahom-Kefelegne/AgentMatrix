@@ -114,7 +114,7 @@ function startServer(): Promise<void> {
         }
       });
 
-      setupPromptBridge(io!, ptyManager);
+      setupPromptBridge(io!);
       setupTerminalBridge(io!, ptyManager);
 
       httpServer.listen(port, () => {

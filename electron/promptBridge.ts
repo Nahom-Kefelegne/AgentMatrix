@@ -1,14 +1,40 @@
+import { spawn } from 'child_process';
+import { execSync } from 'child_process';
+import { existsSync } from 'fs';
+import { homedir } from 'os';
+import { join } from 'path';
 import type { Server as SocketIOServer } from 'socket.io';
-import { PtyManager } from './pty/PtyManager';
-import { OutputParser } from './pty/OutputParser';
 import { getSession } from '../lib/state/sessionStore';
 
-// Track last sent prompt per session for echo filtering
-const lastPrompts = new Map<string, string>();
-// Track if echo has been consumed for this prompt
-const echoConsumed = new Map<string, boolean>();
+function findClaudeBinary(): string {
+  const cmd = process.platform === 'win32' ? 'where claude' : 'which claude';
+  return execSync(cmd, { encoding: 'utf-8' }).trim().split('\n')[0];
+}
 
-export function setupPromptBridge(io: SocketIOServer, ptyManager: PtyManager): void {
+function findSessionCwd(sessionId: string): string | undefined {
+  try {
+    const projectsDir = join(homedir(), '.claude', 'projects');
+    const output = execSync(
+      `find "${projectsDir}" -name "${sessionId}.jsonl" -type f 2>/dev/null`,
+      { encoding: 'utf-8', timeout: 5000 },
+    ).trim();
+    if (!output) return undefined;
+    const parts = output.split('/');
+    const idx = parts.indexOf('projects');
+    if (idx < 0 || idx + 1 >= parts.length) return undefined;
+    const derived = parts[idx + 1].replace(/^-/, '/').replace(/-/g, '/');
+    return existsSync(derived) ? derived : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Prompt bridge using --print mode.
+ * Each prompt spawns `claude --print --resume <id> --fork-session` as a child process.
+ * This gives clean text output without terminal noise.
+ */
+export function setupPromptBridge(io: SocketIOServer): void {
   io.on('connection', (socket) => {
     socket.on('prompt:send', ({ sessionId, prompt }) => {
       try {
@@ -18,48 +44,55 @@ export function setupPromptBridge(io: SocketIOServer, ptyManager: PtyManager): v
           return;
         }
 
-        console.log(`[prompt:send] session=${session.name} prompt="${prompt.slice(0, 60)}"`);
+        const claudePath = findClaudeBinary();
+        const cwd = findSessionCwd(sessionId) ?? session.cwd ?? homedir();
 
-        // Store prompt for echo filtering
-        lastPrompts.set(sessionId, prompt);
-        echoConsumed.set(sessionId, false);
+        console.log(`[prompt:send] session=${session.name} prompt="${prompt.slice(0, 60)}" cwd=${cwd}`);
 
-        // Spawn PTY if needed
-        if (!ptyManager.hasPty(sessionId)) {
-          console.log(`[prompt] Spawning PTY for ${session.name} in ${session.cwd}`);
-          ptyManager.spawn(sessionId, {
-            cwd: session.cwd,
-            resumeName: session.name,
-          });
+        const env = { ...process.env };
+        delete env.CLAUDECODE;
 
-          // Subscribe to output
-          ptyManager.onOutput(sessionId, (data) => {
-            console.log(`[pty:raw] ${JSON.stringify(data).slice(0, 150)}`);
-            const clean = OutputParser.stripAnsi(data);
-            if (!clean.trim()) return;
+        const args = [
+          '--print',
+          '--resume', sessionId,
+          '--fork-session',
+          '--dangerously-skip-permissions',
+          '--output-format', 'text',
+          prompt,
+        ];
 
-            // Filter out echo of the prompt we just sent (only once)
-            const lastPrompt = lastPrompts.get(sessionId);
-            if (lastPrompt && !echoConsumed.get(sessionId) && OutputParser.isEcho(clean, lastPrompt)) {
-              console.log(`[pty:echo-filtered] ${clean.slice(0, 80)}`);
-              echoConsumed.set(sessionId, true);
-              return;
-            }
+        const child = spawn(claudePath, args, {
+          cwd,
+          env,
+          stdio: ['ignore', 'pipe', 'pipe'],
+        });
 
-            console.log(`[pty:emit] ${clean.slice(0, 120)}`);
-            io.emit('prompt:output', { sessionId, text: clean });
-          });
+        let output = '';
 
-          // Notify when Claude is ready for input
-          ptyManager.onReady(sessionId, () => {
-            console.log(`[pty:ready] ${session.name}`);
-            io.emit('prompt:ready', { sessionId });
-          });
-        }
+        child.stdout.on('data', (chunk: Buffer) => {
+          const text = chunk.toString('utf-8');
+          output += text;
+          io.emit('prompt:output', { sessionId, text });
+        });
 
-        ptyManager.sendPrompt(sessionId, prompt);
+        child.stderr.on('data', (chunk: Buffer) => {
+          console.log(`[prompt:stderr] ${chunk.toString('utf-8').slice(0, 200)}`);
+        });
+
+        child.on('close', (code) => {
+          console.log(`[prompt:done] session=${session.name} code=${code} len=${output.length}`);
+          if (code !== 0 && !output.trim()) {
+            io.emit('prompt:error', { sessionId, error: `Process exited with code ${code}` });
+          }
+          io.emit('prompt:ready', { sessionId });
+        });
+
+        child.on('error', (err) => {
+          console.error('[prompt:spawn-error]', err);
+          io.emit('prompt:error', { sessionId, error: err.message });
+        });
       } catch (err) {
-        console.error(`[prompt:error]`, err);
+        console.error('[prompt:error]', err);
         socket.emit('prompt:error', { sessionId, error: String(err) });
       }
     });

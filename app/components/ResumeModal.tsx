@@ -13,6 +13,7 @@ interface SessionInfo {
 interface ResumeModalProps {
   isOpen: boolean;
   onClose: () => void;
+  onResumeInApp?: (sessionId: string) => void;
 }
 
 function FolderPicker({ value, onChange }: { value: string; onChange: (path: string) => void }) {
@@ -108,7 +109,7 @@ function formatTimeAgo(ms: number): string {
   return `${days}d ago`;
 }
 
-export default function ResumeModal({ isOpen, onClose }: ResumeModalProps) {
+export default function ResumeModal({ isOpen, onClose, onResumeInApp }: ResumeModalProps) {
   const [cwd, setCwd] = useState('/Users/nkefelegne/Desktop/DEV');
   const [sessions, setSessions] = useState<SessionInfo[]>([]);
   const [loading, setLoading] = useState(false);
@@ -227,16 +228,32 @@ export default function ResumeModal({ isOpen, onClose }: ResumeModalProps) {
                 }}>
                   {getCommand(s)}
                 </div>
-                <button
-                  onClick={() => handleCopy(s)}
-                  style={{
-                    width: '100%', padding: '10px 14px', borderRadius: 6, border: 'none',
-                    background: copied === s.id ? '#2a5a2a' : '#4a9eff',
-                    color: '#fff', fontSize: 15, fontWeight: 600, cursor: 'pointer',
-                  }}
-                >
-                  {copied === s.id ? '✓ Copied! Paste in terminal to resume' : 'Copy Resume Command'}
-                </button>
+                <div style={{ display: 'flex', gap: 8 }}>
+                  {onResumeInApp && (
+                    <button
+                      onClick={() => { onResumeInApp(s.id); onClose(); }}
+                      style={{
+                        flex: 1, padding: '10px 14px', borderRadius: 6, border: 'none',
+                        background: '#4a9eff', color: '#fff', fontSize: 15, fontWeight: 600,
+                        cursor: 'pointer', fontFamily: 'inherit',
+                      }}
+                    >
+                      Resume in App
+                    </button>
+                  )}
+                  <button
+                    onClick={() => handleCopy(s)}
+                    style={{
+                      flex: 1, padding: '10px 14px', borderRadius: 6,
+                      border: '1px solid #3a3a4e',
+                      background: copied === s.id ? '#2a5a2a' : '#1e1e30',
+                      color: copied === s.id ? '#51cf66' : '#ccc',
+                      fontSize: 15, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit',
+                    }}
+                  >
+                    {copied === s.id ? '✓ Copied!' : 'Copy Command'}
+                  </button>
+                </div>
               </div>
             ))
           )}

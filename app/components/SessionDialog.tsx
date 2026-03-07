@@ -2,7 +2,6 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import type { SessionData, Action } from '@/lib/types';
-import PromptPanel from './PromptPanel';
 import TerminalPanel from './TerminalPanel';
 
 const STATUS_COLORS: Record<string, string> = {
@@ -360,9 +359,11 @@ export default function SessionDialog({
   sessionId, sessions, onClose, isTaskTracker, onSetTaskTracker, noBackdrop,
   onPrev, onNext, sessionIndex, sessionTotal,
 }: SessionDialogProps) {
-  const [activeTab, setActiveTab] = useState<'info' | 'settings' | 'terminal' | 'console'>('info');
+  const [activeTab, setActiveTab] = useState<'info' | 'settings' | 'console'>('info');
   const [killing, setKilling] = useState(false);
   const [restartCommand, setRestartCommand] = useState<string | null>(null);
+  const [fullscreen, setFullscreen] = useState(false);
+  const isConsole = activeTab === 'console';
   const [, setTick] = useState(0);
 
   // Live timestamps
@@ -426,8 +427,13 @@ export default function SessionDialog({
 
       {/* Dialog */}
       <div style={{
-        position: 'fixed', top: '50%', left: '50%', transform: 'translate(-50%, -50%)',
-        width: 900, height: '85vh',
+        position: 'fixed',
+        top: fullscreen ? 0 : '50%',
+        left: fullscreen ? 0 : '50%',
+        transform: fullscreen ? 'none' : 'translate(-50%, -50%)',
+        width: fullscreen ? '100vw' : isConsole ? 1100 : 900,
+        height: fullscreen ? '100vh' : '85vh',
+        transition: 'width 0.2s ease, height 0.2s ease',
         background: '#111118', border: '1px solid #222235', borderRadius: 16,
         zIndex: 101, display: 'flex', flexDirection: 'column', overflow: 'hidden',
         boxShadow: '0 20px 60px rgba(0,0,0,0.5)',
@@ -476,6 +482,14 @@ export default function SessionDialog({
                   }}>&#8250;</button>
                 </>
               )}
+            <button onClick={() => setFullscreen(f => !f)} title={fullscreen ? 'Exit fullscreen' : 'Fullscreen'} style={{
+              width: 30, height: 30, borderRadius: 6, border: '1px solid #2a2a3e',
+              background: '#1a1a2a', color: '#666', fontSize: 14,
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              cursor: 'pointer', fontFamily: 'inherit',
+            }}>
+              {fullscreen ? '⊡' : '⊞'}
+            </button>
             <button onClick={onClose} style={{
               width: 32, height: 32, borderRadius: 8, border: '1px solid #2a2a3e',
               background: '#1a1a2a', color: '#666', fontSize: 16,
@@ -504,8 +518,8 @@ export default function SessionDialog({
           display: 'flex', borderBottom: '1px solid #1e1e30', flexShrink: 0,
           padding: '0 24px',
         }}>
-          {(['info', 'settings', 'terminal', 'console'] as const).map(tab => {
-            const labels = { info: 'Info', settings: 'Settings', terminal: 'Prompt', console: 'Console' };
+          {(['info', 'settings', 'console'] as const).map(tab => {
+            const labels = { info: 'Info', settings: 'Settings', console: 'Console' };
             return (
             <button key={tab} onClick={() => setActiveTab(tab)} style={{
               padding: '12px 20px', fontSize: 16, fontWeight: 600, cursor: 'pointer',
@@ -539,18 +553,11 @@ export default function SessionDialog({
             <SettingsTab session={session} />
           </div>
           <div style={{
-            position: 'absolute', inset: 0, padding: '20px 24px',
-            display: activeTab === 'terminal' ? 'flex' : 'none',
-            flexDirection: 'column',
-          }}>
-            <PromptPanel sessionId={session.id} sessionName={session.name} cwd={session.cwd} />
-          </div>
-          <div style={{
             position: 'absolute', inset: 0, padding: '12px 16px',
             display: activeTab === 'console' ? 'flex' : 'none',
             flexDirection: 'column',
           }}>
-            <TerminalPanel sessionId={session.id} sessionName={session.name} cwd={session.cwd} />
+            <TerminalPanel sessionId={session.id} sessionName={session.name} cwd={session.cwd} visible={activeTab === 'console'} />
           </div>
         </div>
 

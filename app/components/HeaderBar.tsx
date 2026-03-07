@@ -7,6 +7,7 @@ interface HeaderBarProps {
   onTasksClick: () => void;
   onResumeClick: () => void;
   onSessionsClick: () => void;
+  onNewSessionClick: () => void;
   viewMode: 'office' | 'dashboard';
   onToggleView: () => void;
 }
@@ -49,7 +50,7 @@ function HeaderButton({ onClick, label, title, badge }: {
 
 export default function HeaderBar({
   connected, sessionCount, onSetupClick, onTasksClick, onResumeClick, onSessionsClick,
-  viewMode, onToggleView,
+  onNewSessionClick, viewMode, onToggleView,
 }: HeaderBarProps) {
   return (
     <header
@@ -114,8 +115,9 @@ export default function HeaderBar({
         ))}
       </div>
       <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+        <HeaderButton onClick={onNewSessionClick} label="+ New" title="Start a new Claude session" />
         <HeaderButton onClick={onSessionsClick} label="Sessions" title="Browse active sessions" badge={sessionCount} />
-        <HeaderButton onClick={onResumeClick} label="Resume Session" title="Resume a past session" />
+        <HeaderButton onClick={onResumeClick} label="Resume" title="Resume a past session" />
         <HeaderButton onClick={onTasksClick} label="Tasks" title="View task board" />
         <HeaderButton onClick={onSetupClick} label="Setup" title="Hook configuration" />
       </div>
