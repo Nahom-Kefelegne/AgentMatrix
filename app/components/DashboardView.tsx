@@ -1,324 +1,402 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import type { SessionData, Action } from '@/lib/types';
+import type { SessionData } from '@/lib/types';
+import { useSocketContext } from './SocketProvider';
 
-const STATUS_COLORS: Record<string, string> = {
-  idle: '#888888',
-  working: '#51cf66',
-  meeting: '#4a9eff',
+const STATUS: Record<string, { color: string; label: string; icon: string }> = {
+  idle: { color: '#888', label: 'Idle', icon: '💤' },
+  working: { color: '#51cf66', label: 'Working', icon: '⚡' },
+  meeting: { color: '#4a9eff', label: 'In Meeting', icon: '👥' },
 };
 
-const STATUS_GRADIENTS: Record<string, string> = {
-  idle: 'linear-gradient(135deg, #888888, #666666)',
-  working: 'linear-gradient(135deg, #51cf66, #2b9e3e)',
-  meeting: 'linear-gradient(135deg, #4a9eff, #2a6fd4)',
-};
-
-const STATUS_LABELS: Record<string, string> = {
-  working: 'Working',
-  idle: 'Idle',
-  meeting: 'In Meeting',
-};
-
-function formatTimeAgo(timestamp: number): string {
-  const diff = Math.floor((Date.now() - timestamp) / 1000);
-  if (diff < 5) return 'just now';
-  if (diff < 60) return `${diff}s ago`;
-  if (diff < 3600) return `${Math.floor(diff / 60)}m ago`;
-  if (diff < 86400) return `${Math.floor(diff / 3600)}h ago`;
-  return `${Math.floor(diff / 86400)}d ago`;
+function ago(ts: number): string {
+  const d = Math.floor((Date.now() - ts) / 1000);
+  if (d < 5) return 'just now';
+  if (d < 60) return `${d}s ago`;
+  if (d < 3600) return `${Math.floor(d / 60)}m ago`;
+  return d < 86400 ? `${Math.floor(d / 3600)}h ago` : `${Math.floor(d / 86400)}d ago`;
 }
 
-function truncatePath(path: string, maxLen = 45): string {
-  if (path.length <= maxLen) return path;
-  const parts = path.split('/');
-  if (parts.length <= 3) return '...' + path.slice(-maxLen);
-  return '.../' + parts.slice(-3).join('/');
-}
-
-interface DashboardViewProps {
+interface Props {
   sessions: Map<string, SessionData>;
-  onSelectSession: (sessionId: string) => void;
+  onSelectSession: (id: string) => void;
 }
 
-export default function DashboardView({ sessions, onSelectSession }: DashboardViewProps) {
-  const sessionList = Array.from(sessions.values());
-  const [filter, setFilter] = useState<'all' | 'working' | 'idle' | 'meeting'>('all');
-  const [, setTick] = useState(0);
+export default function DashboardView({ sessions, onSelectSession }: Props) {
+  const { socketRef } = useSocketContext();
+  const all = Array.from(sessions.values());
+  const [filter, setFilter] = useState('all');
+  const [, tick] = useState(0);
+  const [sessionStates, setSessionStates] = useState<Record<string, { state: string; actionLabel?: string }>>({});
 
+  useEffect(() => { const i = setInterval(() => tick(t => t + 1), 5000); return () => clearInterval(i); }, []);
+
+  // Listen for session state changes from PTY
   useEffect(() => {
-    const interval = setInterval(() => setTick(t => t + 1), 5000);
-    return () => clearInterval(interval);
-  }, []);
+    const socket = socketRef.current;
+    if (!socket) return;
+    const handler = (data: { sessionId: string; state: string; actionLabel?: string }) => {
+      setSessionStates(prev => ({ ...prev, [data.sessionId]: { state: data.state, actionLabel: data.actionLabel } }));
+    };
+    socket.on('session:state' as any, handler);
+    return () => { socket.off('session:state' as any, handler); };
+  }, [socketRef]);
 
-  const filtered = filter === 'all' ? sessionList : sessionList.filter(s => s.status === filter);
-  const workingCount = sessionList.filter(s => s.status === 'working').length;
-  const idleCount = sessionList.filter(s => s.status === 'idle').length;
-  const meetingCount = sessionList.filter(s => s.status === 'meeting').length;
+  const list = filter === 'all' ? all : all.filter(s => s.status === filter);
+  const counts: Record<string, number> = {
+    all: all.length,
+    working: all.filter(s => s.status === 'working').length,
+    idle: all.filter(s => s.status === 'idle').length,
+    meeting: all.filter(s => s.status === 'meeting').length,
+  };
 
   return (
     <div style={{
       marginTop: 'var(--header-height)',
       height: 'calc(100vh - var(--header-height))',
       overflowY: 'auto',
-      display: 'flex',
-      flexDirection: 'column',
-      alignItems: 'center',
+      background: '#08080f',
     }}>
-      {/* Stats bar */}
-      <motion.div
-        initial={{ opacity: 0, y: -10 }}
-        animate={{ opacity: 1, y: 0 }}
-        style={{
-          display: 'flex', alignItems: 'center', gap: 10,
-          padding: '18px 20px 0', width: '100%', maxWidth: 1200,
-        }}
-      >
-        <StatPill label="All" count={sessionList.length} active={filter === 'all'} color="#aaa" onClick={() => setFilter('all')} />
-        {workingCount > 0 && <StatPill label="Working" count={workingCount} active={filter === 'working'} color="#51cf66" onClick={() => setFilter('working')} />}
-        {idleCount > 0 && <StatPill label="Idle" count={idleCount} active={filter === 'idle'} color="#888" onClick={() => setFilter('idle')} />}
-        {meetingCount > 0 && <StatPill label="Meeting" count={meetingCount} active={filter === 'meeting'} color="#4a9eff" onClick={() => setFilter('meeting')} />}
-      </motion.div>
-
-      {/* Cards */}
-      {filtered.length === 0 ? (
+      <div style={{
+        maxWidth: 1100,
+        margin: '0 auto',
+        padding: '32px 40px 48px',
+      }}>
+        {/* Filter bar */}
         <motion.div
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          style={{
-            flex: 1, display: 'flex', flexDirection: 'column',
-            alignItems: 'center', justifyContent: 'center', gap: 12,
-          }}
+          initial={{ opacity: 0, y: -8 }}
+          animate={{ opacity: 1, y: 0 }}
+          style={{ display: 'flex', gap: 10, marginBottom: 28 }}
         >
-          <div style={{ fontSize: 48, opacity: 0.15 }}>&#9673;</div>
-          <div style={{ fontSize: 18, color: '#888' }}>
-            {sessionList.length === 0 ? 'No sessions yet' : 'No sessions match filter'}
-          </div>
-          <div style={{ fontSize: 14, color: '#555' }}>
-            Click <strong style={{ color: '#4a9eff' }}>+ New</strong> to start a session
-          </div>
+          {[
+            { key: 'all', label: 'All Sessions' },
+            { key: 'working', label: 'Working' },
+            { key: 'idle', label: 'Idle' },
+            { key: 'meeting', label: 'Meeting' },
+          ].map(f => {
+            if (f.key !== 'all' && !counts[f.key]) return null;
+            const active = filter === f.key;
+            const meta = STATUS[f.key];
+            const c = meta?.color || '#4a9eff';
+            return (
+              <motion.button
+                key={f.key}
+                whileHover={{ scale: 1.03 }}
+                whileTap={{ scale: 0.97 }}
+                onClick={() => setFilter(f.key)}
+                style={{
+                  padding: '8px 20px',
+                  borderRadius: 24,
+                  fontSize: 14,
+                  fontWeight: 600,
+                  fontFamily: 'inherit',
+                  cursor: 'pointer',
+                  border: active ? `1.5px solid ${c}40` : '1.5px solid #1a1a28',
+                  background: active ? `${c}10` : '#0e0e18',
+                  color: active ? c : '#666',
+                  transition: 'all 0.15s',
+                }}
+              >
+                {f.label}
+                <span style={{
+                  marginLeft: 8,
+                  fontSize: 12,
+                  fontWeight: 700,
+                  padding: '2px 8px',
+                  borderRadius: 12,
+                  background: active ? `${c}18` : '#151520',
+                  color: active ? c : '#444',
+                }}>
+                  {counts[f.key]}
+                </span>
+              </motion.button>
+            );
+          })}
         </motion.div>
-      ) : (
-        <div style={{
-          display: 'grid',
-          gridTemplateColumns: 'repeat(auto-fill, minmax(370px, 1fr))',
-          gap: 16, padding: '16px 20px 30px',
-          width: '100%', maxWidth: 1200,
-        }}>
-          <AnimatePresence mode="popLayout">
-            {filtered.map((session, i) => (
-              <SessionCard
-                key={session.id}
-                session={session}
-                index={i}
-                onClick={() => onSelectSession(session.id)}
-              />
-            ))}
-          </AnimatePresence>
-        </div>
-      )}
+
+        {/* Cards grid */}
+        {list.length === 0 ? (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            style={{
+              display: 'flex', flexDirection: 'column',
+              alignItems: 'center', justifyContent: 'center',
+              padding: '120px 0', gap: 16,
+            }}
+          >
+            <div style={{ fontSize: 56, opacity: 0.08 }}>&#11044;</div>
+            <div style={{ fontSize: 18, color: '#666' }}>
+              {all.length === 0 ? 'No sessions yet' : 'No sessions match filter'}
+            </div>
+            <div style={{ fontSize: 14, color: '#444' }}>
+              Click <strong style={{ color: '#4a9eff' }}>+ New</strong> to launch a session
+            </div>
+          </motion.div>
+        ) : (
+          <div style={{
+            display: 'grid',
+            gridTemplateColumns: 'repeat(auto-fill, minmax(480px, 1fr))',
+            gap: 20,
+          }}>
+            <AnimatePresence mode="popLayout">
+              {list.map((s, i) => (
+                <SessionCard key={s.id} s={s} i={i} ptyState={sessionStates[s.id]} onClick={() => onSelectSession(s.id)} />
+              ))}
+            </AnimatePresence>
+          </div>
+        )}
+      </div>
 
       <style>{`
-        @keyframes shimmer {
-          0% { background-position: -200% 0; }
-          100% { background-position: 200% 0; }
-        }
-        @keyframes pulseGlow {
-          0%, 100% { box-shadow: 0 0 4px currentColor; }
-          50% { box-shadow: 0 0 12px currentColor; }
-        }
+        @keyframes cardShimmer { 0%{background-position:-200% 0} 100%{background-position:200% 0} }
+        @keyframes statusPulse { 0%,100%{opacity:.4;transform:scale(.8)} 50%{opacity:1;transform:scale(1.25)} }
       `}</style>
     </div>
   );
 }
 
-function StatPill({ label, count, active, color, onClick }: {
-  label: string; count: number; active: boolean; color: string; onClick: () => void;
+function SessionCard({ s, i, ptyState, onClick }: {
+  s: SessionData; i: number;
+  ptyState?: { state: string; actionLabel?: string };
+  onClick: () => void;
 }) {
-  return (
-    <motion.button
-      whileHover={{ scale: 1.04 }}
-      whileTap={{ scale: 0.97 }}
-      onClick={onClick}
-      style={{
-        padding: '7px 16px', borderRadius: 20,
-        border: active ? `1px solid ${color}` : '1px solid #2a2a3a',
-        background: active ? `${color}15` : 'transparent',
-        color: active ? color : '#999',
-        fontSize: 15, fontWeight: 600,
-        cursor: 'pointer', fontFamily: 'inherit',
-        display: 'flex', alignItems: 'center', gap: 6,
-      }}
-    >
-      {label}
-      <span style={{
-        fontSize: 13, fontWeight: 700,
-        background: active ? `${color}25` : '#222238',
-        padding: '1px 7px', borderRadius: 10,
-        color: active ? color : '#666',
-      }}>
-        {count}
-      </span>
-    </motion.button>
-  );
-}
-
-function SessionCard({ session, index, onClick }: {
-  session: SessionData; index: number; onClick: () => void;
-}) {
-  const statusColor = STATUS_COLORS[session.status] || STATUS_COLORS.idle;
-  const statusGradient = STATUS_GRADIENTS[session.status] || STATUS_GRADIENTS.idle;
-  const statusLabel = STATUS_LABELS[session.status] || session.status;
-  const isWorking = session.status === 'working';
-  const recentActions = session.recentActions.slice(0, 3);
+  const meta = STATUS[s.status] || STATUS.idle;
+  const working = s.status === 'working';
+  const actions = s.recentActions.slice(0, 4);
 
   return (
     <motion.div
       layout
-      initial={{ opacity: 0, y: 20, scale: 0.97 }}
+      initial={{ opacity: 0, y: 24, scale: 0.97 }}
       animate={{ opacity: 1, y: 0, scale: 1 }}
-      exit={{ opacity: 0, scale: 0.95, y: -10 }}
-      transition={{ duration: 0.3, delay: index * 0.05 }}
-      whileHover={{ y: -4, transition: { duration: 0.15 } }}
+      exit={{ opacity: 0, scale: 0.95 }}
+      transition={{ duration: 0.35, delay: i * 0.05, type: 'spring', stiffness: 240, damping: 22 }}
+      whileHover={{ y: -5, transition: { duration: 0.12 } }}
       onClick={onClick}
       style={{
-        background: 'rgba(22, 22, 37, 0.8)',
-        backdropFilter: 'blur(12px)',
-        border: '1px solid rgba(255,255,255,0.06)',
-        borderRadius: 14,
         cursor: 'pointer',
-        position: 'relative',
+        borderRadius: 16,
         overflow: 'hidden',
+        background: '#111120',
+        border: '1px solid #1e1e30',
+        position: 'relative',
+        transition: 'border-color 0.15s',
       }}
+      onMouseEnter={e => (e.currentTarget.style.borderColor = '#2a2a45')}
+      onMouseLeave={e => (e.currentTarget.style.borderColor = '#1e1e30')}
     >
-      {/* Top gradient accent */}
+      {/* Accent top bar */}
       <div style={{
         height: 3,
-        background: statusGradient,
-        opacity: isWorking ? 1 : 0.5,
+        background: `linear-gradient(90deg, ${meta.color}, ${meta.color}66)`,
+        opacity: working ? 1 : 0.3,
       }} />
-
-      {/* Shimmer for working */}
-      {isWorking && (
+      {working && (
         <div style={{
           position: 'absolute', top: 0, left: 0, right: 0, height: 3,
-          background: 'linear-gradient(90deg, transparent 0%, rgba(255,255,255,0.3) 50%, transparent 100%)',
+          background: 'linear-gradient(90deg, transparent, rgba(255,255,255,.4), transparent)',
           backgroundSize: '200% 100%',
-          animation: 'shimmer 2s ease-in-out infinite',
+          animation: 'cardShimmer 2s ease-in-out infinite',
         }} />
       )}
 
-      <div style={{ padding: '16px 20px 18px' }}>
-        {/* Header */}
-        <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: 8 }}>
+      {/* Card body */}
+      <div style={{ padding: '20px 24px 22px' }}>
+        {/* Row 1: Name + Status */}
+        <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 16, marginBottom: 12 }}>
           <div style={{ flex: 1, minWidth: 0 }}>
             <div style={{
-              fontSize: 19, fontWeight: 700, color: '#f0f0f0',
+              fontSize: 20, fontWeight: 700, color: '#eee',
               whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
             }}>
-              {session.name}
+              {s.name}
             </div>
-            {session.cwd && (
+            {s.cwd && (
               <div style={{
-                fontSize: 13, color: '#666', marginTop: 3,
-                whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+                fontSize: 13, color: '#555', marginTop: 4,
                 fontFamily: "'Courier New', monospace",
+                whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
               }}>
-                {truncatePath(session.cwd)}
+                {s.cwd}
               </div>
             )}
           </div>
           <div style={{
-            display: 'flex', alignItems: 'center', gap: 6,
-            padding: '4px 12px', borderRadius: 8,
-            background: `${statusColor}12`,
-            border: `1px solid ${statusColor}25`,
-            flexShrink: 0, marginLeft: 12,
+            display: 'flex', alignItems: 'center', gap: 7,
+            padding: '5px 14px', borderRadius: 10,
+            background: `${meta.color}0c`,
+            border: `1px solid ${meta.color}20`,
+            flexShrink: 0,
           }}>
             <div style={{
-              width: 7, height: 7, borderRadius: '50%',
-              backgroundColor: statusColor, color: statusColor,
-              animation: isWorking ? 'pulseGlow 1.5s ease-in-out infinite' : 'none',
+              width: 8, height: 8, borderRadius: '50%',
+              backgroundColor: meta.color,
+              animation: working ? 'statusPulse 1.5s ease-in-out infinite' : 'none',
             }} />
-            <span style={{ fontSize: 13, fontWeight: 600, color: statusColor }}>
-              {statusLabel}
+            <span style={{ fontSize: 13, fontWeight: 600, color: meta.color }}>
+              {meta.label}
             </span>
           </div>
         </div>
 
-        {/* Tool summary */}
-        {isWorking && session.lastToolSummary && (
+        {/* Action needed banner */}
+        {ptyState?.state === 'needs_action' && (
           <motion.div
             initial={{ opacity: 0, height: 0 }}
             animate={{ opacity: 1, height: 'auto' }}
             style={{
-              fontSize: 14, color: '#a8d4ff',
-              padding: '8px 12px', marginTop: 4, marginBottom: 4,
-              background: 'rgba(20, 40, 70, 0.5)',
-              borderRadius: 8, border: '1px solid rgba(74, 158, 255, 0.15)',
-              fontFamily: "'Courier New', monospace",
-              whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+              padding: '10px 14px', borderRadius: 10, marginBottom: 14,
+              background: 'rgba(240, 192, 64, 0.06)',
+              border: '1px solid rgba(240, 192, 64, 0.15)',
+              display: 'flex', alignItems: 'center', gap: 10,
             }}
           >
-            {session.lastToolSummary}
+            <span style={{ fontSize: 16 }}>&#9888;</span>
+            <div>
+              <div style={{ fontSize: 13, fontWeight: 700, color: '#f0c040' }}>
+                Action Required
+              </div>
+              <div style={{ fontSize: 12, color: '#c0a030' }}>
+                {ptyState.actionLabel || 'Session needs your attention'}
+              </div>
+            </div>
           </motion.div>
         )}
 
-        {/* Agents */}
-        {session.agents && session.agents.length > 0 && (
+        {/* PTY ready indicator */}
+        {ptyState?.state === 'ready' && (
           <div style={{
+            padding: '6px 12px', borderRadius: 8, marginBottom: 14,
+            background: 'rgba(81, 207, 102, 0.06)',
+            border: '1px solid rgba(81, 207, 102, 0.12)',
             display: 'flex', alignItems: 'center', gap: 8,
-            marginTop: 8, padding: '6px 12px',
-            background: 'rgba(26, 26, 53, 0.6)',
-            borderRadius: 8, border: '1px solid rgba(255,255,255,0.04)',
+            fontSize: 13, color: '#51cf66', fontWeight: 600,
           }}>
-            <span style={{ fontSize: 14, color: '#9a9aff', fontWeight: 600 }}>
-              {session.agents.length} agent{session.agents.length !== 1 ? 's' : ''}
-            </span>
-            <span style={{ fontSize: 13, color: '#777', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-              {session.agents.map(a => a.name).join(', ')}
-            </span>
+            <span style={{ width: 6, height: 6, borderRadius: '50%', background: '#51cf66' }} />
+            Ready for input
           </div>
         )}
 
-        {/* Recent actions */}
-        {recentActions.length > 0 && (
+        {/* Row 2: Stats row */}
+        <div style={{
+          display: 'flex', gap: 12, marginBottom: 14,
+        }}>
+          <StatChip label="Session ID" value={s.id.slice(0, 8) + '...'} />
+          {s.lastActivity && (
+            <StatChip label="Last Active" value={ago(s.lastActivity)} />
+          )}
+          {s.agents && s.agents.length > 0 && (
+            <StatChip label="Agents" value={`${s.agents.length} active`} accent />
+          )}
+        </div>
+
+        {/* Row 3: Current work */}
+        {working && s.lastToolSummary && (
+          <motion.div
+            initial={{ opacity: 0, height: 0 }}
+            animate={{ opacity: 1, height: 'auto' }}
+            style={{
+              padding: '10px 14px',
+              borderRadius: 10,
+              background: 'rgba(18, 35, 65, 0.5)',
+              border: '1px solid rgba(74, 158, 255, 0.12)',
+              marginBottom: 14,
+            }}
+          >
+            <div style={{ fontSize: 11, fontWeight: 700, color: '#5a8abf', textTransform: 'uppercase', letterSpacing: 1, marginBottom: 4 }}>
+              Currently Working On
+            </div>
+            <div style={{
+              fontSize: 14, color: '#a0ccff',
+              fontFamily: "'Courier New', monospace",
+              whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+            }}>
+              {s.lastToolSummary}
+            </div>
+            {s.currentTool && (
+              <div style={{ fontSize: 12, color: '#4a7aa8', marginTop: 3 }}>
+                Tool: {s.currentTool}
+              </div>
+            )}
+          </motion.div>
+        )}
+
+        {/* Row 4: Agents */}
+        {s.agents && s.agents.length > 0 && (
           <div style={{
-            borderTop: '1px solid rgba(255,255,255,0.04)',
-            paddingTop: 10, marginTop: 12,
+            padding: '10px 14px', borderRadius: 10,
+            background: 'rgba(26, 26, 50, 0.4)',
+            border: '1px solid #1e1e38',
+            marginBottom: 14,
           }}>
-            {recentActions.map((action, i) => (
-              <div key={i} style={{
-                fontSize: 13, color: '#aaa', padding: '3px 0',
-                display: 'flex', alignItems: 'center', gap: 6,
-                opacity: 1 - (i * 0.2),
-              }}>
-                <span style={{ color: '#555', fontSize: 10 }}>&#9656;</span>
-                <span style={{
-                  overflow: 'hidden', textOverflow: 'ellipsis',
-                  whiteSpace: 'nowrap', flex: 1, color: '#bbb',
+            <div style={{ fontSize: 11, fontWeight: 700, color: '#7a7aff', textTransform: 'uppercase', letterSpacing: 1, marginBottom: 6 }}>
+              Agent Team {s.teamId ? `— ${s.teamId}` : ''}
+            </div>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+              {s.agents.map(a => (
+                <span key={a.id} style={{
+                  fontSize: 12, fontWeight: 600, color: '#bbb',
+                  padding: '3px 10px', borderRadius: 6,
+                  background: '#1a1a30', border: '1px solid #252540',
                 }}>
-                  {action.summary || action.toolName}
+                  {a.name}
                 </span>
-                <span style={{ color: '#555', fontSize: 12, flexShrink: 0 }}>
-                  {formatTimeAgo(action.timestamp)}
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Row 5: Recent actions */}
+        {actions.length > 0 && (
+          <div style={{
+            borderTop: '1px solid #1a1a28',
+            paddingTop: 12,
+          }}>
+            <div style={{ fontSize: 11, fontWeight: 700, color: '#555', textTransform: 'uppercase', letterSpacing: 1, marginBottom: 6 }}>
+              Recent Activity
+            </div>
+            {actions.map((a, j) => (
+              <div key={j} style={{
+                display: 'flex', alignItems: 'center', gap: 8,
+                padding: '4px 0', fontSize: 13,
+                opacity: 1 - j * 0.18,
+              }}>
+                <span style={{ color: '#333', fontSize: 10 }}>&#9656;</span>
+                <span style={{
+                  flex: 1, color: '#aaa',
+                  overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                }}>
+                  {a.summary || a.toolName}
+                </span>
+                <span style={{ color: '#444', fontSize: 12, flexShrink: 0 }}>
+                  {ago(a.timestamp)}
                 </span>
               </div>
             ))}
           </div>
         )}
-
-        {/* Last activity */}
-        {session.lastActivity && !isWorking && (
-          <div style={{
-            fontSize: 12, color: '#555', textAlign: 'right', marginTop: 10,
-          }}>
-            Last active {formatTimeAgo(session.lastActivity)}
-          </div>
-        )}
       </div>
     </motion.div>
+  );
+}
+
+function StatChip({ label, value, accent }: { label: string; value: string; accent?: boolean }) {
+  return (
+    <div style={{
+      padding: '6px 12px', borderRadius: 8,
+      background: accent ? 'rgba(74, 74, 255, 0.06)' : '#0c0c16',
+      border: `1px solid ${accent ? '#2a2a5a' : '#161625'}`,
+      flex: 1,
+    }}>
+      <div style={{ fontSize: 10, fontWeight: 700, color: '#555', textTransform: 'uppercase', letterSpacing: 0.8 }}>
+        {label}
+      </div>
+      <div style={{ fontSize: 13, fontWeight: 600, color: accent ? '#9a9aff' : '#bbb', marginTop: 2 }}>
+        {value}
+      </div>
+    </div>
   );
 }

@@ -134,6 +134,7 @@ export interface ServerToClientEvents {
   'terminal:data': (data: { sessionId: string; data: string }) => void;
   'terminal:exit': (data: { sessionId: string; exitCode: number }) => void;
   'terminal:consent': (data: { sessionId: string }) => void;
+  'session:state': (data: { sessionId: string; state: string; actionType?: string; actionLabel?: string }) => void;
 }
 
 export interface ClientToServerEvents {

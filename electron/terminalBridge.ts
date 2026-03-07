@@ -82,6 +82,14 @@ export function setupTerminalBridge(io: SocketIOServer, ptyManager: PtyManager):
           socket.emit('terminal:data', { sessionId: sessionUuid, data });
         });
 
+        // Emit state changes to UI
+        const ptySession = ptyManager.getSession(sessionUuid);
+        if (ptySession) {
+          ptySession.onStateChange = (state) => {
+            io.emit('session:state', { sessionId: sessionUuid, ...state });
+          };
+        }
+
         // Track for auto-resume
         const active = getActiveSessions().filter(s => s.id !== sessionUuid);
         active.push({ id: sessionUuid, name, cwd: opts.cwd });
@@ -127,6 +135,13 @@ export function setupTerminalBridge(io: SocketIOServer, ptyManager: PtyManager):
         ptyManager.onOutput(sessionId, (data) => {
           socket.emit('terminal:data', { sessionId, data });
         });
+
+        const rptySession = ptyManager.getSession(sessionId);
+        if (rptySession) {
+          rptySession.onStateChange = (state) => {
+            io.emit('session:state', { sessionId, ...state });
+          };
+        }
       } catch (err) {
         console.error('[terminal:resume]', err);
       }

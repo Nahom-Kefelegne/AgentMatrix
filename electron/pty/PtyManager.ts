@@ -2,17 +2,19 @@ import { execSync } from 'child_process';
 import { join } from 'path';
 import { homedir } from 'os';
 import type { IPty } from 'node-pty';
-import { OutputParser } from './OutputParser';
+import { OutputParser, type ParsedState } from './OutputParser';
 
 export interface PtySession {
   id: string;
   pty: IPty;
   status: 'starting' | 'ready' | 'busy' | 'closed';
   needsConsent: boolean;
+  sessionState: ParsedState;
   outputBuffer: string[];
   onData: ((data: string) => void) | null;
   onReady: (() => void) | null;
   onConsent: (() => void) | null;
+  onStateChange: ((state: ParsedState) => void) | null;
   pendingPrompt: string | null;
 }
 
@@ -48,39 +50,52 @@ export class PtyManager {
   private createPtySession(id: string, ptyProcess: IPty): PtySession {
     const session: PtySession = {
       id, pty: ptyProcess, status: 'starting',
-      needsConsent: false, outputBuffer: [],
-      onData: null, onReady: null, onConsent: null, pendingPrompt: null,
+      needsConsent: false, sessionState: { state: 'busy' },
+      outputBuffer: [],
+      onData: null, onReady: null, onConsent: null, onStateChange: null,
+      pendingPrompt: null,
     };
 
     ptyProcess.onData((data: string) => {
       session.outputBuffer.push(data);
+      if (session.onData) session.onData(data);
 
-      // Detect consent prompt
-      const stripped = OutputParser.stripAnsi(data);
-      if (session.status === 'starting' && !session.needsConsent &&
-          /Yes, I trust this folder|trust this project/i.test(stripped)) {
+      // Trim buffer
+      if (session.outputBuffer.length > 100) {
+        session.outputBuffer = session.outputBuffer.slice(-20);
+      }
+
+      // Detect state from recent output
+      const recent = session.outputBuffer.slice(-10).join('');
+      const newState = OutputParser.detectState(recent);
+      const prevStateKey = session.sessionState.state;
+
+      // Update session state
+      session.sessionState = newState;
+
+      // Handle consent detection
+      if (newState.actionType === 'trust' && !session.needsConsent) {
         session.needsConsent = true;
         if (session.onConsent) session.onConsent();
       }
 
-      if (session.onData) session.onData(data);
-
-      // Detect prompt-ready
-      if (session.status === 'starting' || session.status === 'busy') {
-        const recent = session.outputBuffer.slice(-10).join('');
-        if (OutputParser.isPromptReady(recent)) {
-          session.status = 'ready';
-          if (session.outputBuffer.length > 100) {
-            session.outputBuffer = session.outputBuffer.slice(-20);
-          }
-          if (session.pendingPrompt) {
-            const prompt = session.pendingPrompt;
-            session.pendingPrompt = null;
-            session.status = 'busy';
-            session.pty.write(prompt + '\r');
-          }
-          if (session.onReady) session.onReady();
+      // Handle prompt-ready transition
+      if (newState.state === 'ready' && (session.status === 'starting' || session.status === 'busy')) {
+        session.status = 'ready';
+        if (session.pendingPrompt) {
+          const prompt = session.pendingPrompt;
+          session.pendingPrompt = null;
+          session.status = 'busy';
+          session.sessionState = { state: 'busy' };
+          session.pty.write(prompt + '\r');
+          return;
         }
+        if (session.onReady) session.onReady();
+      }
+
+      // Emit state change if different
+      if (newState.state !== prevStateKey || newState.actionType) {
+        if (session.onStateChange) session.onStateChange(newState);
       }
     });
 
