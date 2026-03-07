@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import type { SessionData, Action } from '@/lib/types';
 import TerminalPanel from './TerminalPanel';
+import { useSocketContext } from './SocketProvider';
 
 const STATUS_COLORS: Record<string, string> = {
   idle: '#888888',
@@ -353,21 +354,17 @@ interface SessionDialogProps {
   onNext?: () => void;
   sessionIndex?: number;
   sessionTotal?: number;
-  /** Set of session IDs managed by the app (spawned/resumed through UI) */
-  managedSessions?: Set<string>;
 }
 
 export default function SessionDialog({
   sessionId, sessions, onClose, isTaskTracker, onSetTaskTracker, noBackdrop,
-  onPrev, onNext, sessionIndex, sessionTotal, managedSessions,
+  onPrev, onNext, sessionIndex, sessionTotal,
 }: SessionDialogProps) {
-  const hasConsole = managedSessions?.has(sessionId ?? '') ?? false;
+  const { socketRef } = useSocketContext();
   const [activeTab, setActiveTab] = useState<'info' | 'settings' | 'console'>('info');
   const [killing, setKilling] = useState(false);
   const [restartCommand, setRestartCommand] = useState<string | null>(null);
   const [fullscreen, setFullscreen] = useState(false);
-  const [renaming, setRenaming] = useState(false);
-  const [renameValue, setRenameValue] = useState('');
   const isConsole = activeTab === 'console';
   const [, setTick] = useState(0);
 
@@ -381,9 +378,6 @@ export default function SessionDialog({
     setActiveTab('info');
   }, [sessionId]);
   // If console tab was active but session is no longer managed, switch to info
-  useEffect(() => {
-    if (activeTab === 'console' && !hasConsole) setActiveTab('info');
-  }, [hasConsole, activeTab]);
 
   if (!sessionId) return null;
   const session = sessions.get(sessionId);
@@ -461,44 +455,9 @@ export default function SessionDialog({
                 backgroundColor: statusColor,
                 boxShadow: isWorking ? `0 0 8px ${statusColor}60` : 'none',
               }} />
-              {renaming ? (
-                <input
-                  autoFocus
-                  value={renameValue}
-                  onChange={e => setRenameValue(e.target.value)}
-                  onKeyDown={async e => {
-                    if (e.key === 'Enter' && renameValue.trim()) {
-                      await fetch('/api/sessions/rename', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ sessionId: session.id, name: renameValue.trim() }),
-                      });
-                      setRenaming(false);
-                    }
-                    if (e.key === 'Escape') setRenaming(false);
-                  }}
-                  onBlur={() => setRenaming(false)}
-                  style={{
-                    fontSize: 22, fontWeight: 700, color: '#eee',
-                    background: '#1a1a2a', border: '1px solid #4a9eff',
-                    borderRadius: 6, padding: '2px 8px', fontFamily: 'inherit',
-                    outline: 'none', width: 250,
-                  }}
-                />
-              ) : (
-                <span
-                  onClick={() => { setRenameValue(session.name); setRenaming(true); }}
-                  title="Click to rename"
-                  style={{
-                    fontSize: 22, fontWeight: 700, color: '#eee', cursor: 'pointer',
-                    borderBottom: '1px dashed transparent',
-                  }}
-                  onMouseEnter={e => e.currentTarget.style.borderBottomColor = '#555'}
-                  onMouseLeave={e => e.currentTarget.style.borderBottomColor = 'transparent'}
-                >
-                  {session.name}
-                </span>
-              )}
+              <span style={{ fontSize: 22, fontWeight: 700, color: '#eee' }}>
+                {session.name}
+              </span>
               <span style={{
                 fontSize: 12, fontWeight: 600, color: statusColor,
                 textTransform: 'uppercase', letterSpacing: 0.5,
@@ -508,37 +467,37 @@ export default function SessionDialog({
                 {session.status}
               </span>
             </div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
               {onPrev && onNext && sessionTotal !== undefined && sessionIndex !== undefined && (
                 <>
                   <button onClick={(e) => { e.stopPropagation(); onPrev(); }} style={{
-                    width: 30, height: 30, borderRadius: 6, border: '1px solid #2a2a3e',
-                    background: '#1a1a2a', color: '#999', fontSize: 16,
+                    width: 36, height: 36, borderRadius: 8, border: '1px solid #3a3a4e',
+                    background: '#1e1e30', color: '#ccc', fontSize: 20,
                     display: 'flex', alignItems: 'center', justifyContent: 'center',
                     cursor: 'pointer', fontFamily: 'inherit',
                   }}>&#8249;</button>
-                  <span style={{ fontSize: 13, color: '#777', minWidth: 50, textAlign: 'center' }}>
+                  <span style={{ fontSize: 14, color: '#aaa', minWidth: 55, textAlign: 'center', fontWeight: 600 }}>
                     {sessionIndex + 1} of {sessionTotal}
                   </span>
                   <button onClick={(e) => { e.stopPropagation(); onNext(); }} style={{
-                    width: 30, height: 30, borderRadius: 6, border: '1px solid #2a2a3e',
-                    background: '#1a1a2a', color: '#999', fontSize: 16,
+                    width: 36, height: 36, borderRadius: 8, border: '1px solid #3a3a4e',
+                    background: '#1e1e30', color: '#ccc', fontSize: 20,
                     display: 'flex', alignItems: 'center', justifyContent: 'center',
                     cursor: 'pointer', fontFamily: 'inherit',
                   }}>&#8250;</button>
                 </>
               )}
             <button onClick={() => setFullscreen(f => !f)} title={fullscreen ? 'Exit fullscreen' : 'Fullscreen'} style={{
-              width: 30, height: 30, borderRadius: 6, border: '1px solid #2a2a3e',
-              background: '#1a1a2a', color: '#666', fontSize: 14,
+              width: 36, height: 36, borderRadius: 8, border: '1px solid #3a3a4e',
+              background: '#1e1e30', color: '#ccc', fontSize: 18,
               display: 'flex', alignItems: 'center', justifyContent: 'center',
               cursor: 'pointer', fontFamily: 'inherit',
             }}>
               {fullscreen ? '⊡' : '⊞'}
             </button>
             <button onClick={onClose} style={{
-              width: 32, height: 32, borderRadius: 8, border: '1px solid #2a2a3e',
-              background: '#1a1a2a', color: '#666', fontSize: 16,
+              width: 36, height: 36, borderRadius: 8, border: '1px solid #3a3a4e',
+              background: '#1e1e30', color: '#ccc', fontSize: 18,
               display: 'flex', alignItems: 'center', justifyContent: 'center',
               cursor: 'pointer', fontFamily: 'inherit',
               transition: 'all 0.15s',
@@ -564,7 +523,7 @@ export default function SessionDialog({
           display: 'flex', borderBottom: '1px solid #1e1e30', flexShrink: 0,
           padding: '0 24px',
         }}>
-          {(['info', 'settings', ...(hasConsole ? ['console'] as const : [])] as const).map(tab => {
+          {(['info', 'settings', 'console'] as const).map(tab => {
             const labels: Record<string, string> = { info: 'Info', settings: 'Settings', console: 'Console' };
             return (
             <button key={tab} onClick={() => setActiveTab(tab)} style={{
@@ -596,7 +555,7 @@ export default function SessionDialog({
             overflowY: 'auto',
             display: activeTab === 'settings' ? 'block' : 'none',
           }}>
-            <SettingsTab session={session} />
+            <SettingsTab session={session} socketRef={socketRef} />
           </div>
           <div style={{
             position: 'absolute', inset: 0, padding: '12px 16px',
@@ -636,15 +595,30 @@ export default function SessionDialog({
           }}>
             Restart
           </button>
-          <button onClick={handleKill} disabled={killing} style={{
-            padding: '8px 16px', borderRadius: 6,
-            border: '1px solid #ff6b6b40', background: '#1a0e0e',
-            color: '#ff6b6b', fontSize: 14, fontWeight: 600,
-            cursor: killing ? 'not-allowed' : 'pointer',
-            opacity: killing ? 0.5 : 1,
-            fontFamily: 'inherit', transition: 'all 0.15s',
-          }}>
-            {killing ? 'Firing...' : 'Fire'}
+          <button
+            disabled={killing}
+            onClick={() => {
+              if (!confirm(`End "${session.name}"?`)) return;
+              setKilling(true);
+              const socket = socketRef.current;
+              if (socket) {
+                socket.emit('terminal:end' as any, { sessionId: session.id });
+              }
+              setTimeout(() => {
+                setKilling(false);
+                onClose();
+              }, 2500);
+            }}
+            style={{
+              padding: '8px 16px', borderRadius: 6,
+              border: '1px solid #ff6b6b40', background: '#1a0e0e',
+              color: '#ff6b6b', fontSize: 14, fontWeight: 600,
+              cursor: killing ? 'not-allowed' : 'pointer',
+              opacity: killing ? 0.5 : 1,
+              fontFamily: 'inherit', transition: 'all 0.15s',
+            }}
+          >
+            {killing ? 'Ending...' : 'End Session'}
           </button>
         </div>
       </div>
@@ -716,6 +690,7 @@ function ActionRow({ action, isLast }: { action: Action; isLast: boolean }) {
 function InfoTab({ session, cliCmd }: { session: SessionData; cliCmd: string }) {
   return (
     <>
+
       {/* Working on — prominent when active */}
       {session.status === 'working' && session.lastToolSummary && (
         <div style={{
@@ -849,9 +824,69 @@ function InfoTab({ session, cliCmd }: { session: SessionData; cliCmd: string }) 
 
 // ===== Settings Tab =====
 
-function SettingsTab({ session }: { session: SessionData }) {
+function SettingsTab({ session, socketRef }: {
+  session: SessionData;
+  socketRef: React.RefObject<any>;
+}) {
+  const [renameValue, setRenameValue] = useState(session.name);
+  const [renameStatus, setRenameStatus] = useState<'' | 'saving' | 'saved'>('');
+
+  const handleRename = async () => {
+    const newName = renameValue.trim();
+    if (!newName || newName === session.name) return;
+    setRenameStatus('saving');
+    // Send /rename to PTY if managed
+    const socket = socketRef.current;
+    if (socket) {
+      socket.emit('terminal:input' as any, {
+        sessionId: session.id,
+        data: `/rename ${newName}\r`,
+      });
+    }
+    // Update cache
+    await fetch('/api/sessions/rename', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ sessionId: session.id, name: newName }),
+    });
+    setRenameStatus('saved');
+    setTimeout(() => setRenameStatus(''), 2000);
+  };
+
   return (
     <>
+      {/* Rename */}
+      <div style={{ marginBottom: 20 }}>
+          <SectionLabel>Rename Session</SectionLabel>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <input
+              value={renameValue}
+              onChange={e => setRenameValue(e.target.value)}
+              onKeyDown={e => { if (e.key === 'Enter') handleRename(); }}
+              style={{
+                flex: 1, background: '#1a1a2a', border: '1px solid #2a2a3e',
+                color: '#eee', borderRadius: 8, padding: '10px 14px', fontSize: 15,
+                fontFamily: 'inherit',
+              }}
+            />
+            <button
+              onClick={handleRename}
+              disabled={renameStatus === 'saving' || renameValue.trim() === session.name}
+              style={{
+                padding: '10px 18px', borderRadius: 8, border: 'none',
+                background: renameStatus === 'saved' ? '#1a3a1a' :
+                  renameValue.trim() !== session.name ? '#4a9eff' : '#1e1e30',
+                color: renameStatus === 'saved' ? '#51cf66' :
+                  renameValue.trim() !== session.name ? '#fff' : '#555',
+                fontSize: 14, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit',
+              }}
+            >
+              {renameStatus === 'saved' ? '✓ Saved' : renameStatus === 'saving' ? '...' : 'Rename'}
+            </button>
+          </div>
+        </div>
+      </div>
+
       <MemorySection cwd={session.cwd} />
       <McpSection />
 

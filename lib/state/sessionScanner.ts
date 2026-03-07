@@ -10,7 +10,7 @@ import {
   ENTRANCE_POINT,
   CHARACTER_COLORS,
 } from '../constants';
-import { addSession, removeSession, getSession, updateSession, getAllSessions, getNextDeskIndex } from './sessionStore';
+import { addSession, removeSession, getSession, updateSession, getAllSessions, getNextDeskIndex, isAppManaged } from './sessionStore';
 import { resolveSessionName, checkForRename } from './sessionName';
 import { getCachedName, setCachedName } from './nameCache';
 
@@ -196,7 +196,9 @@ export function scanActiveSessions(): {
   }
 
   // Remove sessions that are no longer running
+  // Skip sessions launched/resumed by the app
   for (const session of currentSessions) {
+    if (isAppManaged(session.id)) continue;
     if (!activeIds.has(session.id)) {
       removeSession(session.id);
       removed.push(session.id);

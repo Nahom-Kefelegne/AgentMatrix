@@ -240,10 +240,13 @@ const OfficeCanvas = forwardRef<OfficeCanvasHandle, OfficeCanvasProps>(function 
     engine.handleMouseMove(coords.canvasX, coords.canvasY, coords.screenX, coords.screenY);
   }, [getCanvasCoords]);
 
+  const mouseDownPos = useRef<{ x: number; y: number } | null>(null);
+
   const handleMouseDown = useCallback((e: React.MouseEvent<HTMLCanvasElement>) => {
     const engine = engineRef.current;
     const coords = getCanvasCoords(e);
     if (!engine || !coords) return;
+    mouseDownPos.current = { x: e.clientX, y: e.clientY };
     engine.handleMouseDown(coords.canvasX, coords.canvasY);
   }, [getCanvasCoords]);
 
@@ -252,8 +255,15 @@ const OfficeCanvas = forwardRef<OfficeCanvasHandle, OfficeCanvasProps>(function 
     const coords = getCanvasCoords(e);
     if (!engine || !coords) return;
     engine.handleMouseUp(coords.canvasX, coords.canvasY);
-    // Also trigger click for side panel
-    engine.handleMouseClick(coords.canvasX, coords.canvasY);
+    // Only trigger click if mouse didn't move much (not a drag)
+    if (mouseDownPos.current) {
+      const dx = Math.abs(e.clientX - mouseDownPos.current.x);
+      const dy = Math.abs(e.clientY - mouseDownPos.current.y);
+      if (dx < 5 && dy < 5) {
+        engine.handleMouseClick(coords.canvasX, coords.canvasY);
+      }
+    }
+    mouseDownPos.current = null;
   }, [getCanvasCoords]);
 
   return (

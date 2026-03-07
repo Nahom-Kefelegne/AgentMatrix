@@ -1,7 +1,8 @@
 import type { Server as SocketIOServer } from 'socket.io';
 import { PtyManager } from './pty/PtyManager';
 import { randomUUID } from 'crypto';
-import { getSession, addSession, getAllSessions } from '../lib/state/sessionStore';
+import { homedir } from 'os';
+import { addSession, getAllSessions, getSession, removeSession } from '../lib/state/sessionStore';
 import { setCachedName } from '../lib/state/nameCache';
 import { SOCKET_EVENTS } from '../lib/types';
 import {
@@ -15,6 +16,31 @@ function getNextDeskIndex(): number {
     if (!usedIndices.has(i)) return i;
   }
   return sessions.length;
+}
+
+function createSessionEntry(id: string, name: string, cwd: string) {
+  const deskIndex = getNextDeskIndex();
+  const isDesk = deskIndex < DESK_POSITIONS.length;
+  const deskPosition = isDesk
+    ? DESK_POSITIONS[deskIndex]
+    : deskIndex < DESK_POSITIONS.length + OVERFLOW_POSITIONS.length
+      ? OVERFLOW_POSITIONS[deskIndex - DESK_POSITIONS.length]
+      : ENTRANCE_POINT;
+  const colorIndex = getAllSessions().length % CHARACTER_COLORS.length;
+
+  return {
+    id,
+    name,
+    color: CHARACTER_COLORS[colorIndex],
+    status: 'idle' as const,
+    deskIndex,
+    deskPosition,
+    spawnPosition: ENTRANCE_POINT,
+    recentActions: [],
+    agents: [],
+    cwd,
+    createdAt: Date.now(),
+  };
 }
 
 export function setupTerminalBridge(io: SocketIOServer, ptyManager: PtyManager): void {
@@ -35,35 +61,11 @@ export function setupTerminalBridge(io: SocketIOServer, ptyManager: PtyManager):
         const name = opts.name || `session-${Date.now().toString(36)}`;
         console.log(`[terminal:new] name=${name} uuid=${sessionUuid.slice(0, 8)} cwd=${opts.cwd}`);
 
-        // Create session entry immediately so sprite appears
-        const deskIndex = getNextDeskIndex();
-        const isDesk = deskIndex < DESK_POSITIONS.length;
-        const deskPosition = isDesk
-          ? DESK_POSITIONS[deskIndex]
-          : deskIndex < DESK_POSITIONS.length + OVERFLOW_POSITIONS.length
-            ? OVERFLOW_POSITIONS[deskIndex - DESK_POSITIONS.length]
-            : ENTRANCE_POINT;
-        const colorIndex = getAllSessions().length % CHARACTER_COLORS.length;
-
-        const sessionData = {
-          id: sessionUuid,
-          name,
-          color: CHARACTER_COLORS[colorIndex],
-          status: 'idle' as const,
-          deskIndex,
-          deskPosition,
-          spawnPosition: ENTRANCE_POINT,
-          recentActions: [],
-          agents: [],
-          cwd: opts.cwd,
-          createdAt: Date.now(),
-        };
-
+        const sessionData = createSessionEntry(sessionUuid, name, opts.cwd);
         addSession(sessionData);
         setCachedName(sessionUuid, name);
         io.emit(SOCKET_EVENTS.SESSION_START, sessionData);
 
-        // Spawn the PTY with our controlled UUID
         ptyManager.spawnNew(sessionUuid, {
           cwd: opts.cwd,
           sessionUuid,
@@ -82,36 +84,59 @@ export function setupTerminalBridge(io: SocketIOServer, ptyManager: PtyManager):
         socket.emit('terminal:spawned', { sessionId: sessionUuid, name });
       } catch (err) {
         console.error('[terminal:new]', err);
-        socket.emit('terminal:exit', { sessionId: 'new', exitCode: -1 });
       }
     });
 
-    // Resume an existing session (no fork)
+    // Resume a past session by ID
     socket.on('terminal:resume', ({ sessionId }: { sessionId: string }) => {
       try {
-        const session = getSession(sessionId);
-        const name = session?.name || sessionId;
-
         if (ptyManager.hasPty(sessionId)) {
-          console.log(`[terminal:resume] Re-attaching to ${name}`);
           ptyManager.onOutput(sessionId, (data) => {
             socket.emit('terminal:data', { sessionId, data });
           });
           return;
         }
 
-        console.log(`[terminal:resume] Resuming ${name}`);
-        ptyManager.spawnResume(sessionId, {
-          cwd: session?.cwd,
-          resumeId: sessionId,
-        });
+        const { getCachedName: getName } = require('../lib/state/nameCache');
+        const existing = getSession(sessionId);
+        const name = existing?.name || getName(sessionId) || `Session-${sessionId.slice(0, 8)}`;
+        const cwd = existing?.cwd || ptyManager.findSessionCwd(sessionId) || homedir();
+
+        // Create session entry so sprite appears
+        if (!existing) {
+          const sessionData = createSessionEntry(sessionId, name, cwd);
+          addSession(sessionData);
+          io.emit(SOCKET_EVENTS.SESSION_START, sessionData);
+        }
+
+        console.log(`[terminal:resume] ${name} (${sessionId.slice(0, 8)})`);
+        ptyManager.spawnResume(sessionId, { cwd, resumeId: sessionId });
 
         ptyManager.onOutput(sessionId, (data) => {
           socket.emit('terminal:data', { sessionId, data });
         });
       } catch (err) {
         console.error('[terminal:resume]', err);
-        socket.emit('terminal:exit', { sessionId, exitCode: -1 });
+      }
+    });
+
+    // End a session — send /exit then kill PTY
+    socket.on('terminal:end', ({ sessionId }: { sessionId: string }) => {
+      try {
+        if (ptyManager.hasPty(sessionId)) {
+          const ptySession = ptyManager.getSession(sessionId);
+          if (ptySession) ptySession.pty.write('/exit\r');
+          setTimeout(() => {
+            ptyManager.kill(sessionId);
+            removeSession(sessionId);
+            io.emit(SOCKET_EVENTS.SESSION_END, { sessionId });
+          }, 2000);
+        } else {
+          removeSession(sessionId);
+          io.emit(SOCKET_EVENTS.SESSION_END, { sessionId });
+        }
+      } catch (err) {
+        console.error('[terminal:end]', err);
       }
     });
 

@@ -7,10 +7,24 @@ if (!g.__sessions) g.__sessions = new Map<string, SessionData>();
 if (!g.__deskAssignments) g.__deskAssignments = new Map<number, string>();
 if (!g.__exitedAgentTypes) g.__exitedAgentTypes = new Set<string>();
 if (!g.__agentIdToName) g.__agentIdToName = new Map<string, string>();
+if (!g.__appManagedIds) g.__appManagedIds = new Set<string>();
 const sessions = g.__sessions as Map<string, SessionData>;
 const deskAssignments = g.__deskAssignments as Map<number, string>;
 const exitedAgentTypes = g.__exitedAgentTypes as Set<string>;
 const agentIdToName = g.__agentIdToName as Map<string, string>;
+const appManagedIds = g.__appManagedIds as Set<string>;
+
+export function markAsAppManaged(sessionId: string): void {
+  appManagedIds.add(sessionId);
+}
+
+export function unmarkAppManaged(sessionId: string): void {
+  appManagedIds.delete(sessionId);
+}
+
+export function isAppManaged(sessionId: string): boolean {
+  return appManagedIds.has(sessionId);
+}
 
 export function registerAgentId(agentId: string, name: string): void {
   agentIdToName.set(agentId, name);

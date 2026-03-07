@@ -5,10 +5,8 @@ import next from 'next';
 import { Server as SocketIOServer } from 'socket.io';
 import { SOCKET_EVENTS } from '../lib/types';
 import { SOCKET_PATH } from '../lib/constants';
-import { startSessionScanner } from '../lib/state/sessionScanner';
 import { getAllSessions } from '../lib/state/sessionStore';
 import { PtyManager } from './pty/PtyManager';
-import { setupPromptBridge } from './promptBridge';
 import { setupTerminalBridge } from './terminalBridge';
 
 const isDev = process.env.NODE_ENV !== 'production';
@@ -52,26 +50,13 @@ function createTray() {
   tray.setToolTip('Agent Matrix');
 
   const contextMenu = Menu.buildFromTemplate([
-    {
-      label: 'Show',
-      click: () => {
-        mainWindow?.show();
-      },
-    },
+    { label: 'Show', click: () => mainWindow?.show() },
     { type: 'separator' },
-    {
-      label: 'Quit',
-      click: () => {
-        app.quit();
-      },
-    },
+    { label: 'Quit', click: () => app.quit() },
   ]);
 
   tray.setContextMenu(contextMenu);
-
-  tray.on('click', () => {
-    mainWindow?.show();
-  });
+  tray.on('click', () => mainWindow?.show());
 }
 
 function startServer(): Promise<void> {
@@ -96,25 +81,6 @@ function startServer(): Promise<void> {
         socket.emit(SOCKET_EVENTS.STATE_SNAPSHOT, getAllSessions());
       });
 
-      startSessionScanner((added, removed, updated) => {
-        for (const session of added) {
-          console.log(`[scanner] Discovered session: ${session.name} (${session.id.slice(0, 8)}...)`);
-          io!.emit(SOCKET_EVENTS.SESSION_START, session);
-        }
-        for (const sessionId of removed) {
-          console.log(`[scanner] Session ended: ${sessionId.slice(0, 8)}...`);
-          io!.emit(SOCKET_EVENTS.SESSION_END, { sessionId });
-        }
-        for (const u of updated) {
-          console.log(`[scanner] Updated name: ${u.name} (${u.sessionId.slice(0, 8)}...)`);
-          io!.emit(SOCKET_EVENTS.SESSION_UPDATE, {
-            sessionId: u.sessionId,
-            changes: { name: u.name },
-          });
-        }
-      });
-
-      setupPromptBridge(io!);
       setupTerminalBridge(io!, ptyManager);
 
       httpServer.listen(port, () => {
@@ -131,18 +97,13 @@ app.whenReady().then(async () => {
   createTray();
 
   app.on('activate', () => {
-    if (mainWindow) {
-      mainWindow.show();
-    } else {
-      createWindow();
-    }
+    if (mainWindow) mainWindow.show();
+    else createWindow();
   });
 });
 
 app.on('window-all-closed', () => {
-  if (process.platform !== 'darwin') {
-    app.quit();
-  }
+  if (process.platform !== 'darwin') app.quit();
 });
 
 app.on('will-quit', () => {

@@ -28,7 +28,7 @@ export class PtyManager {
     }
   }
 
-  private findSessionCwd(sessionId: string): string | undefined {
+  findSessionCwd(sessionId: string): string | undefined {
     try {
       const projectsDir = join(homedir(), '.claude', 'projects');
       const output = execSync(
@@ -88,7 +88,7 @@ export class PtyManager {
       console.log(`[pty:exit] id=${id.slice(0, 12)} code=${exitCode}`);
       session.status = 'closed';
       this.sessions.delete(id);
-    });
+      });
 
     this.sessions.set(id, session);
     return session;

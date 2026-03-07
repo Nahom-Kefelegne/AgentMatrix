@@ -26,7 +26,6 @@ function OfficeView() {
   const [showResume, setShowResume] = useState(false);
   const [showSpawn, setShowSpawn] = useState(false);
   const [viewMode, setViewMode] = useState<'office' | 'dashboard'>('office');
-  const [managedSessions] = useState(() => new Set<string>());
   const canvasRef = useRef<OfficeCanvasHandle>(null);
 
   const handleHover = useCallback((char: CharacterData | null, screenX: number, screenY: number) => {
@@ -105,7 +104,7 @@ function OfficeView() {
         />
       )}
 
-      {/* Session dialog — used in both views */}
+      {/* Session dialog */}
       <SessionDialog
         sessionId={selectedSessionId}
         sessions={sessions}
@@ -116,7 +115,6 @@ function OfficeView() {
         onNext={handleNextSession}
         sessionIndex={currentSessionIndex}
         sessionTotal={sessionList.length}
-        managedSessions={managedSessions}
       />
 
       <SetupModal
@@ -135,9 +133,7 @@ function OfficeView() {
         isOpen={showResume}
         onClose={() => setShowResume(false)}
         onResumeInApp={(sid) => {
-          managedSessions.add(sid);
           setSelectedSessionId(sid);
-          // Tell the server to spawn a PTY (resume without fork)
           const socket = socketRef?.current;
           if (socket) socket.emit('terminal:resume' as any, { sessionId: sid });
         }}
@@ -145,10 +141,7 @@ function OfficeView() {
       <SpawnModal
         isOpen={showSpawn}
         onClose={() => setShowSpawn(false)}
-        onSessionSpawned={(sid) => {
-          managedSessions.add(sid);
-          setSelectedSessionId(sid);
-        }}
+        onSessionSpawned={(sid) => setSelectedSessionId(sid)}
       />
     </>
   );
