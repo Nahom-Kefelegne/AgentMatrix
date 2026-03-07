@@ -7,6 +7,8 @@ interface HeaderBarProps {
   onTasksClick: () => void;
   onResumeClick: () => void;
   onSessionsClick: () => void;
+  viewMode: 'office' | 'dashboard';
+  onToggleView: () => void;
 }
 
 function HeaderButton({ onClick, label, title, badge }: {
@@ -47,6 +49,7 @@ function HeaderButton({ onClick, label, title, badge }: {
 
 export default function HeaderBar({
   connected, sessionCount, onSetupClick, onTasksClick, onResumeClick, onSessionsClick,
+  viewMode, onToggleView,
 }: HeaderBarProps) {
   return (
     <header
@@ -80,6 +83,35 @@ export default function HeaderBar({
         <span style={{ fontSize: 22, fontWeight: 700, letterSpacing: 1, color: '#eee' }}>
           Agent Matrix
         </span>
+      </div>
+      <div
+        style={{
+          display: 'flex',
+          background: '#1e1e30',
+          border: '1px solid #3a3a4e',
+          borderRadius: 6,
+          padding: 2,
+        }}
+      >
+        {(['office', 'dashboard'] as const).map((mode) => (
+          <button
+            key={mode}
+            onClick={viewMode !== mode ? onToggleView : undefined}
+            style={{
+              padding: '6px 14px',
+              fontSize: 14,
+              fontWeight: 600,
+              borderRadius: 4,
+              border: 'none',
+              background: viewMode === mode ? '#4a9eff' : 'transparent',
+              color: viewMode === mode ? '#fff' : '#888',
+              cursor: 'pointer',
+              fontFamily: 'inherit',
+            }}
+          >
+            {mode === 'office' ? 'Office' : 'Dashboard'}
+          </button>
+        ))}
       </div>
       <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
         <HeaderButton onClick={onSessionsClick} label="Sessions" title="Browse active sessions" badge={sessionCount} />

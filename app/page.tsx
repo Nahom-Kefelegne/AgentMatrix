@@ -10,6 +10,8 @@ import SidePanel from './components/SidePanel';
 import SetupModal from './components/SetupModal';
 import TaskBoard from './components/TaskBoard';
 import ResumeModal from './components/ResumeModal';
+import DashboardView from './components/DashboardView';
+import SessionDialog from './components/SessionDialog';
 
 function sessionToCharData(session: SessionData): CharacterData {
   return {
@@ -36,6 +38,8 @@ function OfficeView() {
   const [taskTrackerId, setTaskTrackerId] = useState<string | null>(null);
   const [showTaskBoard, setShowTaskBoard] = useState(false);
   const [showResume, setShowResume] = useState(false);
+  const [viewMode, setViewMode] = useState<'office' | 'dashboard'>('office');
+  const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null);
   const sessionCycleIndex = useRef(0);
 
   const handleHover = useCallback((char: CharacterData | null, screenX: number, screenY: number) => {
@@ -85,25 +89,46 @@ function OfficeView() {
         onTasksClick={() => setShowTaskBoard(true)}
         onResumeClick={() => setShowResume(true)}
         onSessionsClick={handleSessionsCycle}
+        viewMode={viewMode}
+        onToggleView={() => setViewMode(m => m === 'office' ? 'dashboard' : 'office')}
       />
-      <OfficeCanvas
-        sessions={sessions}
-        onEvent={onEvent}
-        onHover={handleHover}
-        onClick={handleClick}
-        scrollToId={selectedChar?.id}
-      />
-      <HoverCard character={hoveredChar} x={hoverPos.x} y={hoverPos.y} />
-      <SidePanel
-        character={selectedChar}
-        onClose={() => setSelectedChar(null)}
-        isTaskTracker={selectedChar ? selectedChar.id === taskTrackerId : false}
-        onSetTaskTracker={handleSetTaskTracker}
-        onPrev={handleSessionPrev}
-        onNext={handleSessionNext}
-        sessionIndex={sessionCycleIndex.current}
-        sessionTotal={sessions.size}
-      />
+      {viewMode === 'office' && (
+        <>
+          <OfficeCanvas
+            sessions={sessions}
+            onEvent={onEvent}
+            onHover={handleHover}
+            onClick={handleClick}
+            scrollToId={selectedChar?.id}
+          />
+          <HoverCard character={hoveredChar} x={hoverPos.x} y={hoverPos.y} />
+          <SidePanel
+            character={selectedChar}
+            onClose={() => setSelectedChar(null)}
+            isTaskTracker={selectedChar ? selectedChar.id === taskTrackerId : false}
+            onSetTaskTracker={handleSetTaskTracker}
+            onPrev={handleSessionPrev}
+            onNext={handleSessionNext}
+            sessionIndex={sessionCycleIndex.current}
+            sessionTotal={sessions.size}
+          />
+        </>
+      )}
+      {viewMode === 'dashboard' && (
+        <>
+          <DashboardView
+            sessions={sessions}
+            onSelectSession={(id) => setSelectedSessionId(id)}
+          />
+          <SessionDialog
+            sessionId={selectedSessionId}
+            sessions={sessions}
+            onClose={() => setSelectedSessionId(null)}
+            isTaskTracker={selectedSessionId ? selectedSessionId === taskTrackerId : false}
+            onSetTaskTracker={handleSetTaskTracker}
+          />
+        </>
+      )}
       <SetupModal
         isOpen={showSetup}
         onClose={() => setShowSetup(false)}
