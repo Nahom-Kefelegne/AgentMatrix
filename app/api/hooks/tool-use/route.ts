@@ -2,7 +2,8 @@ import { NextResponse } from 'next/server';
 import { SOCKET_EVENTS } from '@/lib/types';
 import { getSession, updateSession, getAgentName } from '@/lib/state/sessionStore';
 import { emitToClients } from '@/lib/state/socketEmitter';
-import { resolveSessionName } from '@/lib/state/sessionName';
+import { checkForRename } from '@/lib/state/sessionName';
+import { setCachedName } from '@/lib/state/nameCache';
 
 function buildToolSummary(toolName: string, toolInput?: Record<string, unknown>): string {
   if (!toolInput) return toolName;
@@ -31,15 +32,16 @@ function buildToolSummary(toolName: string, toolInput?: Record<string, unknown>)
 export async function POST(request: Request) {
   try {
     const payload = await request.json();
-    // Try to resolve a better name if current one is just the cwd folder
+    // Only update name if a /rename was detected — don't overwrite with slug/cwd
     const session = getSession(payload.session_id);
     if (session && payload.transcript_path) {
-      const resolvedName = resolveSessionName(payload.transcript_path, payload.cwd, payload.session_id);
-      if (resolvedName !== session.name && !resolvedName.startsWith('Session-')) {
-        updateSession(payload.session_id, { name: resolvedName });
+      const renamed = checkForRename(payload.transcript_path);
+      if (renamed && renamed !== session.name) {
+        updateSession(payload.session_id, { name: renamed });
+        setCachedName(payload.session_id, renamed);
         emitToClients(SOCKET_EVENTS.SESSION_UPDATE, {
           sessionId: payload.session_id,
-          changes: { name: resolvedName },
+          changes: { name: renamed },
         });
       }
     }

@@ -36,15 +36,15 @@ export function resolveSessionName(
     try {
       const stat = statSync(transcriptPath);
 
-      // Check last 500KB for recent /rename commands
+      // Read last 500KB for recent /rename commands
       const tailStart = Math.max(0, stat.size - 500_000);
-      const tail = readChunk(transcriptPath, tailStart, 100_000);
+      const tail = readChunk(transcriptPath, tailStart, 500_000);
 
       // Look for rename — handles "renamed to: name" and "renamed to: \nname" (escaped newline in JSONL)
-      const renamedTo = tail.match(/Session and agent renamed to:[\\n ]*([a-zA-Z0-9_-]+)/g);
+      const renamedTo = tail.match(/<local-command-stdout>Session and agent renamed to:(?:\\n| )*([a-zA-Z0-9_-]+)/g);
       if (renamedTo && renamedTo.length > 0) {
         const last = renamedTo[renamedTo.length - 1];
-        const nameMatch = last.match(/renamed to:[\\n ]*([a-zA-Z0-9_-]+)/);
+        const nameMatch = last.match(/renamed to:(?:\\n| )*([a-zA-Z0-9_-]+)/);
         if (nameMatch) return nameMatch[1];
       }
 
@@ -55,11 +55,8 @@ export function resolveSessionName(
         return slugMatch[1];
       }
 
-      // Also check tail for slug (forked sessions might have it later)
-      const tailSlug = tail.match(/"slug"\s*:\s*"([^"]+)"/);
-      if (tailSlug) {
-        return tailSlug[1];
-      }
+      // NOTE: Do NOT check tail for slug — conversation content often contains
+      // repeated slug strings from compacted summaries, causing false matches.
     } catch {
       // File might not exist yet
     }
@@ -74,4 +71,27 @@ export function resolveSessionName(
   }
 
   return `Session-${(sessionId || 'unknown').slice(0, 6)}`;
+}
+
+/**
+ * Check if a session has been /renamed. Returns the new name or undefined.
+ * Used by the scanner's periodic re-check to only upgrade names on rename,
+ * not overwrite them with slug/cwd fallbacks.
+ */
+export function checkForRename(transcriptPath: string): string | undefined {
+  try {
+    const stat = statSync(transcriptPath);
+    const tailStart = Math.max(0, stat.size - 500_000);
+    const tail = readChunk(transcriptPath, tailStart, 500_000);
+
+    const renamedTo = tail.match(/<local-command-stdout>Session and agent renamed to:(?:\\n| )*([a-zA-Z0-9_-]+)/g);
+    if (renamedTo && renamedTo.length > 0) {
+      const last = renamedTo[renamedTo.length - 1];
+      const nameMatch = last.match(/renamed to:(?:\\n| )*([a-zA-Z0-9_-]+)/);
+      if (nameMatch) return nameMatch[1];
+    }
+  } catch {
+    // ignore
+  }
+  return undefined;
 }

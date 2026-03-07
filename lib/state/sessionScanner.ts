@@ -11,7 +11,8 @@ import {
   CHARACTER_COLORS,
 } from '../constants';
 import { addSession, removeSession, getSession, updateSession, getAllSessions, getNextDeskIndex } from './sessionStore';
-import { resolveSessionName } from './sessionName';
+import { resolveSessionName, checkForRename } from './sessionName';
+import { getCachedName, setCachedName } from './nameCache';
 
 const CLAUDE_PROJECTS_DIR = join(homedir(), '.claude', 'projects');
 const SCAN_INTERVAL_MS = 10_000; // 10 seconds
@@ -63,8 +64,12 @@ function findTranscriptPath(sessionId: string): string | undefined {
 /** Extract cwd and other metadata from transcript first line */
 function parseTranscriptMeta(transcriptPath: string): { cwd?: string; slug?: string } {
   try {
-    const content = readFileSync(transcriptPath, 'utf-8');
-    const firstLine = content.split('\n')[0];
+    // Only read first 3KB instead of entire file (can be 10MB+)
+    const fd = require('fs').openSync(transcriptPath, 'r');
+    const buf = Buffer.alloc(3000);
+    require('fs').readSync(fd, buf, 0, 3000, 0);
+    require('fs').closeSync(fd);
+    const firstLine = buf.toString('utf-8').split('\n')[0];
     const data = JSON.parse(firstLine);
     let cwd = data.cwd;
 
@@ -91,8 +96,9 @@ function createSessionFromProcess(proc: ActiveProcess): SessionData | null {
   const transcriptPath = findTranscriptPath(proc.sessionId);
   const meta = transcriptPath ? parseTranscriptMeta(transcriptPath) : {};
 
-  // Priority: --resume name > transcript slug/rename > cwd > session ID
+  // Priority: --resume name > cached name > transcript rename/slug > cwd > session ID
   const name = proc.resumeName
+    || getCachedName(proc.sessionId)
     || resolveSessionName(transcriptPath, meta.cwd, proc.sessionId);
 
   const deskIndex = getNextDeskIndex();
@@ -142,6 +148,7 @@ export function scanActiveSessions(): {
       const session = createSessionFromProcess(proc);
       if (session) {
         addSession(session);
+        setCachedName(session.id, session.name);
         added.push(session);
       }
     } else {
@@ -151,6 +158,7 @@ export function scanActiveSessions(): {
       // Update resume name if available
       if (proc.resumeName && existing.name !== proc.resumeName) {
         updateSession(proc.sessionId, { name: proc.resumeName });
+        setCachedName(proc.sessionId, proc.resumeName);
         updated.push({ sessionId: proc.sessionId, name: proc.resumeName });
       }
 
@@ -167,17 +175,21 @@ export function scanActiveSessions(): {
     }
   }
 
-  // Re-check names for all existing sessions (picks up /rename from CLI)
+  // Re-check names for all existing sessions — only picks up /rename from CLI.
+  // We intentionally do NOT re-resolve with resolveSessionName() here, because
+  // slug/cwd fallbacks can overwrite a good name with a worse one (e.g. a slug
+  // found in conversation content of a forked/compacted session).
   for (const proc of activeProcesses) {
     if (currentIds.has(proc.sessionId) && !proc.resumeName) {
       const existing = getSession(proc.sessionId);
       if (!existing) continue;
       const transcriptPath = findTranscriptPath(proc.sessionId);
       if (transcriptPath) {
-        const resolvedName = resolveSessionName(transcriptPath, existing.cwd, proc.sessionId);
-        if (resolvedName !== existing.name && !resolvedName.startsWith('Session-')) {
-          updateSession(proc.sessionId, { name: resolvedName });
-          updated.push({ sessionId: proc.sessionId, name: resolvedName });
+        const renamed = checkForRename(transcriptPath);
+        if (renamed && renamed !== existing.name) {
+          updateSession(proc.sessionId, { name: renamed });
+          setCachedName(proc.sessionId, renamed);
+          updated.push({ sessionId: proc.sessionId, name: renamed });
         }
       }
     }
