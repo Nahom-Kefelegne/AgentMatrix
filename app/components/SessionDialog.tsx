@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import type { SessionData, Action } from '@/lib/types';
 import PromptPanel from './PromptPanel';
+import TerminalPanel from './TerminalPanel';
 
 const STATUS_COLORS: Record<string, string> = {
   idle: '#888888',
@@ -359,7 +360,7 @@ export default function SessionDialog({
   sessionId, sessions, onClose, isTaskTracker, onSetTaskTracker, noBackdrop,
   onPrev, onNext, sessionIndex, sessionTotal,
 }: SessionDialogProps) {
-  const [activeTab, setActiveTab] = useState<'info' | 'settings' | 'terminal'>('info');
+  const [activeTab, setActiveTab] = useState<'info' | 'settings' | 'terminal' | 'console'>('info');
   const [killing, setKilling] = useState(false);
   const [restartCommand, setRestartCommand] = useState<string | null>(null);
   const [, setTick] = useState(0);
@@ -426,7 +427,7 @@ export default function SessionDialog({
       {/* Dialog */}
       <div style={{
         position: 'fixed', top: '50%', left: '50%', transform: 'translate(-50%, -50%)',
-        width: 860, maxHeight: '88vh',
+        width: 900, height: '85vh',
         background: '#111118', border: '1px solid #222235', borderRadius: 16,
         zIndex: 101, display: 'flex', flexDirection: 'column', overflow: 'hidden',
         boxShadow: '0 20px 60px rgba(0,0,0,0.5)',
@@ -503,7 +504,9 @@ export default function SessionDialog({
           display: 'flex', borderBottom: '1px solid #1e1e30', flexShrink: 0,
           padding: '0 24px',
         }}>
-          {(['info', 'settings', 'terminal'] as const).map(tab => (
+          {(['info', 'settings', 'terminal', 'console'] as const).map(tab => {
+            const labels = { info: 'Info', settings: 'Settings', terminal: 'Prompt', console: 'Console' };
+            return (
             <button key={tab} onClick={() => setActiveTab(tab)} style={{
               padding: '12px 20px', fontSize: 16, fontWeight: 600, cursor: 'pointer',
               color: activeTab === tab ? '#eee' : '#777',
@@ -511,24 +514,44 @@ export default function SessionDialog({
               borderBottom: `2px solid ${activeTab === tab ? '#4a9eff' : 'transparent'}`,
               transition: 'all 0.15s',
             }}>
-              {tab === 'info' ? 'Info' : tab === 'settings' ? 'Settings' : 'Terminal'}
+              {labels[tab]}
             </button>
-          ))}
+            );
+          })}
         </div>
 
-        {/* Content */}
+        {/* Content — all tabs stay mounted to preserve state */}
         <div style={{
-          flex: 1, padding: '20px 24px', minHeight: 0,
-          overflowY: activeTab === 'terminal' ? 'hidden' : 'auto',
-          display: 'flex', flexDirection: 'column',
+          flex: 1, minHeight: 0, position: 'relative',
         }}>
-          {activeTab === 'info' ? (
+          <div style={{
+            position: 'absolute', inset: 0, padding: '20px 24px',
+            overflowY: 'auto',
+            display: activeTab === 'info' ? 'block' : 'none',
+          }}>
             <InfoTab session={session} cliCmd={cliCmd} />
-          ) : activeTab === 'settings' ? (
+          </div>
+          <div style={{
+            position: 'absolute', inset: 0, padding: '20px 24px',
+            overflowY: 'auto',
+            display: activeTab === 'settings' ? 'block' : 'none',
+          }}>
             <SettingsTab session={session} />
-          ) : (
+          </div>
+          <div style={{
+            position: 'absolute', inset: 0, padding: '20px 24px',
+            display: activeTab === 'terminal' ? 'flex' : 'none',
+            flexDirection: 'column',
+          }}>
             <PromptPanel sessionId={session.id} sessionName={session.name} cwd={session.cwd} />
-          )}
+          </div>
+          <div style={{
+            position: 'absolute', inset: 0, padding: '12px 16px',
+            display: activeTab === 'console' ? 'flex' : 'none',
+            flexDirection: 'column',
+          }}>
+            <TerminalPanel sessionId={session.id} sessionName={session.name} cwd={session.cwd} />
+          </div>
         </div>
 
         {/* Bottom bar */}

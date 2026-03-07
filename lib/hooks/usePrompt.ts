@@ -89,5 +89,5 @@ export function usePrompt(
     bufferRef.current = '';
   }, []);
 
-  return { messages, sendPrompt, isWaiting, isReady, clear };
+  return { messages, setMessages, sendPrompt, isWaiting, isReady, clear };
 }

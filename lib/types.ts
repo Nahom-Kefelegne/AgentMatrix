@@ -131,10 +131,16 @@ export interface ServerToClientEvents {
   'prompt:output': (data: { sessionId: string; text: string }) => void;
   'prompt:ready': (data: { sessionId: string }) => void;
   'prompt:error': (data: { sessionId: string; error: string }) => void;
+  'terminal:data': (data: { sessionId: string; data: string }) => void;
+  'terminal:exit': (data: { sessionId: string; exitCode: number }) => void;
+  'terminal:consent': (data: { sessionId: string }) => void;
 }
 
 export interface ClientToServerEvents {
   'prompt:send': (data: { sessionId: string; prompt: string }) => void;
+  'terminal:input': (data: { sessionId: string; data: string }) => void;
+  'terminal:spawn': (data: { sessionId: string }) => void;
+  'terminal:resize': (data: { sessionId: string; cols: number; rows: number }) => void;
 }
 
 // ===== Socket Event Names =====
@@ -154,4 +160,10 @@ export const SOCKET_EVENTS = {
   PROMPT_OUTPUT: 'prompt:output',
   PROMPT_READY: 'prompt:ready',
   PROMPT_ERROR: 'prompt:error',
+  TERMINAL_DATA: 'terminal:data',
+  TERMINAL_INPUT: 'terminal:input',
+  TERMINAL_SPAWN: 'terminal:spawn',
+  TERMINAL_RESIZE: 'terminal:resize',
+  TERMINAL_EXIT: 'terminal:exit',
+  TERMINAL_CONSENT: 'terminal:consent',
 } as const;

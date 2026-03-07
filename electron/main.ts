@@ -6,8 +6,10 @@ import { Server as SocketIOServer } from 'socket.io';
 import { SOCKET_EVENTS } from '../lib/types';
 import { SOCKET_PATH } from '../lib/constants';
 import { startSessionScanner } from '../lib/state/sessionScanner';
+import { getAllSessions } from '../lib/state/sessionStore';
 import { PtyManager } from './pty/PtyManager';
 import { setupPromptBridge } from './promptBridge';
+import { setupTerminalBridge } from './terminalBridge';
 
 const isDev = process.env.NODE_ENV !== 'production';
 const port = parseInt(process.env.PORT || '3000', 10);
@@ -91,9 +93,7 @@ function startServer(): Promise<void> {
       (globalThis as Record<string, unknown>).__socketIO = io;
 
       io.on('connection', (socket) => {
-        import('../lib/state/sessionStore').then(({ getAllSessions }) => {
-          socket.emit(SOCKET_EVENTS.STATE_SNAPSHOT, getAllSessions());
-        });
+        socket.emit(SOCKET_EVENTS.STATE_SNAPSHOT, getAllSessions());
       });
 
       startSessionScanner((added, removed, updated) => {
@@ -115,6 +115,7 @@ function startServer(): Promise<void> {
       });
 
       setupPromptBridge(io!, ptyManager);
+      setupTerminalBridge(io!, ptyManager);
 
       httpServer.listen(port, () => {
         console.log(`> Server ready on http://localhost:${port}`);

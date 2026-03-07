@@ -415,7 +415,7 @@ function TaskFormModal({ task, onSave, onCancel, title: modalTitle }: {
               </label>
               <select
                 value={status}
-                onChange={(e) => setStatus(e.target.value)}
+                onChange={(e) => setStatus(e.target.value as 'pending' | 'in_progress' | 'completed' | 'deleted')}
                 style={{
                   width: '100%', background: '#1a1a2a', border: '1px solid #2a2a3e',
                   color: '#eee', borderRadius: 6, padding: '8px 12px', fontSize: 14, fontFamily: 'inherit',
@@ -658,7 +658,7 @@ export default function TaskBoard({ isOpen, onClose, sessionName }: TaskBoardPro
           changes: { owner: sessionName, status: 'in_progress' },
         }),
       });
-      setReassigningTask(null);
+      setAssigningTask(null);
       fetchTasks();
     } catch (err) {
       console.error('Failed to reassign task:', err);

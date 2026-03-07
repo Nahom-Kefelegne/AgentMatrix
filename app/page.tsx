@@ -129,9 +129,9 @@ function OfficeView() {
 
   const taskTrackerSession = taskTrackerId ? sessions.get(taskTrackerId) : null;
 
-  // Dialog left edge in px (dialog is 860px centered)
+  // Dialog left edge in px (dialog is 900px centered)
   const dialogLeftEdge = typeof window !== 'undefined'
-    ? (window.innerWidth - 860) / 2
+    ? (window.innerWidth - 900) / 2
     : 200;
   const spriteCenterY = typeof window !== 'undefined' ? window.innerHeight / 2 : 300;
 
