@@ -13,6 +13,7 @@ import ResumeModal from './components/ResumeModal';
 import DashboardView from './components/DashboardView';
 import SessionDialog from './components/SessionDialog';
 import SpawnModal from './components/SpawnModal';
+import AppSettingsModal from './components/AppSettingsModal';
 
 function OfficeView() {
   const { connected, sessions, onEvent, socketRef } = useSocketContext();
@@ -25,6 +26,7 @@ function OfficeView() {
   const [showTaskBoard, setShowTaskBoard] = useState(false);
   const [showResume, setShowResume] = useState(false);
   const [showSpawn, setShowSpawn] = useState(false);
+  const [showSettings, setShowSettings] = useState(false);
   const [viewMode, setViewMode] = useState<'office' | 'dashboard'>('office');
   const canvasRef = useRef<OfficeCanvasHandle>(null);
 
@@ -74,6 +76,7 @@ function OfficeView() {
       <HeaderBar
         connected={connected}
         sessionCount={sessions.size}
+        onSettingsClick={() => setShowSettings(true)}
         onSetupClick={() => setShowSetup(true)}
         onTasksClick={() => setShowTaskBoard(true)}
         onResumeClick={() => setShowResume(true)}
@@ -142,6 +145,10 @@ function OfficeView() {
         isOpen={showSpawn}
         onClose={() => setShowSpawn(false)}
         onSessionSpawned={(sid) => setSelectedSessionId(sid)}
+      />
+      <AppSettingsModal
+        isOpen={showSettings}
+        onClose={() => setShowSettings(false)}
       />
     </>
   );

@@ -4,6 +4,7 @@ import { randomUUID } from 'crypto';
 import { homedir } from 'os';
 import { addSession, getAllSessions, getSession, removeSession } from '../lib/state/sessionStore';
 import { setCachedName } from '../lib/state/nameCache';
+import { getActiveSessions, saveActiveSessions } from '../lib/state/activeSessionsCache';
 import { SOCKET_EVENTS } from '../lib/types';
 import {
   DESK_POSITIONS, OVERFLOW_POSITIONS, ENTRANCE_POINT, CHARACTER_COLORS,
@@ -81,6 +82,11 @@ export function setupTerminalBridge(io: SocketIOServer, ptyManager: PtyManager):
           socket.emit('terminal:data', { sessionId: sessionUuid, data });
         });
 
+        // Track for auto-resume
+        const active = getActiveSessions().filter(s => s.id !== sessionUuid);
+        active.push({ id: sessionUuid, name, cwd: opts.cwd });
+        saveActiveSessions(active);
+
         socket.emit('terminal:spawned', { sessionId: sessionUuid, name });
       } catch (err) {
         console.error('[terminal:new]', err);
@@ -110,6 +116,12 @@ export function setupTerminalBridge(io: SocketIOServer, ptyManager: PtyManager):
         }
 
         console.log(`[terminal:resume] ${name} (${sessionId.slice(0, 8)})`);
+
+        // Track for auto-resume
+        const active = getActiveSessions().filter(s => s.id !== sessionId);
+        active.push({ id: sessionId, name, cwd });
+        saveActiveSessions(active);
+
         ptyManager.spawnResume(sessionId, { cwd, resumeId: sessionId });
 
         ptyManager.onOutput(sessionId, (data) => {
@@ -123,6 +135,9 @@ export function setupTerminalBridge(io: SocketIOServer, ptyManager: PtyManager):
     // End a session — send /exit then kill PTY
     socket.on('terminal:end', ({ sessionId }: { sessionId: string }) => {
       try {
+        // Remove from auto-resume list
+        saveActiveSessions(getActiveSessions().filter(s => s.id !== sessionId));
+
         if (ptyManager.hasPty(sessionId)) {
           const ptySession = ptyManager.getSession(sessionId);
           if (ptySession) ptySession.pty.write('/exit\r');

@@ -5,7 +5,10 @@ import next from 'next';
 import { Server as SocketIOServer } from 'socket.io';
 import { SOCKET_EVENTS } from '../lib/types';
 import { SOCKET_PATH } from '../lib/constants';
-import { getAllSessions } from '../lib/state/sessionStore';
+import { getAllSessions, addSession } from '../lib/state/sessionStore';
+import { getCachedName } from '../lib/state/nameCache';
+import { getSettings } from '../lib/state/appSettings';
+import { getActiveSessions } from '../lib/state/activeSessionsCache';
 import { PtyManager } from './pty/PtyManager';
 import { setupTerminalBridge } from './terminalBridge';
 
@@ -85,6 +88,42 @@ function startServer(): Promise<void> {
 
       httpServer.listen(port, () => {
         console.log(`> Server ready on http://localhost:${port}`);
+
+        // Auto-resume sessions from last run
+        const settings = getSettings();
+        if (settings.autoResume) {
+          const cached = getActiveSessions();
+          if (cached.length > 0) {
+            console.log(`[auto-resume] Resuming ${cached.length} session(s)...`);
+            for (const s of cached) {
+              try {
+                const name = getCachedName(s.id) || s.name;
+                // Import createSessionEntry logic inline
+                const { DESK_POSITIONS: DP, OVERFLOW_POSITIONS: OP, ENTRANCE_POINT: EP, CHARACTER_COLORS: CC } = require('../lib/constants');
+                const all = getAllSessions();
+                const used = new Set(all.map((x: any) => x.deskIndex));
+                let di = 0;
+                for (let i = 0; i < DP.length + OP.length; i++) { if (!used.has(i)) { di = i; break; } }
+                const dp = di < DP.length ? DP[di] : di < DP.length + OP.length ? OP[di - DP.length] : EP;
+                const ci = all.length % CC.length;
+
+                const sessionData = {
+                  id: s.id, name, color: CC[ci], status: 'idle' as const,
+                  deskIndex: di, deskPosition: dp, spawnPosition: EP,
+                  recentActions: [], agents: [], cwd: s.cwd, createdAt: Date.now(),
+                };
+                addSession(sessionData);
+                io!.emit(SOCKET_EVENTS.SESSION_START, sessionData);
+
+                ptyManager.spawnResume(s.id, { cwd: s.cwd, resumeId: s.id });
+                console.log(`[auto-resume] ${name} (${s.id.slice(0, 8)})`);
+              } catch (err) {
+                console.error(`[auto-resume] Failed: ${s.name}`, err);
+              }
+            }
+          }
+        }
+
         resolve();
       });
     });

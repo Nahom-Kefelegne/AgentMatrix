@@ -884,9 +884,7 @@ function SettingsTab({ session, socketRef }: {
               {renameStatus === 'saved' ? '✓ Saved' : renameStatus === 'saving' ? '...' : 'Rename'}
             </button>
           </div>
-        </div>
       </div>
-
       <MemorySection cwd={session.cwd} />
       <McpSection />
 

@@ -3,6 +3,7 @@
 interface HeaderBarProps {
   connected: boolean;
   sessionCount: number;
+  onSettingsClick: () => void;
   onSetupClick: () => void;
   onTasksClick: () => void;
   onResumeClick: () => void;
@@ -49,7 +50,7 @@ function HeaderButton({ onClick, label, title, badge }: {
 }
 
 export default function HeaderBar({
-  connected, sessionCount, onSetupClick, onTasksClick, onResumeClick, onSessionsClick,
+  connected, sessionCount, onSettingsClick, onSetupClick, onTasksClick, onResumeClick, onSessionsClick,
   onNewSessionClick, viewMode, onToggleView,
 }: HeaderBarProps) {
   return (
@@ -119,7 +120,8 @@ export default function HeaderBar({
         <HeaderButton onClick={onSessionsClick} label="Sessions" title="Browse active sessions" badge={sessionCount} />
         <HeaderButton onClick={onResumeClick} label="Resume" title="Resume a past session" />
         <HeaderButton onClick={onTasksClick} label="Tasks" title="View task board" />
-        <HeaderButton onClick={onSetupClick} label="Setup" title="Hook configuration" />
+        <HeaderButton onClick={onSettingsClick} label="Settings" title="App settings" />
+        <HeaderButton onClick={onSetupClick} label="Hooks" title="Hook configuration" />
       </div>
     </header>
   );
