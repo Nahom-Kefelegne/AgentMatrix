@@ -29,3 +29,8 @@ export function setCachedName(sessionId: string, name: string): void {
   cache[sessionId] = name;
   writeCache(cache);
 }
+
+/** Get all cached names (for global search) */
+export function getAllCachedNames(): Record<string, string> {
+  return readCache();
+}

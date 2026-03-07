@@ -6,6 +6,7 @@ import { useSocketContext } from './SocketProvider';
 interface SpawnModalProps {
   isOpen: boolean;
   onClose: () => void;
+  onSessionSpawned?: (sessionId: string) => void;
 }
 
 function FolderPicker({ value, onChange }: { value: string; onChange: (path: string) => void }) {
@@ -88,7 +89,7 @@ const EFFORT_LEVELS = [
   { value: 'high', label: 'High' },
 ];
 
-export default function SpawnModal({ isOpen, onClose }: SpawnModalProps) {
+export default function SpawnModal({ isOpen, onClose, onSessionSpawned }: SpawnModalProps) {
   const { socketRef } = useSocketContext();
   const [cwd, setCwd] = useState('/Users/nkefelegne/Desktop/DEV');
   const [sessionName, setSessionName] = useState('');
@@ -106,6 +107,15 @@ export default function SpawnModal({ isOpen, onClose }: SpawnModalProps) {
 
     setLaunching(true);
 
+    // Listen for the spawned response
+    const handleSpawned = (data: { sessionId: string }) => {
+      socket.off('terminal:spawned' as any, handleSpawned);
+      setLaunching(false);
+      onSessionSpawned?.(data.sessionId);
+      onClose();
+    };
+    socket.on('terminal:spawned' as any, handleSpawned);
+
     socket.emit('terminal:new' as any, {
       cwd,
       name: sessionName.trim() || undefined,
@@ -116,11 +126,13 @@ export default function SpawnModal({ isOpen, onClose }: SpawnModalProps) {
       systemPrompt: systemPrompt.trim() || undefined,
     });
 
+    // Timeout fallback
     setTimeout(() => {
+      socket.off('terminal:spawned' as any, handleSpawned);
       setLaunching(false);
       onClose();
-    }, 1000);
-  }, [socketRef, cwd, sessionName, permissionMode, model, effort, allowedTools, systemPrompt, onClose]);
+    }, 5000);
+  }, [socketRef, cwd, sessionName, permissionMode, model, effort, allowedTools, systemPrompt, onClose, onSessionSpawned]);
 
   if (!isOpen) return null;
 

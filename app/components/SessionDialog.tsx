@@ -353,16 +353,21 @@ interface SessionDialogProps {
   onNext?: () => void;
   sessionIndex?: number;
   sessionTotal?: number;
+  /** Set of session IDs managed by the app (spawned/resumed through UI) */
+  managedSessions?: Set<string>;
 }
 
 export default function SessionDialog({
   sessionId, sessions, onClose, isTaskTracker, onSetTaskTracker, noBackdrop,
-  onPrev, onNext, sessionIndex, sessionTotal,
+  onPrev, onNext, sessionIndex, sessionTotal, managedSessions,
 }: SessionDialogProps) {
+  const hasConsole = managedSessions?.has(sessionId ?? '') ?? false;
   const [activeTab, setActiveTab] = useState<'info' | 'settings' | 'console'>('info');
   const [killing, setKilling] = useState(false);
   const [restartCommand, setRestartCommand] = useState<string | null>(null);
   const [fullscreen, setFullscreen] = useState(false);
+  const [renaming, setRenaming] = useState(false);
+  const [renameValue, setRenameValue] = useState('');
   const isConsole = activeTab === 'console';
   const [, setTick] = useState(0);
 
@@ -372,7 +377,13 @@ export default function SessionDialog({
     return () => clearInterval(interval);
   }, []);
 
-  useEffect(() => { setActiveTab('info'); }, [sessionId]);
+  useEffect(() => {
+    setActiveTab('info');
+  }, [sessionId]);
+  // If console tab was active but session is no longer managed, switch to info
+  useEffect(() => {
+    if (activeTab === 'console' && !hasConsole) setActiveTab('info');
+  }, [hasConsole, activeTab]);
 
   if (!sessionId) return null;
   const session = sessions.get(sessionId);
@@ -450,9 +461,44 @@ export default function SessionDialog({
                 backgroundColor: statusColor,
                 boxShadow: isWorking ? `0 0 8px ${statusColor}60` : 'none',
               }} />
-              <span style={{ fontSize: 22, fontWeight: 700, color: '#eee' }}>
-                {session.name}
-              </span>
+              {renaming ? (
+                <input
+                  autoFocus
+                  value={renameValue}
+                  onChange={e => setRenameValue(e.target.value)}
+                  onKeyDown={async e => {
+                    if (e.key === 'Enter' && renameValue.trim()) {
+                      await fetch('/api/sessions/rename', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ sessionId: session.id, name: renameValue.trim() }),
+                      });
+                      setRenaming(false);
+                    }
+                    if (e.key === 'Escape') setRenaming(false);
+                  }}
+                  onBlur={() => setRenaming(false)}
+                  style={{
+                    fontSize: 22, fontWeight: 700, color: '#eee',
+                    background: '#1a1a2a', border: '1px solid #4a9eff',
+                    borderRadius: 6, padding: '2px 8px', fontFamily: 'inherit',
+                    outline: 'none', width: 250,
+                  }}
+                />
+              ) : (
+                <span
+                  onClick={() => { setRenameValue(session.name); setRenaming(true); }}
+                  title="Click to rename"
+                  style={{
+                    fontSize: 22, fontWeight: 700, color: '#eee', cursor: 'pointer',
+                    borderBottom: '1px dashed transparent',
+                  }}
+                  onMouseEnter={e => e.currentTarget.style.borderBottomColor = '#555'}
+                  onMouseLeave={e => e.currentTarget.style.borderBottomColor = 'transparent'}
+                >
+                  {session.name}
+                </span>
+              )}
               <span style={{
                 fontSize: 12, fontWeight: 600, color: statusColor,
                 textTransform: 'uppercase', letterSpacing: 0.5,
@@ -518,8 +564,8 @@ export default function SessionDialog({
           display: 'flex', borderBottom: '1px solid #1e1e30', flexShrink: 0,
           padding: '0 24px',
         }}>
-          {(['info', 'settings', 'console'] as const).map(tab => {
-            const labels = { info: 'Info', settings: 'Settings', console: 'Console' };
+          {(['info', 'settings', ...(hasConsole ? ['console'] as const : [])] as const).map(tab => {
+            const labels: Record<string, string> = { info: 'Info', settings: 'Settings', console: 'Console' };
             return (
             <button key={tab} onClick={() => setActiveTab(tab)} style={{
               padding: '12px 20px', fontSize: 16, fontWeight: 600, cursor: 'pointer',

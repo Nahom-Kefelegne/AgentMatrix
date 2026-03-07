@@ -196,7 +196,9 @@ export function scanActiveSessions(): {
   }
 
   // Remove sessions that are no longer running
+  // Skip app-managed sessions (temp IDs starting with "new-") — they're not in ps aux
   for (const session of currentSessions) {
+    if (session.id.startsWith('new-')) continue;
     if (!activeIds.has(session.id)) {
       removeSession(session.id);
       removed.push(session.id);

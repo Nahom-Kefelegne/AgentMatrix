@@ -16,10 +16,7 @@ export default function TerminalPanel({ sessionId, sessionName, cwd, visible }: 
   const termRef = useRef<any>(null);
   const fitRef = useRef<any>(null);
   const [status, setStatus] = useState<'idle' | 'connecting' | 'connected' | 'exited'>('idle');
-  const [started, setStarted] = useState(false);
-
   useEffect(() => {
-    if (!started) return;
     const container = containerRef.current;
     const socket = socketRef.current;
     if (!container || !socket) return;
@@ -110,9 +107,9 @@ export default function TerminalPanel({ sessionId, sessionName, cwd, visible }: 
       socket.on('terminal:data' as any, handleData);
       socket.on('terminal:exit' as any, handleExit);
 
-      // Spawn the PTY
+      // Attach to the already-spawned PTY (managed session)
       setStatus('connecting');
-      socket.emit('terminal:spawn', { sessionId });
+      socket.emit('terminal:resume' as any, { sessionId });
 
       // Handle resize — debounce to avoid flicker
       let resizeTimer: ReturnType<typeof setTimeout> | null = null;
@@ -149,12 +146,11 @@ export default function TerminalPanel({ sessionId, sessionName, cwd, visible }: 
         termRef.current = null;
       }
     };
-  }, [sessionId, socketRef, started]);
+  }, [sessionId, socketRef]);
 
   // Re-fit when tab becomes visible
   useEffect(() => {
     if (visible && fitRef.current && termRef.current) {
-      // Small delay to let CSS layout settle
       const timer = setTimeout(() => {
         try {
           fitRef.current.fit();
@@ -164,34 +160,6 @@ export default function TerminalPanel({ sessionId, sessionName, cwd, visible }: 
       return () => clearTimeout(timer);
     }
   }, [visible]);
-
-  if (!started) {
-    return (
-      <div style={{
-        display: 'flex', flexDirection: 'column', height: '100%',
-        alignItems: 'center', justifyContent: 'center', gap: 16,
-      }}>
-        <div style={{ fontSize: 16, color: '#aaa' }}>
-          Open a terminal for <span style={{ color: '#8ab4e0', fontWeight: 600 }}>{sessionName}</span>
-        </div>
-        {cwd && (
-          <div style={{ fontSize: 14, color: '#666', fontFamily: "'Courier New', monospace" }}>{cwd}</div>
-        )}
-        <div style={{ display: 'flex', gap: 10 }}>
-          <button onClick={() => setStarted(true)} style={{
-            padding: '10px 24px', borderRadius: 8, border: 'none',
-            background: '#4a9eff', color: '#fff', fontSize: 15, fontWeight: 600,
-            cursor: 'pointer', fontFamily: 'inherit',
-          }}>
-            Fork &amp; Connect
-          </button>
-        </div>
-        <div style={{ fontSize: 13, color: '#555', maxWidth: 350, textAlign: 'center', lineHeight: 1.5 }}>
-          This will fork the session and open an interactive terminal. The original session is not affected.
-        </div>
-      </div>
-    );
-  }
 
   return (
     <div style={{

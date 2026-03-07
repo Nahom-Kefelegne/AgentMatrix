@@ -1,11 +1,21 @@
 import type { Server as SocketIOServer } from 'socket.io';
 import { PtyManager } from './pty/PtyManager';
-import { getSession } from '../lib/state/sessionStore';
+import { getSession, addSession, getAllSessions } from '../lib/state/sessionStore';
+import { setCachedName } from '../lib/state/nameCache';
+import { SOCKET_EVENTS } from '../lib/types';
+import {
+  DESK_POSITIONS, OVERFLOW_POSITIONS, ENTRANCE_POINT, CHARACTER_COLORS,
+} from '../lib/constants';
 
-/**
- * Bridge for terminal I/O between xterm.js and PTY sessions.
- * Handles: spawning new sessions, resuming existing ones, raw I/O, resize.
- */
+function getNextDeskIndex(): number {
+  const sessions = getAllSessions();
+  const usedIndices = new Set(sessions.map(s => s.deskIndex));
+  for (let i = 0; i < DESK_POSITIONS.length + OVERFLOW_POSITIONS.length; i++) {
+    if (!usedIndices.has(i)) return i;
+  }
+  return sessions.length;
+}
+
 export function setupTerminalBridge(io: SocketIOServer, ptyManager: PtyManager): void {
   io.on('connection', (socket) => {
 
@@ -20,11 +30,40 @@ export function setupTerminalBridge(io: SocketIOServer, ptyManager: PtyManager):
       systemPrompt?: string;
     }) => {
       try {
-        // Generate a temporary ID for the PTY (scanner will pick up the real session)
         const tempId = `new-${Date.now()}`;
-        console.log(`[terminal:new] cwd=${opts.cwd} name=${opts.name || '(none)'}`);
+        const name = opts.name || `session-${Date.now().toString(36)}`;
+        console.log(`[terminal:new] name=${name} cwd=${opts.cwd}`);
 
-        const ptySession = ptyManager.spawnNew(tempId, {
+        // Create session entry immediately so sprite appears
+        const deskIndex = getNextDeskIndex();
+        const isDesk = deskIndex < DESK_POSITIONS.length;
+        const deskPosition = isDesk
+          ? DESK_POSITIONS[deskIndex]
+          : deskIndex < DESK_POSITIONS.length + OVERFLOW_POSITIONS.length
+            ? OVERFLOW_POSITIONS[deskIndex - DESK_POSITIONS.length]
+            : ENTRANCE_POINT;
+        const colorIndex = getAllSessions().length % CHARACTER_COLORS.length;
+
+        const sessionData = {
+          id: tempId,
+          name,
+          color: CHARACTER_COLORS[colorIndex],
+          status: 'idle' as const,
+          deskIndex,
+          deskPosition,
+          spawnPosition: ENTRANCE_POINT,
+          recentActions: [],
+          agents: [],
+          cwd: opts.cwd,
+          createdAt: Date.now(),
+        };
+
+        addSession(sessionData);
+        setCachedName(tempId, name);
+        io.emit(SOCKET_EVENTS.SESSION_START, sessionData);
+
+        // Spawn the PTY
+        ptyManager.spawnNew(tempId, {
           cwd: opts.cwd,
           name: opts.name,
           permissionMode: opts.permissionMode,
@@ -34,25 +73,23 @@ export function setupTerminalBridge(io: SocketIOServer, ptyManager: PtyManager):
           systemPrompt: opts.systemPrompt,
         });
 
-        // Stream output
         ptyManager.onOutput(tempId, (data) => {
           socket.emit('terminal:data', { sessionId: tempId, data });
         });
 
-        socket.emit('terminal:spawned', { sessionId: tempId });
+        socket.emit('terminal:spawned', { sessionId: tempId, name });
       } catch (err) {
         console.error('[terminal:new]', err);
         socket.emit('terminal:exit', { sessionId: 'new', exitCode: -1 });
       }
     });
 
-    // Resume an existing session (no fork — continues the same session)
+    // Resume an existing session (no fork)
     socket.on('terminal:resume', ({ sessionId }: { sessionId: string }) => {
       try {
         const session = getSession(sessionId);
         const name = session?.name || sessionId;
 
-        // If PTY already exists, re-attach
         if (ptyManager.hasPty(sessionId)) {
           console.log(`[terminal:resume] Re-attaching to ${name}`);
           ptyManager.onOutput(sessionId, (data) => {
@@ -61,7 +98,7 @@ export function setupTerminalBridge(io: SocketIOServer, ptyManager: PtyManager):
           return;
         }
 
-        console.log(`[terminal:resume] Resuming ${name} (no fork)`);
+        console.log(`[terminal:resume] Resuming ${name}`);
         ptyManager.spawnResume(sessionId, {
           cwd: session?.cwd,
           resumeId: sessionId,
@@ -72,38 +109,6 @@ export function setupTerminalBridge(io: SocketIOServer, ptyManager: PtyManager):
         });
       } catch (err) {
         console.error('[terminal:resume]', err);
-        socket.emit('terminal:exit', { sessionId, exitCode: -1 });
-      }
-    });
-
-    // Legacy: spawn with fork (kept for backward compat, used by Console tab on active sessions)
-    socket.on('terminal:spawn', ({ sessionId }: { sessionId: string }) => {
-      try {
-        const session = getSession(sessionId);
-        if (!session) {
-          socket.emit('terminal:exit', { sessionId, exitCode: -1 });
-          return;
-        }
-
-        if (ptyManager.hasPty(sessionId)) {
-          ptyManager.onOutput(sessionId, (data) => {
-            socket.emit('terminal:data', { sessionId, data });
-          });
-          return;
-        }
-
-        console.log(`[terminal:spawn] Forking ${session.name}`);
-        ptyManager.spawnResume(sessionId, {
-          cwd: session.cwd,
-          resumeId: sessionId,
-          fork: true,
-        });
-
-        ptyManager.onOutput(sessionId, (data) => {
-          socket.emit('terminal:data', { sessionId, data });
-        });
-      } catch (err) {
-        console.error('[terminal:spawn]', err);
         socket.emit('terminal:exit', { sessionId, exitCode: -1 });
       }
     });
