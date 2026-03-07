@@ -1,0 +1,36 @@
+appId: com.agentmatrix.app
+productName: Agent Matrix
+
+asar: true
+
+directories:
+  output: dist
+  buildResources: build
+
+files:
+  - "electron/**/*"
+  - "lib/**/*"
+  - "app/**/*"
+  - "public/**/*"
+  - ".next/**/*"
+  - "server.ts"
+  - "next.config.ts"
+  - "package.json"
+
+mac:
+  target:
+    - dmg
+    - zip
+  category: public.app-category.developer-tools
+
+win:
+  target: nsis
+
+linux:
+  target:
+    - AppImage
+    - deb
+
+nsis:
+  oneClick: false
+  allowToChangeInstallationDirectory: true

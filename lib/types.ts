@@ -128,9 +128,14 @@ export interface ServerToClientEvents {
   'agent:stop': (data: { sessionId: string; agentId: string }) => void;
   'meeting:start': (data: { teamId: string; participantIds: string[] }) => void;
   'meeting:message': (data: { teamId: string; fromId: string; toId: string; summary: string }) => void;
+  'prompt:output': (data: { sessionId: string; text: string }) => void;
+  'prompt:ready': (data: { sessionId: string }) => void;
+  'prompt:error': (data: { sessionId: string; error: string }) => void;
 }
 
-export interface ClientToServerEvents {}
+export interface ClientToServerEvents {
+  'prompt:send': (data: { sessionId: string; prompt: string }) => void;
+}
 
 // ===== Socket Event Names =====
 
@@ -145,4 +150,8 @@ export const SOCKET_EVENTS = {
   AGENT_STOP: 'agent:stop',
   MEETING_START: 'meeting:start',
   MEETING_MESSAGE: 'meeting:message',
+  PROMPT_SEND: 'prompt:send',
+  PROMPT_OUTPUT: 'prompt:output',
+  PROMPT_READY: 'prompt:ready',
+  PROMPT_ERROR: 'prompt:error',
 } as const;

@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import type { SessionData, Action } from '@/lib/types';
+import PromptPanel from './PromptPanel';
 
 const STATUS_COLORS: Record<string, string> = {
   idle: '#888888',
@@ -358,7 +359,7 @@ export default function SessionDialog({
   sessionId, sessions, onClose, isTaskTracker, onSetTaskTracker, noBackdrop,
   onPrev, onNext, sessionIndex, sessionTotal,
 }: SessionDialogProps) {
-  const [activeTab, setActiveTab] = useState<'info' | 'settings'>('info');
+  const [activeTab, setActiveTab] = useState<'info' | 'settings' | 'terminal'>('info');
   const [killing, setKilling] = useState(false);
   const [restartCommand, setRestartCommand] = useState<string | null>(null);
   const [, setTick] = useState(0);
@@ -502,7 +503,7 @@ export default function SessionDialog({
           display: 'flex', borderBottom: '1px solid #1e1e30', flexShrink: 0,
           padding: '0 24px',
         }}>
-          {(['info', 'settings'] as const).map(tab => (
+          {(['info', 'settings', 'terminal'] as const).map(tab => (
             <button key={tab} onClick={() => setActiveTab(tab)} style={{
               padding: '12px 20px', fontSize: 16, fontWeight: 600, cursor: 'pointer',
               color: activeTab === tab ? '#eee' : '#777',
@@ -510,17 +511,23 @@ export default function SessionDialog({
               borderBottom: `2px solid ${activeTab === tab ? '#4a9eff' : 'transparent'}`,
               transition: 'all 0.15s',
             }}>
-              {tab === 'info' ? 'Info' : 'Settings'}
+              {tab === 'info' ? 'Info' : tab === 'settings' ? 'Settings' : 'Terminal'}
             </button>
           ))}
         </div>
 
         {/* Content */}
-        <div style={{ flex: 1, overflowY: 'auto', padding: '20px 24px' }}>
+        <div style={{
+          flex: 1, padding: '20px 24px', minHeight: 0,
+          overflowY: activeTab === 'terminal' ? 'hidden' : 'auto',
+          display: 'flex', flexDirection: 'column',
+        }}>
           {activeTab === 'info' ? (
             <InfoTab session={session} cliCmd={cliCmd} />
-          ) : (
+          ) : activeTab === 'settings' ? (
             <SettingsTab session={session} />
+          ) : (
+            <PromptPanel sessionId={session.id} sessionName={session.name} cwd={session.cwd} />
           )}
         </div>
 

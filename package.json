@@ -2,12 +2,16 @@
   "name": "claude-office",
   "version": "0.1.0",
   "private": true,
+  "main": "electron/main.ts",
   "scripts": {
     "dev": "tsx server.ts",
     "build": "next build",
-    "start": "NODE_ENV=production tsx server.ts"
+    "start": "NODE_ENV=production tsx server.ts",
+    "electron:dev": "npx tsx electron/main.ts",
+    "electron:build": "npm run build && electron-builder"
   },
   "dependencies": {
+    "node-pty": "^1.0.0",
     "next": "16.1.6",
     "react": "19.2.3",
     "react-dom": "19.2.3",
@@ -19,6 +23,8 @@
     "@types/node": "^20",
     "@types/react": "^19",
     "@types/react-dom": "^19",
+    "electron": "^33.0.0",
+    "electron-builder": "^25.0.0",
     "typescript": "^5"
   }
 }
