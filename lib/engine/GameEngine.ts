@@ -334,4 +334,54 @@ export class GameEngine {
   getCharacterManager(): CharacterManager {
     return this.characterManager;
   }
+
+  /**
+   * Get a character's screen position (in display pixels) and a data URL of its sprite.
+   * Used for the floating sprite animation when opening the session dialog.
+   */
+  getCharacterScreenInfo(characterId: string): {
+    screenX: number;
+    screenY: number;
+    spriteDataURL: string;
+    name: string;
+    color: string;
+  } | null {
+    const char = this.characterManager.getCharacter(characterId);
+    if (!char) return null;
+
+    // Screen position (center of character, in display coordinates)
+    const canvasEl = this.canvas;
+    const rect = canvasEl.getBoundingClientRect();
+    const screenX = rect.left + (char.x + TILE_SIZE / 2) * (rect.width / CANVAS_W);
+    const screenY = rect.top + (char.y + TILE_SIZE / 2) * (rect.height / CANVAS_H);
+
+    // Render sprite to a small offscreen canvas
+    const spriteSize = 64;
+    const offscreen = document.createElement('canvas');
+    offscreen.width = spriteSize;
+    offscreen.height = spriteSize;
+    const ctx = offscreen.getContext('2d')!;
+    ctx.imageSmoothingEnabled = false;
+
+    // Draw the character's current frame centered in the canvas
+    if (this.spriteSheet.isReady) {
+      const frame = char.getFrameInfo();
+      this.spriteSheet.drawCharFrame(
+        ctx,
+        frame.blockX, frame.blockY,
+        frame.dirRow, frame.frame,
+        (spriteSize - 48) / 2, (spriteSize - 51) / 2,
+        frame.flip,
+        48, 51,
+      );
+    }
+
+    return {
+      screenX,
+      screenY,
+      spriteDataURL: offscreen.toDataURL(),
+      name: char.name,
+      color: char.color,
+    };
+  }
 }

@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useEffect, useRef, useCallback } from 'react';
+import React, { useEffect, useRef, useCallback, forwardRef, useImperativeHandle } from 'react';
 import { CANVAS_W, CANVAS_H, DISPLAY_W, DISPLAY_H, SCALE } from '@/lib/constants';
 import { SOCKET_EVENTS } from '@/lib/types';
 import type { SessionData, AgentData, CharacterData } from '@/lib/types';
@@ -14,7 +14,16 @@ interface OfficeCanvasProps {
   scrollToId?: string | null;
 }
 
-export default function OfficeCanvas({ sessions, onEvent, onHover, onClick, scrollToId }: OfficeCanvasProps) {
+export interface OfficeCanvasHandle {
+  getCharacterScreenInfo: (id: string) => {
+    screenX: number; screenY: number; spriteDataURL: string; name: string; color: string;
+  } | null;
+}
+
+const OfficeCanvas = forwardRef<OfficeCanvasHandle, OfficeCanvasProps>(function OfficeCanvas(
+  { sessions, onEvent, onHover, onClick, scrollToId },
+  ref,
+) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const overlayRef = useRef<HTMLCanvasElement>(null);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -198,6 +207,13 @@ export default function OfficeCanvas({ sessions, onEvent, onHover, onClick, scro
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // Expose engine methods to parent via ref
+  useImperativeHandle(ref, () => ({
+    getCharacterScreenInfo: (id: string) => {
+      return engineRef.current?.getCharacterScreenInfo?.(id) ?? null;
+    },
+  }), []);
+
   // Highlight selected character
   useEffect(() => {
     if (engineRef.current && engineReadyRef.current && engineRef.current.highlightCharacter) {
@@ -287,4 +303,6 @@ export default function OfficeCanvas({ sessions, onEvent, onHover, onClick, scro
       </div>
     </div>
   );
-}
+});
+
+export default OfficeCanvas;

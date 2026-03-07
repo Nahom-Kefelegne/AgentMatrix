@@ -7,7 +7,10 @@ import { emitToClients } from '@/lib/state/socketEmitter';
 export async function POST(request: Request) {
   try {
     const payload = await request.json();
-    const summary = payload.tool_name;
+
+    // Use lastToolSummary from the preceding tool-use event (has file paths, etc.)
+    const session = getSession(payload.session_id);
+    const summary = session?.lastToolSummary || payload.tool_name;
 
     addAction(payload.session_id, {
       toolName: payload.tool_name,
@@ -31,14 +34,14 @@ export async function POST(request: Request) {
       summary,
     });
 
-    const session = getSession(payload.session_id);
-    if (session) {
+    const updated = getSession(payload.session_id);
+    if (updated) {
       emitToClients(SOCKET_EVENTS.SESSION_UPDATE, {
         sessionId: payload.session_id,
         changes: {
           currentTool: undefined,
           lastActivity,
-          recentActions: session.recentActions,
+          recentActions: updated.recentActions,
         },
       });
     }

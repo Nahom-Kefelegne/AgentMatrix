@@ -105,6 +105,18 @@ export class Character {
     return this.path.length > 0;
   }
 
+  getFrameInfo(): { blockX: number; blockY: number; dirRow: number; frame: number; flip: boolean } {
+    const block = this.spriteSheet.getCharacterFrame(this.charIndex);
+    const dirInfo = DIR_INFO[this.direction];
+    return {
+      blockX: block.blockX,
+      blockY: block.blockY,
+      dirRow: dirInfo.row,
+      frame: this.animFrame,
+      flip: dirInfo.flip,
+    };
+  }
+
   moveTo(tileX: number, tileY: number, tileMap: TileMap): void {
     const start: Point = { x: this.tileX, y: this.tileY };
     const end: Point = { x: tileX, y: tileY };

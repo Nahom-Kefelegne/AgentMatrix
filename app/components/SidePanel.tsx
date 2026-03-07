@@ -41,7 +41,7 @@ function CopyCliButton({ cwd, name }: { cwd?: string; name: string }) {
         cursor: 'pointer',
       }}
     >
-      {copied ? '✓ CLI Command Copied!' : 'Copy CLI Command'}
+      {copied ? '✓ Copied!' : 'Copy Resume Command'}
     </button>
   );
 }
