@@ -1,6 +1,6 @@
 import type { Server as SocketIOServer } from 'socket.io';
 import { PtyManager } from './pty/PtyManager';
-import { execSync } from 'child_process';
+import { randomUUID } from 'crypto';
 import { getSession, addSession, getAllSessions } from '../lib/state/sessionStore';
 import { setCachedName } from '../lib/state/nameCache';
 import { SOCKET_EVENTS } from '../lib/types';
@@ -31,9 +31,9 @@ export function setupTerminalBridge(io: SocketIOServer, ptyManager: PtyManager):
       systemPrompt?: string;
     }) => {
       try {
-        const tempId = `new-${Date.now()}`;
+        const sessionUuid = randomUUID();
         const name = opts.name || `session-${Date.now().toString(36)}`;
-        console.log(`[terminal:new] name=${name} cwd=${opts.cwd}`);
+        console.log(`[terminal:new] name=${name} uuid=${sessionUuid.slice(0, 8)} cwd=${opts.cwd}`);
 
         // Create session entry immediately so sprite appears
         const deskIndex = getNextDeskIndex();
@@ -46,7 +46,7 @@ export function setupTerminalBridge(io: SocketIOServer, ptyManager: PtyManager):
         const colorIndex = getAllSessions().length % CHARACTER_COLORS.length;
 
         const sessionData = {
-          id: tempId,
+          id: sessionUuid,
           name,
           color: CHARACTER_COLORS[colorIndex],
           status: 'idle' as const,
@@ -60,12 +60,13 @@ export function setupTerminalBridge(io: SocketIOServer, ptyManager: PtyManager):
         };
 
         addSession(sessionData);
-        setCachedName(tempId, name);
+        setCachedName(sessionUuid, name);
         io.emit(SOCKET_EVENTS.SESSION_START, sessionData);
 
-        // Spawn the PTY
-        ptyManager.spawnNew(tempId, {
+        // Spawn the PTY with our controlled UUID
+        ptyManager.spawnNew(sessionUuid, {
           cwd: opts.cwd,
+          sessionUuid,
           name: opts.name,
           permissionMode: opts.permissionMode,
           model: opts.model,
@@ -74,37 +75,11 @@ export function setupTerminalBridge(io: SocketIOServer, ptyManager: PtyManager):
           systemPrompt: opts.systemPrompt,
         });
 
-        ptyManager.onOutput(tempId, (data) => {
-          socket.emit('terminal:data', { sessionId: tempId, data });
+        ptyManager.onOutput(sessionUuid, (data) => {
+          socket.emit('terminal:data', { sessionId: sessionUuid, data });
         });
 
-        // After a delay, find the real session ID by checking what sessions
-        // the scanner discovers that we don't already have names for.
-        // We poll a few times since Claude takes a moment to start.
-        let detectAttempts = 0;
-        const detectInterval = setInterval(() => {
-          detectAttempts++;
-          if (detectAttempts > 6) { clearInterval(detectInterval); return; }
-          try {
-            const output = execSync(
-              "ps aux | grep '[c]laude.*--session-id' | grep -v grep",
-              { encoding: 'utf-8', timeout: 5000 },
-            );
-            const knownIds = new Set(getAllSessions().filter(s => !s.id.startsWith('new-')).map(s => s.id));
-            for (const line of output.split('\n')) {
-              const match = line.match(/--session-id\s+([a-f0-9-]+)/);
-              if (match && !knownIds.has(match[1])) {
-                const realId = match[1];
-                console.log(`[terminal:new] Mapped name "${name}" to real session ${realId.slice(0, 8)}`);
-                setCachedName(realId, name);
-                clearInterval(detectInterval);
-                return;
-              }
-            }
-          } catch {}
-        }, 3000);
-
-        socket.emit('terminal:spawned', { sessionId: tempId, name });
+        socket.emit('terminal:spawned', { sessionId: sessionUuid, name });
       } catch (err) {
         console.error('[terminal:new]', err);
         socket.emit('terminal:exit', { sessionId: 'new', exitCode: -1 });

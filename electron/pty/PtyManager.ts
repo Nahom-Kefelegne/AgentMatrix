@@ -120,6 +120,7 @@ export class PtyManager {
   /** Spawn a brand new Claude session (no resume) */
   spawnNew(id: string, opts: {
     cwd: string;
+    sessionUuid?: string;
     name?: string;
     permissionMode?: string;
     model?: string;
@@ -130,6 +131,8 @@ export class PtyManager {
     if (this.sessions.has(id)) throw new Error(`Session ${id} already exists`);
 
     const args: string[] = [];
+    // Pin the session ID so we control it (no race condition for name mapping)
+    if (opts.sessionUuid) args.push('--session-id', opts.sessionUuid);
     if (opts.permissionMode === 'bypassPermissions') args.push('--dangerously-skip-permissions');
     else if (opts.permissionMode) args.push('--permission-mode', opts.permissionMode);
     if (opts.model) args.push('--model', opts.model);
