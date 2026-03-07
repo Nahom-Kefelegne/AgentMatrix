@@ -6,10 +6,18 @@ const SETTINGS_PATH = join(homedir(), '.claude', 'agentmatrix-settings.json');
 
 export interface AppSettings {
   autoResume: boolean;
+  defaultModel: string;
+  defaultPermissionMode: string;
+  defaultEffort: string;
+  appendSystemPrompt: string;
 }
 
 const DEFAULTS: AppSettings = {
   autoResume: true,
+  defaultModel: '',
+  defaultPermissionMode: 'bypassPermissions',
+  defaultEffort: '',
+  appendSystemPrompt: '',
 };
 
 export function getSettings(): AppSettings {

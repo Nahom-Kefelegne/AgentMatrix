@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 import { useSocketContext } from './SocketProvider';
 
 interface SpawnModalProps {
@@ -93,13 +93,30 @@ export default function SpawnModal({ isOpen, onClose, onSessionSpawned }: SpawnM
   const { socketRef } = useSocketContext();
   const [cwd, setCwd] = useState('/Users/nkefelegne/Desktop/DEV');
   const [sessionName, setSessionName] = useState('');
-  const [permissionMode, setPermissionMode] = useState('bypassPermissions');
+  const [permissionMode, setPermissionMode] = useState('');
   const [model, setModel] = useState('');
   const [effort, setEffort] = useState('');
   const [allowedTools, setAllowedTools] = useState('');
   const [systemPrompt, setSystemPrompt] = useState('');
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [launching, setLaunching] = useState(false);
+  const [defaultsLoaded, setDefaultsLoaded] = useState(false);
+
+  // Load defaults from app settings
+  useEffect(() => {
+    if (isOpen && !defaultsLoaded) {
+      fetch('/api/settings')
+        .then(r => r.json())
+        .then(data => {
+          if (data.defaultModel && !model) setModel(data.defaultModel);
+          if (data.defaultPermissionMode) setPermissionMode(data.defaultPermissionMode);
+          if (data.defaultEffort && !effort) setEffort(data.defaultEffort);
+          if (data.appendSystemPrompt && !systemPrompt) setSystemPrompt(data.appendSystemPrompt);
+          setDefaultsLoaded(true);
+        })
+        .catch(() => setDefaultsLoaded(true));
+    }
+  }, [isOpen, defaultsLoaded]);
 
   const handleLaunch = useCallback(() => {
     const socket = socketRef.current;
