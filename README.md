@@ -220,7 +220,70 @@ Claude Code Sessions
 +---------------------+
 ```
 
-## Development
+## Desktop App (Electron)
+
+Agent Matrix can run as a standalone desktop app with **interactive terminal sessions** — send prompts to Claude Code directly from the UI.
+
+### Why Desktop?
+
+The web app can monitor sessions but can't send prompts to them (browser can't access terminal processes). The Electron desktop app wraps the same UI but adds a PTY (pseudo-terminal) layer that lets you:
+
+- **Send prompts** to any session from the Session Dialog's "Terminal" tab
+- **Stream responses** back in real-time
+- **Resume idle sessions** interactively — no terminal window needed
+- **System tray** — runs in background, always monitoring
+- Uses your existing **Claude Code authentication** and **settings** — no API key needed
+
+### Run the Desktop App (Development)
+
+```bash
+# 1. Install dependencies (includes Electron + node-pty)
+npm install
+
+# 2. Start in dev mode
+npm run electron:dev
+```
+
+This starts the Next.js server and opens the Electron window. The app is fully functional — office view, dashboard, prompting all work.
+
+### Build for Distribution
+
+```bash
+# Build the Next.js app, then package with electron-builder
+npm run electron:build
+```
+
+This produces platform-specific installers:
+- **macOS**: `.dmg` in `dist/`
+- **Windows**: `.exe` installer in `dist/`
+- **Linux**: `.AppImage` and `.deb` in `dist/`
+
+### How Prompting Works
+
+1. Click a session (office or dashboard view) → Session Dialog opens
+2. Go to the **Terminal** tab
+3. Type a prompt and press Enter
+4. Agent Matrix spawns a PTY running `claude --resume <session> --dangerously-skip-permissions`
+5. Your prompt is sent to Claude's stdin, responses stream back in real-time
+6. The PTY persists — you can send multiple prompts in the same session
+
+**Note:** Prompting only works for sessions you resume from the UI. Sessions running in an external terminal are read-only (visible but not interactive).
+
+### Desktop App Architecture
+
+```
+Electron Main Process
+├── Next.js server (same as web mode)
+├── Session scanner (process discovery)
+├── Socket.io server (real-time events)
+├── PTY Manager (terminal sessions)
+│   ├── Spawns claude --resume <name>
+│   ├── stdin.write(prompt) ← from browser
+│   └── stdout → Socket.io → browser
+└── System tray (background mode)
+```
+
+## Development (Web Only)
 
 ```bash
 npm run dev      # Start dev server (tsx server.ts)
@@ -228,15 +291,23 @@ npm run build    # Production build
 npm start        # Start production server
 ```
 
-The app uses a custom `server.ts` that wraps Next.js with Socket.io. Hot reload works for both the Next.js frontend and the API routes.
+The web app uses a custom `server.ts` that wraps Next.js with Socket.io. Hot reload works for both the Next.js frontend and the API routes. The web app has all features except interactive prompting (which requires the Electron desktop app).
 
 ## Project Structure
 
 ```
 AgentMatrix/
 +-- server.ts                    # Custom HTTP server (Next.js + Socket.io)
++-- electron/                    # Electron desktop app (optional)
+|   +-- main.ts                  # Electron main process + server startup
+|   +-- preload.ts               # Context bridge for renderer
+|   +-- promptBridge.ts          # Socket.io <-> PTY bridge
+|   +-- pty/
+|       +-- PtyManager.ts        # Spawn/manage Claude terminal sessions
+|       +-- OutputParser.ts      # ANSI stripping, prompt-ready detection
+|       +-- index.ts
 +-- app/
-|   +-- page.tsx                 # Main page
+|   +-- page.tsx                 # Main page (office + dashboard views)
 |   +-- layout.tsx               # Root layout
 |   +-- globals.css              # Dark theme styles
 |   +-- api/
@@ -246,9 +317,12 @@ AgentMatrix/
 |   |   +-- dirs/                # Directory browser API
 |   +-- components/
 |       +-- OfficeCanvas.tsx     # Dual-canvas game renderer
-|       +-- SidePanel.tsx        # Session info/settings panel
+|       +-- DashboardView.tsx    # Card grid session dashboard
+|       +-- SessionDialog.tsx    # Session detail modal (Info/Settings/Terminal)
+|       +-- PromptPanel.tsx      # Interactive prompt UI for Terminal tab
+|       +-- FloatingSprite.tsx   # Animated sprite beside dialog
 |       +-- TaskBoard.tsx        # Task management board
-|       +-- HeaderBar.tsx        # Top navigation bar
+|       +-- HeaderBar.tsx        # Top nav with Office/Dashboard toggle
 |       +-- HoverCard.tsx        # Character hover tooltip
 |       +-- SetupModal.tsx       # Hook configuration modal
 |       +-- ResumeModal.tsx      # Resume past sessions
@@ -268,11 +342,14 @@ AgentMatrix/
 |   |   +-- sessionStore.ts      # In-memory session state
 |   |   +-- sessionScanner.ts    # Process discovery + name resolution
 |   |   +-- sessionName.ts       # Name resolution from transcripts
+|   |   +-- nameCache.ts         # Persistent name cache across restarts
 |   |   +-- socketEmitter.ts     # Server-side socket emit helper
 |   +-- hooks/
 |       +-- useSocket.ts         # Client socket event hook
+|       +-- usePrompt.ts         # Prompt send/receive hook (Electron)
 +-- public/
-    +-- sprites/characters.png   # 24-character sprite sheet (CC0 license)
+|   +-- sprites/characters.png   # 24-character sprite sheet (CC0 license)
++-- electron-builder.yml         # Desktop app packaging config
 ```
 
 ## Requirements
