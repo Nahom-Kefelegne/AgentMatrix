@@ -2,7 +2,7 @@ import type { Server as SocketIOServer } from 'socket.io';
 import { PtyManager } from './pty/PtyManager';
 import { randomUUID } from 'crypto';
 import { homedir } from 'os';
-import { addSession, getAllSessions, getSession, removeSession } from '../lib/state/sessionStore';
+import { addSession, getAllSessions, getSession, removeSession, updateSession } from '../lib/state/sessionStore';
 import { setCachedName } from '../lib/state/nameCache';
 import { getActiveSessions, saveActiveSessions } from '../lib/state/activeSessionsCache';
 import { SOCKET_EVENTS } from '../lib/types';
@@ -82,11 +82,11 @@ export function setupTerminalBridge(io: SocketIOServer, ptyManager: PtyManager):
           socket.emit('terminal:data', { sessionId: sessionUuid, data });
         });
 
-        // Emit state changes to UI
-        const ptySession = ptyManager.getSession(sessionUuid);
-        if (ptySession) {
-          ptySession.onStateChange = (state) => {
-            io.emit('session:state', { sessionId: sessionUuid, ...state });
+        // Wire up state change → single socket event
+        const newPty = ptyManager.getSession(sessionUuid);
+        if (newPty) {
+          newPty.onStateChange = (info) => {
+            io.emit('session:state', { sessionId: sessionUuid, ...info });
           };
         }
 
@@ -136,10 +136,10 @@ export function setupTerminalBridge(io: SocketIOServer, ptyManager: PtyManager):
           socket.emit('terminal:data', { sessionId, data });
         });
 
-        const rptySession = ptyManager.getSession(sessionId);
-        if (rptySession) {
-          rptySession.onStateChange = (state) => {
-            io.emit('session:state', { sessionId, ...state });
+        const rPty = ptyManager.getSession(sessionId);
+        if (rPty) {
+          rPty.onStateChange = (info) => {
+            io.emit('session:state', { sessionId, ...info });
           };
         }
       } catch (err) {

@@ -12,6 +12,7 @@ interface OfficeCanvasProps {
   onHover: (char: CharacterData | null, screenX: number, screenY: number) => void;
   onClick: (char: CharacterData | null) => void;
   scrollToId?: string | null;
+  socketRef?: React.RefObject<any>;
 }
 
 export interface OfficeCanvasHandle {
@@ -21,7 +22,7 @@ export interface OfficeCanvasHandle {
 }
 
 const OfficeCanvas = forwardRef<OfficeCanvasHandle, OfficeCanvasProps>(function OfficeCanvas(
-  { sessions, onEvent, onHover, onClick, scrollToId },
+  { sessions, onEvent, onHover, onClick, scrollToId, socketRef: parentSocketRef },
   ref,
 ) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -80,9 +81,10 @@ const OfficeCanvas = forwardRef<OfficeCanvasHandle, OfficeCanvasProps>(function 
           engine.updateCharacter(data.sessionId, rest);
         } else {
           engine.updateCharacter(data.sessionId, data.changes);
-          // Show zzz when session goes idle (persistent until they work again)
           if (data.changes.status === 'idle') {
             engine.showEmoji(data.sessionId, '💤', true);
+          } else if (data.changes.status === 'working') {
+            engine.clearEmoji(data.sessionId);
           }
         }
         break;
@@ -213,6 +215,25 @@ const OfficeCanvas = forwardRef<OfficeCanvasHandle, OfficeCanvasProps>(function 
       return engineRef.current?.getCharacterScreenInfo?.(id) ?? null;
     },
   }), []);
+
+  // Listen for session:state events and update sprite status
+  useEffect(() => {
+    const socket = parentSocketRef?.current;
+    if (!socket) return;
+    const handler = (data: { sessionId: string; state: string }) => {
+      const engine = engineRef.current;
+      if (!engine) return;
+      const newStatus = data.state === 'busy' ? 'working' : 'idle';
+      engine.updateCharacter(data.sessionId, { status: newStatus as any });
+      if (newStatus === 'idle') {
+        engine.showEmoji(data.sessionId, '💤', true);
+      } else {
+        engine.clearEmoji(data.sessionId);
+      }
+    };
+    socket.on('session:state', handler);
+    return () => { socket.off('session:state', handler); };
+  }, [parentSocketRef]);
 
   // Highlight selected character
   useEffect(() => {

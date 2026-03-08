@@ -68,7 +68,8 @@ export default function TerminalPanel({ sessionId, sessionName, cwd, visible }: 
         fontSize: 16,
         fontFamily: "'Menlo', 'Monaco', 'Courier New', monospace",
         lineHeight: 1.4,
-        cursorBlink: true,
+        cursorBlink: false,
+        cursorStyle: 'bar',
         scrollback: 5000,
         scrollOnUserInput: true,
       });

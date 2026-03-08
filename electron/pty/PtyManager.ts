@@ -2,19 +2,17 @@ import { execSync } from 'child_process';
 import { join } from 'path';
 import { homedir } from 'os';
 import type { IPty } from 'node-pty';
-import { OutputParser, type ParsedState } from './OutputParser';
+import { OutputParser, type PtyState, type StateInfo } from './OutputParser';
 
 export interface PtySession {
   id: string;
   pty: IPty;
   status: 'starting' | 'ready' | 'busy' | 'closed';
-  needsConsent: boolean;
-  sessionState: ParsedState;
+  currentState: PtyState;
   outputBuffer: string[];
   onData: ((data: string) => void) | null;
   onReady: (() => void) | null;
-  onConsent: (() => void) | null;
-  onStateChange: ((state: ParsedState) => void) | null;
+  onStateChange: ((info: StateInfo) => void) | null;
   pendingPrompt: string | null;
 }
 
@@ -50,52 +48,38 @@ export class PtyManager {
   private createPtySession(id: string, ptyProcess: IPty): PtySession {
     const session: PtySession = {
       id, pty: ptyProcess, status: 'starting',
-      needsConsent: false, sessionState: { state: 'busy' },
-      outputBuffer: [],
-      onData: null, onReady: null, onConsent: null, onStateChange: null,
+      currentState: 'busy', outputBuffer: [],
+      onData: null, onReady: null, onStateChange: null,
       pendingPrompt: null,
     };
 
     ptyProcess.onData((data: string) => {
       session.outputBuffer.push(data);
+      if (session.outputBuffer.length > 50) session.outputBuffer = session.outputBuffer.slice(-20);
       if (session.onData) session.onData(data);
 
-      // Trim buffer
-      if (session.outputBuffer.length > 100) {
-        session.outputBuffer = session.outputBuffer.slice(-20);
-      }
+      const prev = session.currentState;
+      const recentForReady = session.outputBuffer.slice(-3).join('');
 
-      // Detect state from recent output
-      const recent = session.outputBuffer.slice(-10).join('');
-      const newState = OutputParser.detectState(recent);
-      const prevStateKey = session.sessionState.state;
-
-      // Update session state
-      session.sessionState = newState;
-
-      // Handle consent detection
-      if (newState.actionType === 'trust' && !session.needsConsent) {
-        session.needsConsent = true;
-        if (session.onConsent) session.onConsent();
-      }
-
-      // Handle prompt-ready transition
-      if (newState.state === 'ready' && (session.status === 'starting' || session.status === 'busy')) {
-        session.status = 'ready';
-        if (session.pendingPrompt) {
-          const prompt = session.pendingPrompt;
-          session.pendingPrompt = null;
-          session.status = 'busy';
-          session.sessionState = { state: 'busy' };
-          session.pty.write(prompt + '\r');
-          return;
+      if (OutputParser.isPromptReady(recentForReady)) {
+        if (prev !== 'ready') {
+          session.currentState = 'ready';
+          session.status = 'ready';
+          if (session.pendingPrompt) {
+            const p = session.pendingPrompt;
+            session.pendingPrompt = null;
+            session.currentState = 'busy';
+            session.status = 'busy';
+            session.pty.write(p + '\r');
+            return;
+          }
+          if (session.onReady) session.onReady();
+          if (session.onStateChange) session.onStateChange({ state: 'ready' });
         }
-        if (session.onReady) session.onReady();
-      }
-
-      // Emit state change if different
-      if (newState.state !== prevStateKey || newState.actionType) {
-        if (session.onStateChange) session.onStateChange(newState);
+      } else if (prev === 'ready') {
+        session.currentState = 'busy';
+        session.status = 'busy';
+        if (session.onStateChange) session.onStateChange({ state: 'busy' });
       }
     });
 
@@ -103,7 +87,7 @@ export class PtyManager {
       console.log(`[pty:exit] id=${id.slice(0, 12)} code=${exitCode}`);
       session.status = 'closed';
       this.sessions.delete(id);
-      });
+    });
 
     this.sessions.set(id, session);
     return session;
@@ -115,11 +99,8 @@ export class PtyManager {
     const { existsSync } = require('fs');
     const safeCwd = existsSync(cwd) ? cwd : homedir();
     const claudeCmd = `${claudePath} ${claudeArgs.join(' ')}`;
-
     const env = { ...process.env };
     delete env.CLAUDECODE;
-
-    console.log(`[pty:spawn] cmd="${claudeCmd}" cwd="${safeCwd}"`);
 
     if (process.platform === 'win32') {
       return pty.spawn('cmd.exe', ['/c', `cd /d "${safeCwd}" && ${claudeCmd}`], {
@@ -132,21 +113,13 @@ export class PtyManager {
     });
   }
 
-  /** Spawn a brand new Claude session (no resume) */
   spawnNew(id: string, opts: {
-    cwd: string;
-    sessionUuid?: string;
-    name?: string;
-    permissionMode?: string;
-    model?: string;
-    effort?: string;
-    allowedTools?: string;
-    systemPrompt?: string;
+    cwd: string; sessionUuid?: string; name?: string;
+    permissionMode?: string; model?: string; effort?: string;
+    allowedTools?: string; systemPrompt?: string;
   }): PtySession {
     if (this.sessions.has(id)) throw new Error(`Session ${id} already exists`);
-
     const args: string[] = [];
-    // Pin the session ID so we control it (no race condition for name mapping)
     if (opts.sessionUuid) args.push('--session-id', opts.sessionUuid);
     if (opts.permissionMode === 'bypassPermissions') args.push('--dangerously-skip-permissions');
     else if (opts.permissionMode) args.push('--permission-mode', opts.permissionMode);
@@ -154,25 +127,15 @@ export class PtyManager {
     if (opts.effort) args.push('--effort', opts.effort);
     if (opts.allowedTools) args.push('--allowedTools', opts.allowedTools);
     if (opts.systemPrompt) args.push('--append-system-prompt', `"${opts.systemPrompt.replace(/"/g, '\\"')}"`);
-
-    const ptyProcess = this.spawnPty(opts.cwd, args);
-    return this.createPtySession(id, ptyProcess);
+    return this.createPtySession(id, this.spawnPty(opts.cwd, args));
   }
 
-  /** Resume an existing session by ID */
-  spawnResume(id: string, opts: {
-    cwd?: string;
-    resumeId: string;
-    fork?: boolean;
-  }): PtySession {
+  spawnResume(id: string, opts: { cwd?: string; resumeId: string; fork?: boolean }): PtySession {
     if (this.sessions.has(id)) throw new Error(`Session ${id} already exists`);
-
     const cwd = this.findSessionCwd(opts.resumeId) ?? opts.cwd ?? homedir();
     const args = ['--resume', opts.resumeId, '--dangerously-skip-permissions'];
     if (opts.fork) args.push('--fork-session');
-
-    const ptyProcess = this.spawnPty(cwd, args);
-    return this.createPtySession(id, ptyProcess);
+    return this.createPtySession(id, this.spawnPty(cwd, args));
   }
 
   sendPrompt(sessionId: string, prompt: string): void {
@@ -181,6 +144,7 @@ export class PtyManager {
     if (session.status === 'closed') throw new Error(`Session ${sessionId} closed`);
     if (session.status === 'ready') {
       session.status = 'busy';
+      session.currentState = 'busy';
       session.pty.write(prompt + '\r');
     } else {
       session.pendingPrompt = prompt;

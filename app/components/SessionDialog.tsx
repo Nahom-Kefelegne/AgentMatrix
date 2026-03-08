@@ -367,7 +367,6 @@ export default function SessionDialog({
   const [fullscreen, setFullscreen] = useState(false);
   const isConsole = activeTab === 'console';
   const [, setTick] = useState(0);
-
   // Live timestamps
   useEffect(() => {
     const interval = setInterval(() => setTick(t => t + 1), 5000);
