@@ -13,6 +13,7 @@ interface OfficeCanvasProps {
   onClick: (char: CharacterData | null) => void;
   scrollToId?: string | null;
   socketRef?: React.RefObject<any>;
+  connected?: boolean;
 }
 
 export interface OfficeCanvasHandle {
@@ -22,7 +23,7 @@ export interface OfficeCanvasHandle {
 }
 
 const OfficeCanvas = forwardRef<OfficeCanvasHandle, OfficeCanvasProps>(function OfficeCanvas(
-  { sessions, onEvent, onHover, onClick, scrollToId, socketRef: parentSocketRef },
+  { sessions, onEvent, onHover, onClick, scrollToId, socketRef: parentSocketRef, connected: parentConnected },
   ref,
 ) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -219,7 +220,7 @@ const OfficeCanvas = forwardRef<OfficeCanvasHandle, OfficeCanvasProps>(function 
   // Listen for session:state events and update sprite status
   useEffect(() => {
     const socket = parentSocketRef?.current;
-    if (!socket) return;
+    if (!socket || !parentConnected) return;
     const handler = (data: { sessionId: string; state: string }) => {
       const engine = engineRef.current;
       if (!engine) return;
@@ -233,7 +234,7 @@ const OfficeCanvas = forwardRef<OfficeCanvasHandle, OfficeCanvasProps>(function 
     };
     socket.on('session:state', handler);
     return () => { socket.off('session:state', handler); };
-  }, [parentSocketRef]);
+  }, [parentSocketRef, parentConnected]);
 
   // Highlight selected character
   useEffect(() => {

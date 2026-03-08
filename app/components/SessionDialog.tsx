@@ -3,7 +3,9 @@
 import { useState, useEffect, useCallback } from 'react';
 import type { SessionData, Action } from '@/lib/types';
 import TerminalPanel from './TerminalPanel';
+import ContextBar from './ContextBar';
 import { useSocketContext } from './SocketProvider';
+import { useSessionContext } from '@/lib/hooks/useSessionContext';
 
 const STATUS_COLORS: Record<string, string> = {
   idle: '#888888',
@@ -360,7 +362,8 @@ export default function SessionDialog({
   sessionId, sessions, onClose, isTaskTracker, onSetTaskTracker, noBackdrop,
   onPrev, onNext, sessionIndex, sessionTotal,
 }: SessionDialogProps) {
-  const { socketRef } = useSocketContext();
+  const { socketRef, connected } = useSocketContext();
+  const contextMap = useSessionContext(socketRef, connected);
   const [activeTab, setActiveTab] = useState<'info' | 'settings' | 'console'>('info');
   const [killing, setKilling] = useState(false);
   const [restartCommand, setRestartCommand] = useState<string | null>(null);
@@ -547,7 +550,7 @@ export default function SessionDialog({
             overflowY: 'auto',
             display: activeTab === 'info' ? 'block' : 'none',
           }}>
-            <InfoTab session={session} cliCmd={cliCmd} />
+            <InfoTab session={session} cliCmd={cliCmd} contextUsage={sessionId ? contextMap[sessionId] ?? null : null} />
           </div>
           <div style={{
             position: 'absolute', inset: 0, padding: '20px 24px',
@@ -686,9 +689,15 @@ function ActionRow({ action, isLast }: { action: Action; isLast: boolean }) {
   );
 }
 
-function InfoTab({ session, cliCmd }: { session: SessionData; cliCmd: string }) {
+function InfoTab({ session, cliCmd, contextUsage }: { session: SessionData; cliCmd: string; contextUsage: number | null }) {
   return (
     <>
+      {/* Context usage */}
+      {contextUsage !== null && (
+        <div style={{ marginBottom: 20 }}>
+          <ContextBar usage={contextUsage} />
+        </div>
+      )}
 
       {/* Working on — prominent when active */}
       {session.status === 'working' && session.lastToolSummary && (

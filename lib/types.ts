@@ -40,6 +40,7 @@ export interface SessionData {
   agents: AgentData[];
   teamId?: string;
   cwd?: string;
+  contextUsage?: number;
   createdAt: number;
 }
 

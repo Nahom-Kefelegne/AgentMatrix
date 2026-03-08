@@ -3,6 +3,9 @@
 import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import type { SessionData } from '@/lib/types';
+import { useSocketContext } from './SocketProvider';
+import ContextBar from './ContextBar';
+import { useSessionContext } from '@/lib/hooks/useSessionContext';
 
 const STATUS: Record<string, { color: string; label: string }> = {
   idle: { color: '#888', label: 'Idle' },
@@ -24,6 +27,8 @@ interface Props {
 }
 
 export default function DashboardView({ sessions, onSelectSession }: Props) {
+  const { socketRef, connected } = useSocketContext();
+  const contextMap = useSessionContext(socketRef, connected);
   const all = Array.from(sessions.values());
   const [filter, setFilter] = useState('all');
   const [, tick] = useState(0);
@@ -88,7 +93,7 @@ export default function DashboardView({ sessions, onSelectSession }: Props) {
         ) : (
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(480px, 1fr))', gap: 20 }}>
             <AnimatePresence mode="popLayout">
-              {list.map((s, i) => <SessionCard key={s.id} s={s} i={i} onClick={() => onSelectSession(s.id)} />)}
+              {list.map((s, i) => <SessionCard key={s.id} s={s} i={i} contextUsage={contextMap[s.id] ?? null} onClick={() => onSelectSession(s.id)} />)}
             </AnimatePresence>
           </div>
         )}
@@ -102,7 +107,7 @@ export default function DashboardView({ sessions, onSelectSession }: Props) {
   );
 }
 
-function SessionCard({ s, i, onClick }: { s: SessionData; i: number; onClick: () => void }) {
+function SessionCard({ s, i, contextUsage, onClick }: { s: SessionData; i: number; contextUsage: number | null; onClick: () => void }) {
   const meta = STATUS[s.status] || STATUS.idle;
   const working = s.status === 'working';
   const actions = s.recentActions.slice(0, 4);
@@ -156,6 +161,13 @@ function SessionCard({ s, i, onClick }: { s: SessionData; i: number; onClick: ()
             <span style={{ fontSize: 13, fontWeight: 600, color: meta.color }}>{meta.label}</span>
           </div>
         </div>
+
+        {/* Context bar */}
+        {contextUsage !== null && (
+          <div style={{ marginBottom: 14 }}>
+            <ContextBar usage={contextUsage} compact />
+          </div>
+        )}
 
         {/* Stats */}
         <div style={{ display: 'flex', gap: 12, marginBottom: 14 }}>

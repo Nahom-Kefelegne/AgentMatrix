@@ -5,7 +5,7 @@ import next from 'next';
 import { Server as SocketIOServer } from 'socket.io';
 import { SOCKET_EVENTS } from '../lib/types';
 import { SOCKET_PATH } from '../lib/constants';
-import { getAllSessions, addSession } from '../lib/state/sessionStore';
+import { getAllSessions, addSession, updateSession } from '../lib/state/sessionStore';
 import { getCachedName } from '../lib/state/nameCache';
 import { getSettings } from '../lib/state/appSettings';
 import { getActiveSessions } from '../lib/state/activeSessionsCache';
@@ -116,6 +116,14 @@ function startServer(): Promise<void> {
                 io!.emit(SOCKET_EVENTS.SESSION_START, sessionData);
 
                 ptyManager.spawnResume(s.id, { cwd: s.cwd, resumeId: s.id });
+                // Wire up callbacks
+                const pty = ptyManager.getSession(s.id);
+                if (pty) {
+                  pty.onStateChange = (info) => io!.emit('session:state', { sessionId: s.id, ...info });
+                  pty.onContextUpdate = (usage) => {
+                    io!.emit('session:context', { sessionId: s.id, usage });
+                  };
+                }
                 console.log(`[auto-resume] ${name} (${s.id.slice(0, 8)})`);
               } catch (err) {
                 console.error(`[auto-resume] Failed: ${s.name}`, err);

@@ -21,6 +21,17 @@ export class OutputParser {
     return /[>\u276F]\s*$/.test(clean);
   }
 
+  /** Parse context usage from Claude's status bar output. Returns % used or null. */
+  static parseContextUsage(text: string): number | null {
+    const c = OutputParser.stripAnsi(text);
+    // "Context: 97% remaining (3% used)" — words may be squished or spaced
+    const remainMatch = c.match(/(\d+)%\s*remaining/i);
+    if (remainMatch) return 100 - parseInt(remainMatch[1], 10);
+    const usedMatch = c.match(/(\d+)%\s*used/i);
+    if (usedMatch) return parseInt(usedMatch[1], 10);
+    return null;
+  }
+
   static isEcho(text: string, lastPrompt: string): boolean {
     if (!lastPrompt) return false;
     const clean = OutputParser.stripAnsi(text).trim();

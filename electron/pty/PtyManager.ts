@@ -9,10 +9,12 @@ export interface PtySession {
   pty: IPty;
   status: 'starting' | 'ready' | 'busy' | 'closed';
   currentState: PtyState;
+  contextUsage: number | null; // % used (0-100)
   outputBuffer: string[];
   onData: ((data: string) => void) | null;
   onReady: (() => void) | null;
   onStateChange: ((info: StateInfo) => void) | null;
+  onContextUpdate: ((usage: number) => void) | null;
   pendingPrompt: string | null;
 }
 
@@ -48,8 +50,9 @@ export class PtyManager {
   private createPtySession(id: string, ptyProcess: IPty): PtySession {
     const session: PtySession = {
       id, pty: ptyProcess, status: 'starting',
-      currentState: 'busy', outputBuffer: [],
-      onData: null, onReady: null, onStateChange: null,
+      currentState: 'busy', contextUsage: null,
+      outputBuffer: [],
+      onData: null, onReady: null, onStateChange: null, onContextUpdate: null,
       pendingPrompt: null,
     };
 
@@ -57,6 +60,14 @@ export class PtyManager {
       session.outputBuffer.push(data);
       if (session.outputBuffer.length > 50) session.outputBuffer = session.outputBuffer.slice(-20);
       if (session.onData) session.onData(data);
+
+      // Parse context usage — check single chunk AND recent buffer
+      const recent = session.outputBuffer.slice(-3).join('');
+      const ctx = OutputParser.parseContextUsage(data) ?? OutputParser.parseContextUsage(recent);
+      if (ctx !== null && ctx !== session.contextUsage) {
+        session.contextUsage = ctx;
+        if (session.onContextUpdate) session.onContextUpdate(ctx);
+      }
 
       const prev = session.currentState;
       const recentForReady = session.outputBuffer.slice(-3).join('');

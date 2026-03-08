@@ -96,6 +96,7 @@ function OfficeView() {
           onClick={handleClick}
           scrollToId={selectedSessionId}
           socketRef={socketRef}
+          connected={connected}
         />
         <HoverCard character={hoveredChar} x={hoverPos.x} y={hoverPos.y} />
       </div>

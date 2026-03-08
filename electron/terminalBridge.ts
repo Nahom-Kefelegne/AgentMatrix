@@ -82,11 +82,14 @@ export function setupTerminalBridge(io: SocketIOServer, ptyManager: PtyManager):
           socket.emit('terminal:data', { sessionId: sessionUuid, data });
         });
 
-        // Wire up state change → single socket event
+        // Wire up callbacks
         const newPty = ptyManager.getSession(sessionUuid);
         if (newPty) {
           newPty.onStateChange = (info) => {
             io.emit('session:state', { sessionId: sessionUuid, ...info });
+          };
+          newPty.onContextUpdate = (usage) => {
+            io.emit('session:context', { sessionId: sessionUuid, usage });
           };
         }
 
@@ -108,6 +111,18 @@ export function setupTerminalBridge(io: SocketIOServer, ptyManager: PtyManager):
           ptyManager.onOutput(sessionId, (data) => {
             socket.emit('terminal:data', { sessionId, data });
           });
+          // Ensure callbacks are set (might be missing from auto-resume)
+          const existingPty = ptyManager.getSession(sessionId);
+          if (existingPty) {
+            if (!existingPty.onStateChange) {
+              existingPty.onStateChange = (info) => io.emit('session:state', { sessionId, ...info });
+            }
+            if (!existingPty.onContextUpdate) {
+              existingPty.onContextUpdate = (usage) => {
+                io.emit('session:context', { sessionId, usage });
+              };
+            }
+          }
           return;
         }
 
@@ -140,6 +155,9 @@ export function setupTerminalBridge(io: SocketIOServer, ptyManager: PtyManager):
         if (rPty) {
           rPty.onStateChange = (info) => {
             io.emit('session:state', { sessionId, ...info });
+          };
+          rPty.onContextUpdate = (usage) => {
+            io.emit('session:context', { sessionId, usage });
           };
         }
       } catch (err) {
