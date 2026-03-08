@@ -47,6 +47,7 @@ export class Character {
   private exiting = false;
   private exitDone = false;
   get pendingRemoval(): boolean { return this.exitDone; }
+  get isLeaving(): boolean { return this.exiting || this.fired; }
 
   // Fired animation
   private fired = false;

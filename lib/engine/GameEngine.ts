@@ -232,6 +232,8 @@ export class GameEngine {
     const char = this.characterManager.getCharacter(sessionId);
     if (!char) return;
     this.sessions.delete(sessionId);
+    // If already in fired animation, let it finish — don't override with regular exit
+    if (char.isLeaving) return;
     this.characterManager.despawn(sessionId, this.tileMap);
   }
 
@@ -245,6 +247,8 @@ export class GameEngine {
   updateCharacter(sessionId: string, changes: Partial<SessionData>): void {
     const char = this.characterManager.getCharacter(sessionId);
     if (!char) return;
+    // Don't update characters that are in exit/fired animation
+    if (char.isLeaving) return;
 
     // Update session record
     const session = this.sessions.get(sessionId);

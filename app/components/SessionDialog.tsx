@@ -606,7 +606,7 @@ export default function SessionDialog({
               setTimeout(() => {
                 setKilling(false);
                 onClose();
-              }, 2500);
+              }, 4500);
             }}
             style={{
               padding: '8px 16px', borderRadius: 6,

@@ -147,24 +147,29 @@ export function setupTerminalBridge(io: SocketIOServer, ptyManager: PtyManager):
       }
     });
 
-    // End a session — send /exit then kill PTY
+    // End a session — fire animation, then /exit, then cleanup
     socket.on('terminal:end', ({ sessionId }: { sessionId: string }) => {
       try {
         // Remove from auto-resume list
         saveActiveSessions(getActiveSessions().filter(s => s.id !== sessionId));
 
-        if (ptyManager.hasPty(sessionId)) {
-          const ptySession = ptyManager.getSession(sessionId);
-          if (ptySession) ptySession.pty.write('/exit\r');
-          setTimeout(() => {
-            ptyManager.kill(sessionId);
-            removeSession(sessionId);
-            io.emit(SOCKET_EVENTS.SESSION_END, { sessionId });
-          }, 2000);
-        } else {
+        // Trigger fired animation FIRST
+        io.emit('session:fired', { sessionId });
+
+        // Send /exit to PTY after a small delay (let animation start)
+        setTimeout(() => {
+          if (ptyManager.hasPty(sessionId)) {
+            const ptySession = ptyManager.getSession(sessionId);
+            if (ptySession) ptySession.pty.write('/exit\r');
+          }
+        }, 500);
+
+        // Clean up after animation finishes
+        setTimeout(() => {
+          ptyManager.kill(sessionId);
           removeSession(sessionId);
           io.emit(SOCKET_EVENTS.SESSION_END, { sessionId });
-        }
+        }, 8000); // shocked(1s) + packing(1.5s) + walk to exit(~4s) + buffer
       } catch (err) {
         console.error('[terminal:end]', err);
       }
