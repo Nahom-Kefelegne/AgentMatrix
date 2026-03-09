@@ -4,20 +4,38 @@ import { homedir } from 'os';
 
 const STORE_PATH = join(homedir(), '.claude', 'agentmatrix-tasks.json');
 
+export interface Discussion {
+  author: string;
+  text: string;
+  timestamp: number;
+}
+
 export interface AppTask {
   id: string;
   subject: string;
   description: string;
   status: 'pending' | 'assigned' | 'completed';
-  assignedTo?: string; // session ID
-  assignedToName?: string; // session name
+  source: 'app' | 'ado';
+  adoId?: number;
+  adoState?: string;
+  type?: string;
+  priority?: string;
+  discussions: Discussion[];
+  assignedTo?: string;
+  assignedToName?: string;
   createdAt: number;
   assignedAt?: number;
 }
 
 function readStore(): AppTask[] {
   try {
-    return JSON.parse(readFileSync(STORE_PATH, 'utf-8'));
+    const tasks = JSON.parse(readFileSync(STORE_PATH, 'utf-8'));
+    // Migration: add missing fields for old tasks
+    return tasks.map((t: Record<string, unknown>) => ({
+      ...t,
+      source: t.source || 'app',
+      discussions: t.discussions || [],
+    }));
   } catch {
     return [];
   }
@@ -50,6 +68,16 @@ export function updateAppTask(id: string, changes: Record<string, unknown>): voi
         (tasks[idx] as Record<string, unknown>)[key] = val;
       }
     }
+    writeStore(tasks);
+  }
+}
+
+export function appendDiscussion(id: string, entry: Discussion): void {
+  const tasks = readStore();
+  const idx = tasks.findIndex(t => t.id === id);
+  if (idx >= 0) {
+    if (!tasks[idx].discussions) tasks[idx].discussions = [];
+    tasks[idx].discussions.push(entry);
     writeStore(tasks);
   }
 }

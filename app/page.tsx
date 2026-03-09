@@ -14,6 +14,7 @@ import DashboardView from './components/DashboardView';
 import SessionDialog from './components/SessionDialog';
 import SpawnModal from './components/SpawnModal';
 import AppSettingsModal from './components/AppSettingsModal';
+import SplashScreen from './components/SplashScreen';
 
 function OfficeView() {
   const { connected, sessions, onEvent, socketRef } = useSocketContext();
@@ -23,6 +24,7 @@ function OfficeView() {
   const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null);
   const [showSetup, setShowSetup] = useState(false);
   const [showTaskBoard, setShowTaskBoard] = useState(false);
+  const [openTaskId, setOpenTaskId] = useState<string | null>(null);
   const [showResume, setShowResume] = useState(false);
   const [showSpawn, setShowSpawn] = useState(false);
   const [orchestratorViewId, setOrchestratorViewId] = useState<string | null>(null);
@@ -122,6 +124,7 @@ function OfficeView() {
         onPrev={handlePrevSession}
         onNext={handleNextSession}
         onSelectSession={(id) => setSelectedSessionId(id)}
+        onOpenTask={(taskId) => { setOpenTaskId(taskId); setShowTaskBoard(true); }}
         sessionIndex={currentSessionIndex}
         sessionTotal={sessionList.length}
       />
@@ -134,8 +137,9 @@ function OfficeView() {
       />
       <TaskBoard
         isOpen={showTaskBoard}
-        onClose={() => setShowTaskBoard(false)}
+        onClose={() => { setShowTaskBoard(false); setOpenTaskId(null); }}
         onOpenSession={(id) => setSelectedSessionId(id)}
+        initialTaskId={openTaskId}
       />
       <ResumeModal
         isOpen={showResume}
@@ -192,7 +196,9 @@ function OfficeView() {
 export default function Home() {
   return (
     <SocketProvider>
-      <OfficeView />
+      <SplashScreen>
+        <OfficeView />
+      </SplashScreen>
     </SocketProvider>
   );
 }

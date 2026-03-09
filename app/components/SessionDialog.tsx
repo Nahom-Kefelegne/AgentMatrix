@@ -357,11 +357,12 @@ interface SessionDialogProps {
   sessionTotal?: number;
   readOnly?: boolean;
   onSelectSession?: (sessionId: string) => void;
+  onOpenTask?: (taskId: string) => void;
 }
 
 export default function SessionDialog({
   sessionId, sessions, onClose, noBackdrop,
-  onPrev, onNext, sessionIndex, sessionTotal, readOnly, onSelectSession,
+  onPrev, onNext, sessionIndex, sessionTotal, readOnly, onSelectSession, onOpenTask,
 }: SessionDialogProps) {
   const { socketRef, connected } = useSocketContext();
   const contextMap = useSessionContext(socketRef, connected);
@@ -561,7 +562,7 @@ export default function SessionDialog({
             overflowY: 'auto',
             display: activeTab === 'tasks' ? 'block' : 'none',
           }}>
-            <TasksTab sessionId={session.id} />
+            <TasksTab sessionId={session.id} socketRef={socketRef} onOpenTask={onOpenTask} onSwitchToConsole={() => setActiveTab('console')} />
           </div>
           <div style={{
             position: 'absolute', inset: 0, padding: '20px 24px',
@@ -667,37 +668,66 @@ export default function SessionDialog({
 
 // ===== Tasks Tab =====
 
-const TASK_STATUS_COLORS: Record<string, string> = {
-  pending: '#ff6b6b',
-  in_progress: '#ffd43b',
-  completed: '#51cf66',
+const TASK_TYPE_ICONS: Record<string, string> = {
+  Bug: '\uD83D\uDD34', Task: '\u2705', 'User Story': '\uD83D\uDCD6',
+  Feature: '\u2B50', Epic: '\uD83C\uDFD4\uFE0F', Issue: '\u26A0\uFE0F',
 };
 
-function TasksTab({ sessionId }: { sessionId: string }) {
-  const [tasks, setTasks] = useState<import('@/lib/types').TaskItem[]>([]);
+const TASK_STATE_COLORS: Record<string, string> = {
+  Proposed: '#4a9eff', Active: '#ffd43b', Resolved: '#51cf66', Closed: '#888',
+};
+
+function TasksTab({ sessionId, socketRef, onOpenTask, onSwitchToConsole }: { sessionId: string; socketRef: React.RefObject<any>; onOpenTask?: (taskId: string) => void; onSwitchToConsole?: () => void }) {
+  const [tasks, setTasks] = useState<Record<string, unknown>[]>([]);
   const [loading, setLoading] = useState(true);
 
   const fetchTasks = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await fetch(`/api/tasks/${encodeURIComponent(sessionId)}`);
+      const res = await fetch('/api/app-tasks');
       if (res.ok) {
         const data = await res.json();
-        setTasks(data.tasks || []);
-      } else {
-        setTasks([]);
+        setTasks((data.tasks || []).filter((t: Record<string, unknown>) => t.assignedTo === sessionId));
       }
-    } catch {
-      setTasks([]);
-    }
+    } catch {}
     setLoading(false);
   }, [sessionId]);
 
   useEffect(() => { fetchTasks(); }, [fetchTasks]);
 
-  const pending = tasks.filter(t => t.status === 'pending');
-  const inProgress = tasks.filter(t => t.status === 'in_progress');
-  const completed = tasks.filter(t => t.status === 'completed');
+  const handleTaskClick = useCallback((taskId: string) => {
+    if (onOpenTask) onOpenTask(taskId);
+  }, [onOpenTask]);
+
+  const handleSyncWithClaude = useCallback(async (task: Record<string, unknown>) => {
+    try {
+      const writeRes = await fetch('/api/app-tasks/assign', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          sessionId, taskId: task.id, subject: task.subject,
+          description: task.description, type: task.type,
+          priority: task.priority, discussions: task.discussions,
+        }),
+      });
+      const { filePath } = await writeRes.json();
+      const socket = socketRef.current;
+      if (socket) {
+        socket.emit('terminal:input', {
+          sessionId,
+          data: `Read the updated task details at ${filePath}. Sync your understanding of this task with the new information. Delete the file when done.\r`,
+        });
+      }
+      setTimeout(() => {
+        fetch('/api/app-tasks/assign', {
+          method: 'DELETE', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ sessionId, taskId: task.id }),
+        }).catch(() => {});
+      }, 60000);
+
+      // Switch to console tab
+      if (onSwitchToConsole) onSwitchToConsole();
+    } catch {}
+  }, [sessionId, socketRef, onSwitchToConsole]);
 
   if (loading) {
     return <div style={{ color: '#888', fontSize: 15, padding: 20, textAlign: 'center' }}>Loading...</div>;
@@ -706,73 +736,48 @@ function TasksTab({ sessionId }: { sessionId: string }) {
   if (tasks.length === 0) {
     return (
       <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '60px 0', gap: 12 }}>
-        <div style={{ fontSize: 16, color: '#666' }}>No tasks for this session</div>
-        <div style={{ fontSize: 14, color: '#444' }}>Tasks appear when the session uses TodoWrite</div>
-        <button onClick={fetchTasks} style={{
-          marginTop: 8, padding: '8px 16px', borderRadius: 6, border: '1px solid #2a2a3e',
-          background: '#1a1a2a', color: '#aaa', fontSize: 14, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit',
-        }}>
-          Refresh
-        </button>
+        <div style={{ fontSize: 16, color: '#666' }}>No tasks assigned to this session</div>
+        <div style={{ fontSize: 14, color: '#444' }}>Assign tasks from the Task Board</div>
       </div>
     );
   }
 
   return (
     <>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
-        <div style={{ fontSize: 14, color: '#888' }}>
-          {tasks.length} task{tasks.length !== 1 ? 's' : ''} — {completed.length} done
-        </div>
-        <button onClick={fetchTasks} style={{
-          padding: '6px 14px', borderRadius: 6, border: '1px solid #2a2a3e',
-          background: '#1a1a2a', color: '#aaa', fontSize: 13, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit',
-        }}>
-          Refresh
-        </button>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
+        <div style={{ fontSize: 14, color: '#888', fontWeight: 600 }}>{tasks.length} task{tasks.length !== 1 ? 's' : ''}</div>
+        <button onClick={fetchTasks} style={{ padding: '5px 12px', borderRadius: 6, border: '1px solid #2a2a3e', background: '#1a1a2a', color: '#aaa', fontSize: 12, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit' }}>Refresh</button>
       </div>
 
-      {[
-        { label: 'In Progress', items: inProgress, color: TASK_STATUS_COLORS.in_progress },
-        { label: 'Pending', items: pending, color: TASK_STATUS_COLORS.pending },
-        { label: 'Completed', items: completed, color: TASK_STATUS_COLORS.completed },
-      ].filter(g => g.items.length > 0).map(group => (
-        <div key={group.label} style={{ marginBottom: 20 }}>
-          <div style={{
-            fontSize: 12, fontWeight: 700, color: '#888', textTransform: 'uppercase', letterSpacing: 1,
-            marginBottom: 8, display: 'flex', alignItems: 'center', gap: 8,
-          }}>
-            <span style={{ width: 8, height: 8, borderRadius: '50%', background: group.color, display: 'inline-block' }} />
-            {group.label} ({group.items.length})
-          </div>
-          <div style={{ background: '#12121e', borderRadius: 8, border: '1px solid #1e1e30', overflow: 'hidden' }}>
-            {group.items.map((task, i) => (
-              <div key={task.id} style={{
-                padding: '12px 14px',
-                borderBottom: i < group.items.length - 1 ? '1px solid #1a1a28' : 'none',
-              }}>
-                <div style={{ fontSize: 15, color: '#eee', fontWeight: 500, marginBottom: 4 }}>
-                  {task.subject}
-                </div>
-                {task.description && task.description !== task.subject && (
-                  <div style={{ fontSize: 13, color: '#888', lineHeight: 1.4 }}>
-                    {task.description.slice(0, 200)}
-                  </div>
-                )}
-                {task.owner && (
-                  <span style={{
-                    display: 'inline-block', marginTop: 6,
-                    fontSize: 11, padding: '2px 8px', borderRadius: 4,
-                    background: '#4a9eff20', color: '#7aafff', fontWeight: 600,
-                  }}>
-                    {task.owner}
-                  </span>
-                )}
+      <div style={{ background: '#12121e', borderRadius: 10, border: '1px solid #1e1e30', overflow: 'hidden' }}>
+        {tasks.map((task: Record<string, unknown>, i: number) => {
+          const icon = TASK_TYPE_ICONS[(task.type as string) || ''] || '';
+          const state = (task.state || task.adoState || 'Proposed') as string;
+          return (
+            <div key={task.id as string} onClick={() => handleTaskClick(task.id as string)} style={{
+              padding: '12px 14px', borderBottom: i < tasks.length - 1 ? '1px solid #1a1a28' : 'none',
+              cursor: 'pointer', transition: 'background 0.1s',
+            }}
+              onMouseEnter={e => e.currentTarget.style.background = '#1a1a2e'}
+              onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                {icon && <span style={{ fontSize: 13 }}>{icon}</span>}
+                <span style={{ fontSize: 15, color: '#eee', fontWeight: 700 }}>{task.subject as string}</span>
               </div>
-            ))}
-          </div>
-        </div>
-      ))}
+              {task.description && <div style={{ fontSize: 13, color: '#777', marginTop: 4, fontWeight: 500 }}>{(task.description as string).slice(0, 80)}</div>}
+              <div style={{ display: 'flex', gap: 5, marginTop: 6, alignItems: 'center' }}>
+                <span style={{ fontSize: 10, padding: '2px 8px', borderRadius: 10, background: (TASK_STATE_COLORS[state] || '#888') + '15', color: TASK_STATE_COLORS[state] || '#888', fontWeight: 700 }}>{state}</span>
+                {task.adoId && <span style={{ fontSize: 10, padding: '2px 8px', borderRadius: 10, background: '#4a9eff10', color: '#4a9eff', fontWeight: 700 }}>#{task.adoId as number}</span>}
+                <button onClick={(e) => { e.stopPropagation(); handleSyncWithClaude(task); }} style={{
+                  marginLeft: 'auto', padding: '2px 8px', borderRadius: 4, border: '1px solid #51cf6630',
+                  background: 'transparent', color: '#51cf66', fontSize: 10, fontWeight: 700, cursor: 'pointer',
+                }}>Sync</button>
+              </div>
+            </div>
+          );
+        })}
+      </div>
     </>
   );
 }

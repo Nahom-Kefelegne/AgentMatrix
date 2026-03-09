@@ -1,4 +1,5 @@
 import type { PtySession } from './PtyManager';
+import { OutputParser } from './OutputParser';
 import { join } from 'path';
 import { homedir } from 'os';
 import { existsSync, readFileSync, unlinkSync } from 'fs';
@@ -12,26 +13,30 @@ export interface InjectionResult {
 }
 
 export interface InjectOptions {
-  /** Max time to wait for output file (default 45s) */
   timeoutMs?: number;
-  /** How often to check for file (default 2s) */
   pollIntervalMs?: number;
 }
 
-/** Get the output file path for a specific session */
 function getOutputPath(sessionId: string): string {
   return join(OUTPUT_DIR, `agentmatrix-output-${sessionId}.txt`);
+}
+
+/** Check if the PTY output buffer indicates prompt is ready */
+function isPromptReady(ptySession: PtySession): boolean {
+  // Check entire buffer — strip ANSI from each chunk and look for prompt
+  const fullClean = ptySession.outputBuffer
+    .slice(-10)
+    .map(chunk => OutputParser.stripAnsi(chunk))
+    .join('');
+  return /[❯\u276F]\s*$/.test(fullClean);
 }
 
 /**
  * Inject a prompt into a PTY session and capture structured output.
  *
- * Tells Claude to write the response to a session-specific temp file
- * using the Bash tool. Each session gets its own file to avoid race
- * conditions when multiple sessions are injected concurrently.
- *
- * The caller provides just the instruction — file-write wrapping is
- * handled automatically.
+ * Writes prompt + Enter in quick succession with a confirmation
+ * check that the prompt indicator was present in the buffer.
+ * Then polls for the output file.
  */
 export async function injectPrompt(
   ptySession: PtySession,
@@ -46,10 +51,16 @@ export async function injectPrompt(
 
   if (ptySession.status === 'closed') return empty;
 
-  // Clean up any previous output file for this session
+  // Wait briefly for prompt if not ready (check every 300ms, max 3s)
+  for (let i = 0; i < 10; i++) {
+    if (isPromptReady(ptySession)) break;
+    await new Promise(r => setTimeout(r, 300));
+  }
+
+  // Clean up previous output file
   try { if (existsSync(outputFile)) unlinkSync(outputFile); } catch {}
 
-  // Build the prompt: instruction + file write command
+  // Build prompt
   const prompt = [
     instruction,
     `\nWrite ONLY the output to ${outputFile} using the Bash tool.`,
@@ -57,12 +68,10 @@ export async function injectPrompt(
     `Do this now, no questions asked.`,
   ].join(' ');
 
-  // Write prompt then submit with Enter
-  ptySession.pty.write(prompt);
-  // Small delay before pressing Enter so TUI processes the text
-  setTimeout(() => ptySession.pty.write('\r'), 100);
+  // Write prompt text then Enter — use a single write with \r appended
+  ptySession.pty.write(prompt + '\r');
 
-  // Poll for the output file
+  // Poll for output file
   const startTime = Date.now();
   while (Date.now() - startTime < timeoutMs) {
     await new Promise(r => setTimeout(r, pollIntervalMs));
@@ -73,19 +82,16 @@ export async function injectPrompt(
         unlinkSync(outputFile);
 
         if (content.length > 0) {
-          const lines = content
-            .split('\n')
-            .map(l => l.trim())
-            .filter(l => l.length > 0);
-
-          return { success: true, content, lines };
+          return {
+            success: true,
+            content,
+            lines: content.split('\n').map(l => l.trim()).filter(l => l.length > 0),
+          };
         }
       } catch {}
     }
   }
 
-  // Clean up on timeout
   try { if (existsSync(outputFile)) unlinkSync(outputFile); } catch {}
-
   return empty;
 }

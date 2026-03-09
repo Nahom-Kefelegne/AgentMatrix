@@ -17,6 +17,18 @@ export default function TerminalPanel({ sessionId, sessionName, cwd, visible, re
   const termRef = useRef<any>(null);
   const fitRef = useRef<any>(null);
   const [status, setStatus] = useState<'idle' | 'connecting' | 'connected' | 'exited'>('idle');
+  const [initializing, setInitializing] = useState(false);
+
+  // Listen for session initializing state (summary generation on startup)
+  useEffect(() => {
+    const socket = socketRef.current;
+    if (!socket) return;
+    const handler = (data: { sessionId: string; busy: boolean }) => {
+      if (data.sessionId === sessionId) setInitializing(data.busy);
+    };
+    socket.on('session:initializing' as any, handler);
+    return () => { socket.off('session:initializing' as any, handler); };
+  }, [socketRef, sessionId]);
   useEffect(() => {
     const container = containerRef.current;
     const socket = socketRef.current;
@@ -224,18 +236,36 @@ export default function TerminalPanel({ sessionId, sessionName, cwd, visible, re
       `}</style>
 
       {/* xterm container */}
+      <div style={{ flex: 1, minHeight: 0, position: 'relative' }}>
+        {initializing && (
+          <div style={{
+            position: 'absolute', inset: 0, zIndex: 10,
+            background: 'rgba(12, 12, 24, 0.92)',
+            display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 12,
+            borderRadius: 8,
+          }}>
+            <div style={{
+              width: 24, height: 24, border: '3px solid #2a2a3e', borderTopColor: '#4a9eff',
+              borderRadius: '50%', animation: 'spin 0.8s linear infinite',
+            }} />
+            <div style={{ fontSize: 14, color: '#aaa' }}>Session initializing...</div>
+            <div style={{ fontSize: 12, color: '#555' }}>Generating work summary</div>
+            <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
+          </div>
+        )}
       <div
         ref={containerRef}
-        onClick={() => termRef.current?.focus()}
+        onClick={() => !initializing && termRef.current?.focus()}
         style={{
-          flex: 1,
-          minHeight: 0,
+          height: '100%',
           borderRadius: 8,
           overflow: 'hidden',
           background: '#0c0c18',
           border: '1px solid #1e1e30',
+          pointerEvents: initializing ? 'none' : 'auto',
         }}
       />
+      </div>
     </div>
   );
 }
