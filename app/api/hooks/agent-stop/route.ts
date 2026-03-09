@@ -14,19 +14,17 @@ export async function POST(request: Request) {
       markAgentTypeExited(parentSessionId, agentType);
     }
 
-    // Resolve the agent's character name and ID
     const agentName = getAgentName(payload.agent_id) || agentType;
 
-    // Try removing by ID first, then by name
+    // Remove from store
     removeAgent(parentSessionId, payload.agent_id);
     const characterId = removeAgentByName(parentSessionId, agentName);
 
-    // Emit stop with the character ID the client knows about
     const emitAgentId = characterId || payload.agent_id;
     emitToClients(SOCKET_EVENTS.AGENT_STOP, {
       sessionId: parentSessionId,
       agentId: emitAgentId,
-      agentName: agentName,
+      agentName,
     });
 
     // If all agents are gone, end the meeting

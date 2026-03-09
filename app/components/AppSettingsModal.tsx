@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
+import { useSocketContext } from './SocketProvider';
 
 interface AppSettings {
   autoResume: boolean;
@@ -13,6 +14,7 @@ interface AppSettings {
 interface AppSettingsModalProps {
   isOpen: boolean;
   onClose: () => void;
+  onViewOrchestrator?: (sessionId: string) => void;
 }
 
 const MODELS = [
@@ -39,13 +41,27 @@ const EFFORT_LEVELS = [
   { value: 'high', label: 'High' },
 ];
 
-export default function AppSettingsModal({ isOpen, onClose }: AppSettingsModalProps) {
+export default function AppSettingsModal({ isOpen, onClose, onViewOrchestrator }: AppSettingsModalProps) {
+  const { socketRef, connected } = useSocketContext();
   const [settings, setSettings] = useState<AppSettings>({
     autoResume: true, defaultModel: '', defaultPermissionMode: 'bypassPermissions',
     defaultEffort: '', appendSystemPrompt: '',
   });
   const [loaded, setLoaded] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [orchestratorId, setOrchestratorId] = useState<string | null>(null);
+  const [showOrchestrator, setShowOrchestrator] = useState(false);
+
+  // Get orchestrator ID from server
+  useEffect(() => {
+    const socket = socketRef.current;
+    if (!socket || !connected) return;
+    const handler = (data: { sessionId: string }) => setOrchestratorId(data.sessionId);
+    socket.on('orchestrator:id' as any, handler);
+    // Request it now in case we missed the initial emit
+    socket.emit('orchestrator:get-id' as any);
+    return () => { socket.off('orchestrator:id' as any, handler); };
+  }, [socketRef, connected]);
 
   useEffect(() => {
     if (isOpen && !loaded) {
@@ -195,6 +211,64 @@ export default function AppSettingsModal({ isOpen, onClose }: AppSettingsModalPr
                 fontFamily: 'inherit', resize: 'vertical', lineHeight: 1.5,
               }}
             />
+          </div>
+
+          <Divider />
+
+          {/* Orchestrator */}
+          <div style={{ padding: '14px 0' }}>
+            <div style={{ fontSize: 16, fontWeight: 600, color: '#eee', marginBottom: 4 }}>
+              Orchestrator Session
+            </div>
+            <div style={{ fontSize: 14, color: '#888', marginBottom: 10 }}>
+              Internal Claude session used for deep search and app tasks. View its terminal (read-only).
+            </div>
+            <div style={{ display: 'flex', gap: 8 }}>
+              <button
+                onClick={() => {
+                  if (orchestratorId && onViewOrchestrator) {
+                    onClose();
+                    onViewOrchestrator(orchestratorId);
+                  }
+                }}
+                disabled={!orchestratorId}
+                style={{
+                  padding: '8px 16px', borderRadius: 6,
+                  border: '1px solid #2a2a3e',
+                  background: orchestratorId ? '#1a1a2a' : '#151520',
+                  color: orchestratorId ? '#4a9eff' : '#555',
+                  fontSize: 14, fontWeight: 600, cursor: orchestratorId ? 'pointer' : 'default',
+                  fontFamily: 'inherit',
+                }}
+              >
+                {orchestratorId ? 'View Orchestrator' : 'Not running'}
+              </button>
+              <button
+                onClick={() => {
+                  if (!confirm('This will kill the current orchestrator session and start a fresh one. All orchestrator context will be lost. Continue?')) return;
+                  const socket = socketRef.current;
+                  if (socket) {
+                    socket.emit('orchestrator:reset' as any);
+                  }
+                }}
+                disabled={!orchestratorId}
+                style={{
+                  padding: '8px 16px', borderRadius: 6,
+                  border: '1px solid #ff6b6b30',
+                  background: '#1a0e0e',
+                  color: orchestratorId ? '#ff6b6b' : '#555',
+                  fontSize: 14, fontWeight: 600, cursor: orchestratorId ? 'pointer' : 'default',
+                  fontFamily: 'inherit',
+                }}
+              >
+                Reset
+              </button>
+            </div>
+            {orchestratorId && (
+              <div style={{ fontSize: 12, color: '#555', marginTop: 6, fontFamily: "'Courier New', monospace" }}>
+                {orchestratorId.slice(0, 12)}...
+              </div>
+            )}
           </div>
         </div>
 

@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import type { SessionData } from '@/lib/types';
 import { useSocketContext } from './SocketProvider';
@@ -93,7 +93,7 @@ export default function DashboardView({ sessions, onSelectSession }: Props) {
         ) : (
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(480px, 1fr))', gap: 20 }}>
             <AnimatePresence mode="popLayout">
-              {list.map((s, i) => <SessionCard key={s.id} s={s} i={i} contextUsage={contextMap[s.id] ?? null} onClick={() => onSelectSession(s.id)} />)}
+              {list.map((s, i) => <SessionCard key={s.id} s={s} i={i} contextUsage={contextMap[s.id] ?? null} onClick={() => onSelectSession(s.id)} socketRef={socketRef} />)}
             </AnimatePresence>
           </div>
         )}
@@ -107,10 +107,21 @@ export default function DashboardView({ sessions, onSelectSession }: Props) {
   );
 }
 
-function SessionCard({ s, i, contextUsage, onClick }: { s: SessionData; i: number; contextUsage: number | null; onClick: () => void }) {
+function SessionCard({ s, i, contextUsage, onClick, socketRef }: { s: SessionData; i: number; contextUsage: number | null; onClick: () => void; socketRef: React.RefObject<any> }) {
   const meta = STATUS[s.status] || STATUS.idle;
   const working = s.status === 'working';
   const actions = s.recentActions.slice(0, 4);
+  const [summaryRequested, setSummaryRequested] = useState(false);
+  const hasSummary = s.summaryBullets && s.summaryBullets.length > 0;
+  const summaryLoading = summaryRequested && !hasSummary;
+
+  const handleRefreshSummary = useCallback((e: React.MouseEvent) => {
+    e.stopPropagation();
+    const socket = socketRef.current;
+    if (!socket) return;
+    setSummaryRequested(true);
+    socket.emit('session:summary', { sessionId: s.id });
+  }, [socketRef, s.id]);
 
   return (
     <motion.div layout
@@ -192,21 +203,49 @@ function SessionCard({ s, i, contextUsage, onClick }: { s: SessionData; i: numbe
           </motion.div>
         )}
 
-        {/* Actions */}
-        {actions.length > 0 && (
+        {/* Work summary or recent activity */}
+        {s.summaryBullets && s.summaryBullets.length > 0 ? (
           <div style={{ borderTop: '1px solid #1a1a28', paddingTop: 12 }}>
             <div style={{ fontSize: 11, fontWeight: 700, color: '#555', textTransform: 'uppercase', letterSpacing: 1, marginBottom: 6 }}>
-              Recent Activity
+              Work Summary
             </div>
-            {actions.map((a, j) => (
-              <div key={j} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '4px 0', fontSize: 13, opacity: 1 - j * 0.18 }}>
-                <span style={{ color: '#333', fontSize: 10 }}>&#9656;</span>
-                <span style={{ flex: 1, color: '#aaa', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                  {a.summary || a.toolName}
-                </span>
-                <span style={{ color: '#444', fontSize: 12, flexShrink: 0 }}>{ago(a.timestamp)}</span>
+            {s.summaryBullets.map((bullet, j) => (
+              <div key={j} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '3px 0', fontSize: 13 }}>
+                <span style={{ color: '#4a9eff', fontSize: 8 }}>●</span>
+                <span style={{ color: '#aaa' }}>{bullet}</span>
               </div>
             ))}
+          </div>
+        ) : (
+          <div style={{ borderTop: '1px solid #1a1a28', paddingTop: 12 }}>
+            {actions.length > 0 && (
+              <>
+                <div style={{ fontSize: 11, fontWeight: 700, color: '#555', textTransform: 'uppercase', letterSpacing: 1, marginBottom: 6 }}>
+                  Recent Activity
+                </div>
+                {actions.slice(0, 2).map((a, j) => (
+                  <div key={j} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '3px 0', fontSize: 13, opacity: 1 - j * 0.2 }}>
+                    <span style={{ color: '#333', fontSize: 10 }}>&#9656;</span>
+                    <span style={{ flex: 1, color: '#aaa', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      {a.summary || a.toolName}
+                    </span>
+                  </div>
+                ))}
+              </>
+            )}
+            <button
+              onClick={handleRefreshSummary}
+              disabled={summaryLoading}
+              style={{
+                marginTop: 8, padding: '5px 12px', borderRadius: 6,
+                border: '1px solid #2a2a3e', background: '#1a1a2a',
+                color: summaryLoading ? '#555' : '#4a9eff',
+                fontSize: 12, fontWeight: 600, cursor: summaryLoading ? 'wait' : 'pointer',
+                fontFamily: 'inherit', width: '100%',
+              }}
+            >
+              {summaryLoading ? 'Generating...' : 'Generate Summary'}
+            </button>
           </div>
         )}
 

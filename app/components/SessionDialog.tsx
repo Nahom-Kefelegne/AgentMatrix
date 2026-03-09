@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import type { SessionData, Action } from '@/lib/types';
 import TerminalPanel from './TerminalPanel';
+import HandoffModal from './HandoffModal';
 import ContextBar from './ContextBar';
 import { useSocketContext } from './SocketProvider';
 import { useSessionContext } from '@/lib/hooks/useSessionContext';
@@ -349,24 +350,26 @@ interface SessionDialogProps {
   sessionId: string | null;
   sessions: Map<string, SessionData>;
   onClose: () => void;
-  isTaskTracker: boolean;
-  onSetTaskTracker: (sessionId: string) => void;
   noBackdrop?: boolean;
   onPrev?: () => void;
   onNext?: () => void;
   sessionIndex?: number;
   sessionTotal?: number;
+  readOnly?: boolean;
+  onSelectSession?: (sessionId: string) => void;
 }
 
 export default function SessionDialog({
-  sessionId, sessions, onClose, isTaskTracker, onSetTaskTracker, noBackdrop,
-  onPrev, onNext, sessionIndex, sessionTotal,
+  sessionId, sessions, onClose, noBackdrop,
+  onPrev, onNext, sessionIndex, sessionTotal, readOnly, onSelectSession,
 }: SessionDialogProps) {
   const { socketRef, connected } = useSocketContext();
   const contextMap = useSessionContext(socketRef, connected);
-  const [activeTab, setActiveTab] = useState<'info' | 'settings' | 'console'>('info');
+  const [activeTab, setActiveTab] = useState<'console' | 'tasks' | 'info' | 'settings'>('console');
   const [killing, setKilling] = useState(false);
   const [restartCommand, setRestartCommand] = useState<string | null>(null);
+  const [showHandoff, setShowHandoff] = useState(false);
+  const [handoffActive, setHandoffActive] = useState(false);
   const [fullscreen, setFullscreen] = useState(false);
   const isConsole = activeTab === 'console';
   const [, setTick] = useState(0);
@@ -377,7 +380,8 @@ export default function SessionDialog({
   }, []);
 
   useEffect(() => {
-    setActiveTab('info');
+    setActiveTab('console');
+    setShowHandoff(false);
   }, [sessionId]);
   // If console tab was active but session is no longer managed, switch to info
 
@@ -525,8 +529,8 @@ export default function SessionDialog({
           display: 'flex', borderBottom: '1px solid #1e1e30', flexShrink: 0,
           padding: '0 24px',
         }}>
-          {(['info', 'settings', 'console'] as const).map(tab => {
-            const labels: Record<string, string> = { info: 'Info', settings: 'Settings', console: 'Console' };
+          {(['console', 'tasks', 'info', 'settings'] as const).map(tab => {
+            const labels: Record<string, string> = { console: 'Console', tasks: 'Tasks', info: 'Info', settings: 'Settings' };
             return (
             <button key={tab} onClick={() => setActiveTab(tab)} style={{
               padding: '12px 20px', fontSize: 16, fontWeight: 600, cursor: 'pointer',
@@ -546,11 +550,25 @@ export default function SessionDialog({
           flex: 1, minHeight: 0, position: 'relative',
         }}>
           <div style={{
+            position: 'absolute', inset: 0, padding: '12px 16px',
+            display: activeTab === 'console' ? 'flex' : 'none',
+            flexDirection: 'column',
+          }}>
+            <TerminalPanel sessionId={session.id} sessionName={session.name} cwd={session.cwd} visible={activeTab === 'console'} readOnly={readOnly} />
+          </div>
+          <div style={{
+            position: 'absolute', inset: 0, padding: '20px 24px',
+            overflowY: 'auto',
+            display: activeTab === 'tasks' ? 'block' : 'none',
+          }}>
+            <TasksTab sessionId={session.id} />
+          </div>
+          <div style={{
             position: 'absolute', inset: 0, padding: '20px 24px',
             overflowY: 'auto',
             display: activeTab === 'info' ? 'block' : 'none',
           }}>
-            <InfoTab session={session} cliCmd={cliCmd} contextUsage={sessionId ? contextMap[sessionId] ?? null : null} />
+            <InfoTab session={session} cliCmd={cliCmd} contextUsage={sessionId ? contextMap[sessionId] ?? null : null} socketRef={socketRef} />
           </div>
           <div style={{
             position: 'absolute', inset: 0, padding: '20px 24px',
@@ -559,33 +577,35 @@ export default function SessionDialog({
           }}>
             <SettingsTab session={session} socketRef={socketRef} />
           </div>
-          <div style={{
-            position: 'absolute', inset: 0, padding: '12px 16px',
-            display: activeTab === 'console' ? 'flex' : 'none',
-            flexDirection: 'column',
-          }}>
-            <TerminalPanel sessionId={session.id} sessionName={session.name} cwd={session.cwd} visible={activeTab === 'console'} />
-          </div>
         </div>
 
         {/* Bottom bar */}
+        {readOnly ? (
+          <div style={{
+            padding: '10px 24px', borderTop: '1px solid #1e1e30',
+            background: '#0e0e16', flexShrink: 0,
+            display: 'flex', alignItems: 'center', gap: 8,
+          }}>
+            <span style={{ fontSize: 12, color: '#555', fontStyle: 'italic' }}>Read-only view</span>
+          </div>
+        ) : null}
         <div style={{
-          padding: '14px 24px', borderTop: '1px solid #1e1e30',
-          display: 'flex', alignItems: 'center', gap: 10, flexShrink: 0,
+          padding: '14px 24px', borderTop: readOnly ? 'none' : '1px solid #1e1e30',
+          display: readOnly ? 'none' : 'flex', alignItems: 'center', gap: 10, flexShrink: 0,
           background: '#0e0e16',
         }}>
-          <button onClick={() => onSetTaskTracker(session.id)} style={{
-            padding: '8px 16px', borderRadius: 6,
-            border: isTaskTracker ? '1px solid #4a9eff' : '1px solid #222235',
-            background: isTaskTracker ? '#152540' : '#151520',
-            color: isTaskTracker ? '#7aafff' : '#999',
-            fontSize: 14, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit',
-            transition: 'all 0.15s',
-          }}>
-            {isTaskTracker ? 'Task Tracker ✓' : 'Set as Task Tracker'}
-          </button>
-
           <CopyButton text={cliCmd} label="Copy Resume Command" successLabel="Copied!" />
+
+          <button onClick={() => setShowHandoff(true)} style={{
+            padding: '8px 16px', borderRadius: 6,
+            border: handoffActive ? '1px solid #ffd43b40' : '1px solid #cc5de840',
+            background: handoffActive ? '#1a1a0e' : '#1a0e1a',
+            color: handoffActive ? '#ffd43b' : '#cc5de8',
+            fontSize: 14, fontWeight: 600, cursor: 'pointer',
+            fontFamily: 'inherit', transition: 'all 0.15s',
+          }}>
+            {handoffActive ? 'Transfer in Progress...' : 'Transfer Context'}
+          </button>
 
           <div style={{ flex: 1 }} />
 
@@ -625,9 +645,134 @@ export default function SessionDialog({
         </div>
       </div>
 
+      <HandoffModal
+        isOpen={showHandoff}
+        onClose={() => setShowHandoff(false)}
+        sourceSessionId={session.id}
+        sourceCwd={session.cwd}
+        onStatusChange={(active) => setHandoffActive(active)}
+        onNewSession={(newId) => {
+          setShowHandoff(false);
+          setHandoffActive(false);
+          if (onSelectSession) onSelectSession(newId);
+        }}
+      />
+
       {restartCommand && (
         <RestartDialog command={restartCommand} onClose={() => setRestartCommand(null)} />
       )}
+    </>
+  );
+}
+
+// ===== Tasks Tab =====
+
+const TASK_STATUS_COLORS: Record<string, string> = {
+  pending: '#ff6b6b',
+  in_progress: '#ffd43b',
+  completed: '#51cf66',
+};
+
+function TasksTab({ sessionId }: { sessionId: string }) {
+  const [tasks, setTasks] = useState<import('@/lib/types').TaskItem[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  const fetchTasks = useCallback(async () => {
+    setLoading(true);
+    try {
+      const res = await fetch(`/api/tasks/${encodeURIComponent(sessionId)}`);
+      if (res.ok) {
+        const data = await res.json();
+        setTasks(data.tasks || []);
+      } else {
+        setTasks([]);
+      }
+    } catch {
+      setTasks([]);
+    }
+    setLoading(false);
+  }, [sessionId]);
+
+  useEffect(() => { fetchTasks(); }, [fetchTasks]);
+
+  const pending = tasks.filter(t => t.status === 'pending');
+  const inProgress = tasks.filter(t => t.status === 'in_progress');
+  const completed = tasks.filter(t => t.status === 'completed');
+
+  if (loading) {
+    return <div style={{ color: '#888', fontSize: 15, padding: 20, textAlign: 'center' }}>Loading...</div>;
+  }
+
+  if (tasks.length === 0) {
+    return (
+      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '60px 0', gap: 12 }}>
+        <div style={{ fontSize: 16, color: '#666' }}>No tasks for this session</div>
+        <div style={{ fontSize: 14, color: '#444' }}>Tasks appear when the session uses TodoWrite</div>
+        <button onClick={fetchTasks} style={{
+          marginTop: 8, padding: '8px 16px', borderRadius: 6, border: '1px solid #2a2a3e',
+          background: '#1a1a2a', color: '#aaa', fontSize: 14, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit',
+        }}>
+          Refresh
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+        <div style={{ fontSize: 14, color: '#888' }}>
+          {tasks.length} task{tasks.length !== 1 ? 's' : ''} — {completed.length} done
+        </div>
+        <button onClick={fetchTasks} style={{
+          padding: '6px 14px', borderRadius: 6, border: '1px solid #2a2a3e',
+          background: '#1a1a2a', color: '#aaa', fontSize: 13, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit',
+        }}>
+          Refresh
+        </button>
+      </div>
+
+      {[
+        { label: 'In Progress', items: inProgress, color: TASK_STATUS_COLORS.in_progress },
+        { label: 'Pending', items: pending, color: TASK_STATUS_COLORS.pending },
+        { label: 'Completed', items: completed, color: TASK_STATUS_COLORS.completed },
+      ].filter(g => g.items.length > 0).map(group => (
+        <div key={group.label} style={{ marginBottom: 20 }}>
+          <div style={{
+            fontSize: 12, fontWeight: 700, color: '#888', textTransform: 'uppercase', letterSpacing: 1,
+            marginBottom: 8, display: 'flex', alignItems: 'center', gap: 8,
+          }}>
+            <span style={{ width: 8, height: 8, borderRadius: '50%', background: group.color, display: 'inline-block' }} />
+            {group.label} ({group.items.length})
+          </div>
+          <div style={{ background: '#12121e', borderRadius: 8, border: '1px solid #1e1e30', overflow: 'hidden' }}>
+            {group.items.map((task, i) => (
+              <div key={task.id} style={{
+                padding: '12px 14px',
+                borderBottom: i < group.items.length - 1 ? '1px solid #1a1a28' : 'none',
+              }}>
+                <div style={{ fontSize: 15, color: '#eee', fontWeight: 500, marginBottom: 4 }}>
+                  {task.subject}
+                </div>
+                {task.description && task.description !== task.subject && (
+                  <div style={{ fontSize: 13, color: '#888', lineHeight: 1.4 }}>
+                    {task.description.slice(0, 200)}
+                  </div>
+                )}
+                {task.owner && (
+                  <span style={{
+                    display: 'inline-block', marginTop: 6,
+                    fontSize: 11, padding: '2px 8px', borderRadius: 4,
+                    background: '#4a9eff20', color: '#7aafff', fontWeight: 600,
+                  }}>
+                    {task.owner}
+                  </span>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+      ))}
     </>
   );
 }
@@ -689,9 +834,55 @@ function ActionRow({ action, isLast }: { action: Action; isLast: boolean }) {
   );
 }
 
-function InfoTab({ session, cliCmd, contextUsage }: { session: SessionData; cliCmd: string; contextUsage: number | null }) {
+function InfoTab({ session, cliCmd, contextUsage, socketRef }: { session: SessionData; cliCmd: string; contextUsage: number | null; socketRef: React.RefObject<any> }) {
+  const [summaryLoading, setSummaryLoading] = useState(false);
+
+  useEffect(() => {
+    if (session.summaryBullets && session.summaryBullets.length > 0) {
+      setSummaryLoading(false);
+    }
+  }, [session.summaryBullets]);
+
+  const handleRefreshSummary = useCallback(() => {
+    const socket = socketRef.current;
+    if (!socket) return;
+    setSummaryLoading(true);
+    socket.emit('session:summary', { sessionId: session.id });
+    setTimeout(() => setSummaryLoading(false), 60000);
+  }, [socketRef, session.id]);
+
   return (
     <>
+      {/* Work summary */}
+      <div style={{ marginBottom: 20 }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+          <SectionLabel>Work Summary</SectionLabel>
+          <button onClick={handleRefreshSummary} disabled={summaryLoading} style={{
+            fontSize: 13, color: summaryLoading ? '#555' : '#4a9eff', background: 'none', border: 'none',
+            cursor: summaryLoading ? 'wait' : 'pointer', fontWeight: 600, fontFamily: 'inherit',
+          }}>
+            {summaryLoading ? 'Generating...' : 'Refresh'}
+          </button>
+        </div>
+        {session.summaryBullets && session.summaryBullets.length > 0 ? (
+          <div style={{
+            background: '#12121e', borderRadius: 8, border: '1px solid #1e1e30',
+            padding: '12px 14px',
+          }}>
+            {session.summaryBullets.map((bullet, i) => (
+              <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '4px 0', fontSize: 14 }}>
+                <span style={{ color: '#4a9eff', fontSize: 8, flexShrink: 0 }}>●</span>
+                <span style={{ color: '#ccc' }}>{bullet}</span>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <div style={{ fontSize: 14, color: '#555', fontStyle: 'italic' }}>
+            {summaryLoading ? 'Asking session for summary...' : 'Click Refresh to generate summary'}
+          </div>
+        )}
+      </div>
+
       {/* Context usage */}
       {contextUsage !== null && (
         <div style={{ marginBottom: 20 }}>
@@ -777,7 +968,7 @@ function InfoTab({ session, cliCmd, contextUsage }: { session: SessionData; cliC
       {/* Agent Team */}
       {session.agents && session.agents.length > 0 && (
         <div style={{ marginBottom: 20 }}>
-          <SectionLabel>Agent Team{session.teamId ? ` — ${session.teamId}` : ''}</SectionLabel>
+          <SectionLabel>Agent Team{session.teamId ? ` — ${session.teamId}` : ''} ({session.agents.length})</SectionLabel>
           <div style={{
             background: '#12121e', borderRadius: 8, border: '1px solid #1e1e30',
             overflow: 'hidden',

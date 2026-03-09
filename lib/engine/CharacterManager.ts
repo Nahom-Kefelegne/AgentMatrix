@@ -1,5 +1,5 @@
 import type { SessionData, AgentData, Point } from '@/lib/types';
-import { ENTRANCE_POINT, MEETING_ROOMS, TILE_SIZE } from '@/lib/constants';
+import { ENTRANCE_POINT, MEETING_ROOMS, DESK_POSITIONS, OVERFLOW_POSITIONS, TILE_SIZE } from '@/lib/constants';
 import { Character } from './Character';
 import { SpriteSheet } from './SpriteSheet';
 import { TileMap } from './TileMap';
@@ -223,6 +223,26 @@ export class CharacterManager {
 
   getCharacter(id: string): Character | undefined {
     return this.characters.get(id);
+  }
+
+  /** Assign an idle desk position for an agent character */
+  assignAgentDesk(agentId: string, tileMap: TileMap): Point | undefined {
+    const allDesks = [...DESK_POSITIONS, ...OVERFLOW_POSITIONS];
+    // Find desks not occupied by any character (compare tile coords)
+    const occupiedTiles = new Set<string>();
+    for (const char of this.characters.values()) {
+      if (char.id === agentId) continue;
+      const tileX = Math.round(char.x / TILE_SIZE);
+      const tileY = Math.round(char.y / TILE_SIZE);
+      occupiedTiles.add(`${tileX},${tileY}`);
+    }
+    for (const desk of allDesks) {
+      if (!occupiedTiles.has(`${desk.x},${desk.y}`)) {
+        return desk;
+      }
+    }
+    // All desks taken — pick an overflow position
+    return OVERFLOW_POSITIONS[0];
   }
 
   /** Find a character by name (useful for agents where IDs change) */

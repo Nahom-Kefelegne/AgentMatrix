@@ -8,9 +8,10 @@ interface TerminalPanelProps {
   sessionName: string;
   cwd?: string;
   visible?: boolean;
+  readOnly?: boolean;
 }
 
-export default function TerminalPanel({ sessionId, sessionName, cwd, visible }: TerminalPanelProps) {
+export default function TerminalPanel({ sessionId, sessionName, cwd, visible, readOnly }: TerminalPanelProps) {
   const { socketRef } = useSocketContext();
   const containerRef = useRef<HTMLDivElement>(null);
   const termRef = useRef<any>(null);
@@ -85,15 +86,21 @@ export default function TerminalPanel({ sessionId, sessionName, cwd, visible }: 
       // Focus the terminal so keyboard works immediately
       terminal.focus();
 
-      // Forward keystrokes to PTY via socket
-      terminal.onData((data: string) => {
-        socket.emit('terminal:input', { sessionId, data });
-      });
+      // Forward keystrokes to PTY via socket (unless read-only)
+      if (!readOnly) {
+        terminal.onData((data: string) => {
+          socket.emit('terminal:input', { sessionId, data });
+        });
+      }
 
-      // Receive PTY output
+      // Receive PTY output — strip screen-clear sequences so history persists
+      const stripClear = (s: string) =>
+        s.replace(/\x1b\[2J/g, '')   // clear entire screen
+         .replace(/\x1b\[3J/g, '')   // clear scrollback
+         .replace(/\x1b\[H/g, '');   // cursor home (often paired with clear)
       const handleData = (msg: { sessionId: string; data: string }) => {
         if (msg.sessionId === sessionId) {
-          terminal.write(msg.data);
+          terminal.write(stripClear(msg.data));
           if (status !== 'connected') setStatus('connected');
         }
       };
@@ -151,16 +158,23 @@ export default function TerminalPanel({ sessionId, sessionName, cwd, visible }: 
 
   // Re-fit when tab becomes visible
   useEffect(() => {
-    if (visible && fitRef.current && termRef.current) {
-      const timer = setTimeout(() => {
-        try {
-          fitRef.current.fit();
-          termRef.current?.focus();
-        } catch {}
-      }, 100);
-      return () => clearTimeout(timer);
-    }
-  }, [visible]);
+    if (!visible || !fitRef.current || !termRef.current) return;
+    const socket = socketRef.current;
+    const fit = () => {
+      try {
+        fitRef.current?.fit();
+        const term = termRef.current;
+        if (term && socket) {
+          socket.emit('terminal:resize', { sessionId, cols: term.cols, rows: term.rows });
+        }
+        term?.focus();
+      } catch {}
+    };
+    // Fit twice — once after layout, once after paint
+    const t1 = setTimeout(fit, 50);
+    const t2 = setTimeout(fit, 200);
+    return () => { clearTimeout(t1); clearTimeout(t2); };
+  }, [visible, sessionId, socketRef]);
 
   return (
     <div style={{

@@ -9,6 +9,10 @@ import { SOCKET_EVENTS } from '../lib/types';
 import {
   DESK_POSITIONS, OVERFLOW_POSITIONS, ENTRANCE_POINT, CHARACTER_COLORS,
 } from '../lib/constants';
+import { requestSummary } from './services/SummaryService';
+import { queryOrchestrator, getOrchestratorId, isOrchestrator, resetOrchestrator } from './services/OrchestratorService';
+import { generateHandoffSummary, injectHandoffIntoSession } from './services/HandoffService';
+export { requestSummary };
 
 function getNextDeskIndex(): number {
   const sessions = getAllSessions();
@@ -107,12 +111,18 @@ export function setupTerminalBridge(io: SocketIOServer, ptyManager: PtyManager):
     // Resume a past session by ID
     socket.on('terminal:resume', ({ sessionId }: { sessionId: string }) => {
       try {
+        console.log(`[terminal:resume] sessionId=${sessionId.slice(0, 12)} hasPty=${ptyManager.hasPty(sessionId)}`);
         if (ptyManager.hasPty(sessionId)) {
+          const existingPty = ptyManager.getSession(sessionId);
+          // Replay buffered output so terminal isn't blank
+          if (existingPty && existingPty.outputBuffer.length > 0) {
+            const replay = existingPty.outputBuffer.join('');
+            socket.emit('terminal:data', { sessionId, data: replay });
+          }
           ptyManager.onOutput(sessionId, (data) => {
             socket.emit('terminal:data', { sessionId, data });
           });
           // Ensure callbacks are set (might be missing from auto-resume)
-          const existingPty = ptyManager.getSession(sessionId);
           if (existingPty) {
             if (!existingPty.onStateChange) {
               existingPty.onStateChange = (info) => io.emit('session:state', { sessionId, ...info });
@@ -126,10 +136,20 @@ export function setupTerminalBridge(io: SocketIOServer, ptyManager: PtyManager):
           return;
         }
 
+        // Orchestrator — just attach output, don't create session/sprite/auto-resume
+        if (isOrchestrator(sessionId)) {
+          if (!ptyManager.hasPty(sessionId)) return;
+          ptyManager.onOutput(sessionId, (data) => {
+            socket.emit('terminal:data', { sessionId, data });
+          });
+          return;
+        }
+
         const { getCachedName: getName } = require('../lib/state/nameCache');
         const existing = getSession(sessionId);
         const name = existing?.name || getName(sessionId) || `Session-${sessionId.slice(0, 8)}`;
-        const cwd = existing?.cwd || ptyManager.findSessionCwd(sessionId) || homedir();
+        const foundCwd = ptyManager.findSessionCwd(sessionId);
+        const cwd = existing?.cwd || foundCwd || homedir();
 
         // Create session entry so sprite appears
         if (!existing) {
@@ -159,6 +179,7 @@ export function setupTerminalBridge(io: SocketIOServer, ptyManager: PtyManager):
           rPty.onContextUpdate = (usage) => {
             io.emit('session:context', { sessionId, usage });
           };
+          // Summary generation handled by auto-resume in main.ts or manual refresh
         }
       } catch (err) {
         console.error('[terminal:resume]', err);
@@ -207,6 +228,108 @@ export function setupTerminalBridge(io: SocketIOServer, ptyManager: PtyManager):
       if (ptySession && ptySession.status !== 'closed') {
         ptySession.pty.resize(cols, rows);
       }
+    });
+
+    // Generate work summary from session (manual refresh)
+    socket.on('session:summary', async ({ sessionId }: { sessionId: string }) => {
+      const bullets = await requestSummary(io, ptyManager, sessionId);
+      socket.emit('session:summary-result', { sessionId, bullets });
+    });
+
+    // Reset orchestrator
+    socket.on('orchestrator:reset', () => {
+      resetOrchestrator();
+      const id = getOrchestratorId();
+      if (id) socket.emit('orchestrator:id', { sessionId: id });
+      console.log('[orchestrator] reset, new id:', id?.slice(0, 12));
+    });
+
+    // Send orchestrator ID on request
+    socket.on('orchestrator:get-id', () => {
+      const id = getOrchestratorId();
+      if (id) socket.emit('orchestrator:id', { sessionId: id });
+    });
+
+    // Context handoff — generate summary from source, spawn new session, inject handoff
+    socket.on('session:handoff', async (data: {
+      sourceSessionId: string;
+      contextRequest: string;
+      targetCwd: string;
+      handoffId: string;
+      sessionName?: string;
+      permissionMode?: string;
+      model?: string;
+      effort?: string;
+      systemPrompt?: string;
+    }) => {
+      const { sourceSessionId, contextRequest, targetCwd, handoffId } = data;
+
+      // Step 1: Generate summary from source session
+      socket.emit('session:handoff-status', { handoffId, status: 'summarizing' });
+      const result = await generateHandoffSummary(ptyManager, sourceSessionId, contextRequest, handoffId);
+
+      if (!result.success) {
+        socket.emit('session:handoff-status', { handoffId, status: 'error', error: result.error });
+        return;
+      }
+
+      // Step 2: Spawn new session
+      socket.emit('session:handoff-status', { handoffId, status: 'spawning' });
+      const { randomUUID } = require('crypto');
+      const sessionUuid = randomUUID();
+      const name = data.sessionName || `handoff-${handoffId}`;
+      const { setCachedName } = require('../lib/state/nameCache');
+
+      const sessionData = createSessionEntry(sessionUuid, name, targetCwd);
+      addSession(sessionData);
+      setCachedName(sessionUuid, name);
+      io.emit(SOCKET_EVENTS.SESSION_START, sessionData);
+
+      ptyManager.spawnNew(sessionUuid, {
+        cwd: targetCwd,
+        sessionUuid,
+        permissionMode: data.permissionMode || 'bypassPermissions',
+        model: data.model,
+        effort: data.effort,
+        systemPrompt: data.systemPrompt,
+      });
+
+      ptyManager.onOutput(sessionUuid, (outData) => {
+        socket.emit('terminal:data', { sessionId: sessionUuid, data: outData });
+      });
+
+      const newPty = ptyManager.getSession(sessionUuid);
+      if (newPty) {
+        newPty.onStateChange = (info) => io.emit('session:state', { sessionId: sessionUuid, ...info });
+        newPty.onContextUpdate = (usage) => io.emit('session:context', { sessionId: sessionUuid, usage });
+
+        // Step 3: Wait for ready, then inject handoff
+        socket.emit('session:handoff-status', { handoffId, status: 'injecting' });
+        // Use fixed delay since onReady may not fire reliably
+        setTimeout(() => {
+          injectHandoffIntoSession(ptyManager, sessionUuid, handoffId);
+          socket.emit('session:handoff-status', {
+            handoffId,
+            status: 'done',
+            newSessionId: sessionUuid,
+          });
+        }, 8000);
+      } else {
+        socket.emit('session:handoff-status', { handoffId, status: 'error', error: 'Failed to spawn session' });
+      }
+
+      // Track for auto-resume
+      const active = getActiveSessions().filter(s => s.id !== sessionUuid);
+      active.push({ id: sessionUuid, name, cwd: targetCwd });
+      saveActiveSessions(active);
+
+      socket.emit('terminal:spawned', { sessionId: sessionUuid, name });
+    });
+
+    // Query the orchestrator
+    socket.on('orchestrator:query', async ({ query, queryId }: { query: string; queryId: string }) => {
+      const result = await queryOrchestrator(query);
+      socket.emit('orchestrator:result', { queryId, ...result });
     });
   });
 }

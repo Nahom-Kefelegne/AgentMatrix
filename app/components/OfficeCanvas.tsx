@@ -23,7 +23,7 @@ export interface OfficeCanvasHandle {
 }
 
 const OfficeCanvas = forwardRef<OfficeCanvasHandle, OfficeCanvasProps>(function OfficeCanvas(
-  { sessions, onEvent, onHover, onClick, scrollToId, socketRef: parentSocketRef, connected: parentConnected },
+  { sessions, onEvent, onHover, onClick, scrollToId },
   ref,
 ) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -74,7 +74,7 @@ const OfficeCanvas = forwardRef<OfficeCanvasHandle, OfficeCanvasProps>(function 
         const goingIdle = data.changes.status === 'idle';
 
         if (wasInMeeting && goingIdle) {
-          engine.updateCharacter(data.sessionId, data.changes);
+          engine.updateCharacter(data.sessionId, { ...data.changes, currentTool: undefined });
           engine.returnToDeskAfterMeeting(data.sessionId);
           engine.showEmoji(data.sessionId, '✅');
         } else if (wasInMeeting && data.changes.status && data.changes.status !== 'meeting') {
@@ -83,6 +83,7 @@ const OfficeCanvas = forwardRef<OfficeCanvasHandle, OfficeCanvasProps>(function 
         } else {
           engine.updateCharacter(data.sessionId, data.changes);
           if (data.changes.status === 'idle') {
+            engine.updateCharacter(data.sessionId, { currentTool: undefined });
             engine.showEmoji(data.sessionId, '💤', true);
           } else if (data.changes.status === 'working') {
             engine.clearEmoji(data.sessionId);
@@ -132,7 +133,6 @@ const OfficeCanvas = forwardRef<OfficeCanvasHandle, OfficeCanvasProps>(function 
       }
       case SOCKET_EVENTS.AGENT_STOP: {
         const data = handler.data as { sessionId: string; agentId: string; agentName?: string };
-        // Try by ID first, then by name
         const cm3 = engine.getCharacterManager();
         const stopChar = cm3.getCharacter(data.agentId)
           || (data.agentName ? cm3.findByName(data.agentName) : undefined);
@@ -217,24 +217,8 @@ const OfficeCanvas = forwardRef<OfficeCanvasHandle, OfficeCanvasProps>(function 
     },
   }), []);
 
-  // Listen for session:state events and update sprite status
-  useEffect(() => {
-    const socket = parentSocketRef?.current;
-    if (!socket || !parentConnected) return;
-    const handler = (data: { sessionId: string; state: string }) => {
-      const engine = engineRef.current;
-      if (!engine) return;
-      const newStatus = data.state === 'busy' ? 'working' : 'idle';
-      engine.updateCharacter(data.sessionId, { status: newStatus as any });
-      if (newStatus === 'idle') {
-        engine.showEmoji(data.sessionId, '💤', true);
-      } else {
-        engine.clearEmoji(data.sessionId);
-      }
-    };
-    socket.on('session:state', handler);
-    return () => { socket.off('session:state', handler); };
-  }, [parentSocketRef, parentConnected]);
+  // Sprite state is driven by SESSION_UPDATE / TOOL_START / TOOL_COMPLETE events
+  // processed in processEvent above — no separate session:state listener needed.
 
   // Highlight selected character
   useEffect(() => {

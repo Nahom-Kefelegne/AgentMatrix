@@ -10,7 +10,8 @@ import { getCachedName } from '../lib/state/nameCache';
 import { getSettings } from '../lib/state/appSettings';
 import { getActiveSessions } from '../lib/state/activeSessionsCache';
 import { PtyManager } from './pty/PtyManager';
-import { setupTerminalBridge } from './terminalBridge';
+import { setupTerminalBridge, requestSummary } from './terminalBridge';
+import { spawnOrchestrator, killOrchestrator, isOrchestrator } from './services/OrchestratorService';
 
 const isDev = process.env.NODE_ENV !== 'production';
 const port = parseInt(process.env.PORT || '3000', 10);
@@ -81,10 +82,19 @@ function startServer(): Promise<void> {
       (globalThis as Record<string, unknown>).__socketIO = io;
 
       io.on('connection', (socket) => {
-        socket.emit(SOCKET_EVENTS.STATE_SNAPSHOT, getAllSessions());
+        // Exclude orchestrator from client-visible sessions
+        const visible = getAllSessions().filter(s => !isOrchestrator(s.id));
+        socket.emit(SOCKET_EVENTS.STATE_SNAPSHOT, visible);
+        // Send orchestrator ID so client can access it
+        const { getOrchestratorId } = require('./services/OrchestratorService');
+        const orchId = getOrchestratorId();
+        if (orchId) socket.emit('orchestrator:id', { sessionId: orchId });
       });
 
       setupTerminalBridge(io!, ptyManager);
+
+      // Spawn orchestrator session (hidden, app-only)
+      spawnOrchestrator(ptyManager);
 
       httpServer.listen(port, () => {
         console.log(`> Server ready on http://localhost:${port}`);
@@ -123,6 +133,14 @@ function startServer(): Promise<void> {
                   pty.onContextUpdate = (usage) => {
                     io!.emit('session:context', { sessionId: s.id, usage });
                   };
+                  // Generate summary shortly after CLI initializes
+                  const sid = s.id;
+                  setTimeout(async () => {
+                    const p = ptyManager.getSession(sid);
+                    if (p && p.status !== 'closed') {
+                      await requestSummary(io!, ptyManager, sid, { timeoutMs: 60000 });
+                    }
+                  }, 5000);
                 }
                 console.log(`[auto-resume] ${name} (${s.id.slice(0, 8)})`);
               } catch (err) {
@@ -154,5 +172,6 @@ app.on('window-all-closed', () => {
 });
 
 app.on('will-quit', () => {
+  killOrchestrator();
   ptyManager.dispose();
 });

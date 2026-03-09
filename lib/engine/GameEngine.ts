@@ -276,6 +276,19 @@ export class GameEngine {
     this.characterManager.despawn(agentId, this.tileMap);
   }
 
+  /** Move an agent from meeting room to an idle desk position */
+  idleAgent(parentSessionId: string, agentId: string): void {
+    const char = this.characterManager.getCharacter(agentId);
+    if (!char || char.isLeaving) return;
+    // Assign a desk position for the agent
+    const deskPos = this.characterManager.assignAgentDesk(agentId, this.tileMap);
+    char.status = 'idle';
+    char.teamId = undefined;
+    if (deskPos) {
+      char.moveTo(deskPos.x, deskPos.y, this.tileMap);
+    }
+  }
+
   returnToDeskAfterMeeting(sessionId: string): void {
     const session = this.sessions.get(sessionId);
     const char = this.characterManager.getCharacter(sessionId);

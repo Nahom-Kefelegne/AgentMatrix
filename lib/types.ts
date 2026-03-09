@@ -41,6 +41,7 @@ export interface SessionData {
   teamId?: string;
   cwd?: string;
   contextUsage?: number;
+  summaryBullets?: string[];
   createdAt: number;
 }
 
@@ -126,7 +127,7 @@ export interface ServerToClientEvents {
   'tool:start': (data: { sessionId: string; toolName: string; toolInput?: string }) => void;
   'tool:complete': (data: { sessionId: string; toolName: string; summary: string }) => void;
   'agent:start': (data: { sessionId: string; agent: AgentData }) => void;
-  'agent:stop': (data: { sessionId: string; agentId: string }) => void;
+  'agent:stop': (data: { sessionId: string; agentId: string; agentName?: string }) => void;
   'meeting:start': (data: { teamId: string; participantIds: string[] }) => void;
   'meeting:message': (data: { teamId: string; fromId: string; toId: string; summary: string }) => void;
   'prompt:output': (data: { sessionId: string; text: string }) => void;
