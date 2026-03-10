@@ -8,14 +8,27 @@ interface TerminalPanelProps {
   sessionName: string;
   cwd?: string;
   visible?: boolean;
+  readOnly?: boolean;
 }
 
-export default function TerminalPanel({ sessionId, sessionName, cwd, visible }: TerminalPanelProps) {
+export default function TerminalPanel({ sessionId, sessionName, cwd, visible, readOnly }: TerminalPanelProps) {
   const { socketRef } = useSocketContext();
   const containerRef = useRef<HTMLDivElement>(null);
   const termRef = useRef<any>(null);
   const fitRef = useRef<any>(null);
   const [status, setStatus] = useState<'idle' | 'connecting' | 'connected' | 'exited'>('idle');
+  const [initializing, setInitializing] = useState(false);
+
+  // Listen for session initializing state (summary generation on startup)
+  useEffect(() => {
+    const socket = socketRef.current;
+    if (!socket) return;
+    const handler = (data: { sessionId: string; busy: boolean }) => {
+      if (data.sessionId === sessionId) setInitializing(data.busy);
+    };
+    socket.on('session:initializing' as any, handler);
+    return () => { socket.off('session:initializing' as any, handler); };
+  }, [socketRef, sessionId]);
   useEffect(() => {
     const container = containerRef.current;
     const socket = socketRef.current;
@@ -85,15 +98,21 @@ export default function TerminalPanel({ sessionId, sessionName, cwd, visible }: 
       // Focus the terminal so keyboard works immediately
       terminal.focus();
 
-      // Forward keystrokes to PTY via socket
-      terminal.onData((data: string) => {
-        socket.emit('terminal:input', { sessionId, data });
-      });
+      // Forward keystrokes to PTY via socket (unless read-only)
+      if (!readOnly) {
+        terminal.onData((data: string) => {
+          socket.emit('terminal:input', { sessionId, data });
+        });
+      }
 
-      // Receive PTY output
+      // Receive PTY output — strip screen-clear sequences so history persists
+      const stripClear = (s: string) =>
+        s.replace(/\x1b\[2J/g, '')   // clear entire screen
+         .replace(/\x1b\[3J/g, '')   // clear scrollback
+         .replace(/\x1b\[H/g, '');   // cursor home (often paired with clear)
       const handleData = (msg: { sessionId: string; data: string }) => {
         if (msg.sessionId === sessionId) {
-          terminal.write(msg.data);
+          terminal.write(stripClear(msg.data));
           if (status !== 'connected') setStatus('connected');
         }
       };
@@ -151,16 +170,23 @@ export default function TerminalPanel({ sessionId, sessionName, cwd, visible }: 
 
   // Re-fit when tab becomes visible
   useEffect(() => {
-    if (visible && fitRef.current && termRef.current) {
-      const timer = setTimeout(() => {
-        try {
-          fitRef.current.fit();
-          termRef.current?.focus();
-        } catch {}
-      }, 100);
-      return () => clearTimeout(timer);
-    }
-  }, [visible]);
+    if (!visible || !fitRef.current || !termRef.current) return;
+    const socket = socketRef.current;
+    const fit = () => {
+      try {
+        fitRef.current?.fit();
+        const term = termRef.current;
+        if (term && socket) {
+          socket.emit('terminal:resize', { sessionId, cols: term.cols, rows: term.rows });
+        }
+        term?.focus();
+      } catch {}
+    };
+    // Fit twice — once after layout, once after paint
+    const t1 = setTimeout(fit, 50);
+    const t2 = setTimeout(fit, 200);
+    return () => { clearTimeout(t1); clearTimeout(t2); };
+  }, [visible, sessionId, socketRef]);
 
   return (
     <div style={{
@@ -210,18 +236,36 @@ export default function TerminalPanel({ sessionId, sessionName, cwd, visible }: 
       `}</style>
 
       {/* xterm container */}
+      <div style={{ flex: 1, minHeight: 0, position: 'relative' }}>
+        {initializing && (
+          <div style={{
+            position: 'absolute', inset: 0, zIndex: 10,
+            background: 'rgba(12, 12, 24, 0.92)',
+            display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 12,
+            borderRadius: 8,
+          }}>
+            <div style={{
+              width: 24, height: 24, border: '3px solid #2a2a3e', borderTopColor: '#4a9eff',
+              borderRadius: '50%', animation: 'spin 0.8s linear infinite',
+            }} />
+            <div style={{ fontSize: 14, color: '#aaa' }}>Session initializing...</div>
+            <div style={{ fontSize: 12, color: '#555' }}>Generating work summary</div>
+            <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
+          </div>
+        )}
       <div
         ref={containerRef}
-        onClick={() => termRef.current?.focus()}
+        onClick={() => !initializing && termRef.current?.focus()}
         style={{
-          flex: 1,
-          minHeight: 0,
+          height: '100%',
           borderRadius: 8,
           overflow: 'hidden',
           background: '#0c0c18',
           border: '1px solid #1e1e30',
+          pointerEvents: initializing ? 'none' : 'auto',
         }}
       />
+      </div>
     </div>
   );
 }

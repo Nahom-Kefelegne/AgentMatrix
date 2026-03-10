@@ -110,6 +110,15 @@ export function removeAgentByName(sessionId: string, name: string): string | und
   return undefined;
 }
 
+export function updateAgentStatus(sessionId: string, agentId: string, agentName: string, status: 'idle' | 'working' | 'meeting'): void {
+  const session = sessions.get(sessionId);
+  if (!session) return;
+  const agent = session.agents.find(a => a.id === agentId || a.name === agentName);
+  if (agent) {
+    agent.status = status;
+  }
+}
+
 export function getNextDeskIndex(): number {
   const totalDesks = DESK_POSITIONS.length;
   const totalOverflow = OVERFLOW_POSITIONS.length;

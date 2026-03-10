@@ -21,6 +21,41 @@ export interface PtySession {
 export class PtyManager {
   private sessions = new Map<string, PtySession>();
 
+  /**
+   * Decode a Claude project dir name back to a real filesystem path.
+   * Claude encodes '/' as '-', but folder names can also contain '-'.
+   * We greedily try to match existing directories from left to right.
+   * e.g. "Users-johndoe-projects-my-app"
+   *   → try /Users → exists, continue
+   *   → try /Users/johndoe → exists, continue
+   *   → try /Users/johndoe/projects → exists, continue
+   *   → try /Users/johndoe/projects/my-app → exists!
+   */
+  private decodeDirName(encoded: string, existsSync: (p: string) => boolean): string | null {
+    const segments = encoded.split('-');
+    let path = '';
+    let i = 0;
+    while (i < segments.length) {
+      // Try greedily: from longest remaining to single segment
+      let found = false;
+      for (let end = segments.length; end > i; end--) {
+        const candidate = path + '/' + segments.slice(i, end).join('-');
+        if (existsSync(candidate)) {
+          path = candidate;
+          i = end;
+          found = true;
+          break;
+        }
+      }
+      if (!found) {
+        // No match — just use single segment as separator fallback
+        path += '/' + segments[i];
+        i++;
+      }
+    }
+    return existsSync(path) ? path : null;
+  }
+
   private findClaudeBinary(): string {
     try {
       const cmd = process.platform === 'win32' ? 'where claude' : 'which claude';
@@ -33,55 +68,48 @@ export class PtyManager {
   findSessionCwd(sessionId: string): string | undefined {
     try {
       const { existsSync, readdirSync, statSync, openSync, readSync, closeSync } = require('fs');
-      const { sep } = require('path');
       const projectsDir = join(homedir(), '.claude', 'projects');
       if (!existsSync(projectsDir)) return undefined;
 
       // Cross-platform: scan directories instead of using `find`
+      let transcriptPath: string | undefined;
       const dirs = readdirSync(projectsDir);
       for (const dir of dirs) {
         const dirPath = join(projectsDir, dir);
         try {
           if (!statSync(dirPath).isDirectory()) continue;
-          const transcriptPath = join(dirPath, `${sessionId}.jsonl`);
-          if (existsSync(transcriptPath)) {
-            // Try reading cwd from transcript first line
-            try {
-              const fd = openSync(transcriptPath, 'r');
-              const buf = Buffer.alloc(4000);
-              readSync(fd, buf, 0, 4000, 0);
-              closeSync(fd);
-              const firstLine = buf.toString('utf-8').split('\n')[0];
-              const parsed = JSON.parse(firstLine);
-              if (parsed.cwd && existsSync(parsed.cwd)) return parsed.cwd;
-            } catch {}
-
-            // Fall back: decode dir name with greedy path matching
-            const encoded = dir.replace(/^-/, '');
-            const resolved = this.decodeDirName(encoded, existsSync);
-            return resolved || undefined;
-          }
+          const candidate = join(dirPath, `${sessionId}.jsonl`);
+          if (existsSync(candidate)) { transcriptPath = candidate; break; }
         } catch {}
       }
-      return undefined;
-    } catch { return undefined; }
-  }
+      if (!transcriptPath) return undefined;
 
-  /** Decode a project dir name back to a real filesystem path (handles hyphens in folder names) */
-  private decodeDirName(encoded: string, existsSync: (p: string) => boolean): string | null {
-    const { sep } = require('path');
-    const segments = encoded.split('-');
-    let p = '';
-    let i = 0;
-    while (i < segments.length) {
-      let found = false;
-      for (let end = segments.length; end > i; end--) {
-        const candidate = p + sep + segments.slice(i, end).join('-');
-        if (existsSync(candidate)) { p = candidate; i = end; found = true; break; }
-      }
-      if (!found) { p += sep + segments[i]; i++; }
+      // Try reading cwd from transcript first line
+      try {
+        const fd = openSync(transcriptPath, 'r');
+        const buf = Buffer.alloc(4000);
+        readSync(fd, buf, 0, 4000, 0);
+        closeSync(fd);
+        const firstLine = buf.toString('utf-8').split('\n')[0];
+        const parsed = JSON.parse(firstLine);
+        if (parsed.cwd && existsSync(parsed.cwd)) {
+          return parsed.cwd;
+        }
+      } catch { /* fall through to dir name decoding */ }
+
+      // Fall back to decoding project dir name
+      const { sep } = require('path');
+      const parts = transcriptPath.split(sep);
+      const idx = parts.indexOf('projects');
+      if (idx < 0 || idx + 1 >= parts.length) return undefined;
+      const encoded = parts[idx + 1].replace(/^-/, ''); // strip leading dash
+      const resolved = this.decodeDirName(encoded, existsSync);
+      console.log(`[findSessionCwd] id=${sessionId.slice(0, 12)} encoded="${encoded}" resolved="${resolved}"`);
+      return resolved || undefined;
+    } catch (err) {
+      console.error('[findSessionCwd] error:', err);
+      return undefined;
     }
-    return existsSync(p) ? p : null;
   }
 
   private createPtySession(id: string, ptyProcess: IPty): PtySession {
@@ -95,7 +123,7 @@ export class PtyManager {
 
     ptyProcess.onData((data: string) => {
       session.outputBuffer.push(data);
-      if (session.outputBuffer.length > 50) session.outputBuffer = session.outputBuffer.slice(-20);
+      if (session.outputBuffer.length > 500) session.outputBuffer = session.outputBuffer.slice(-300);
       if (session.onData) session.onData(data);
 
       // Parse context usage — check single chunk AND recent buffer
@@ -145,7 +173,9 @@ export class PtyManager {
     const pty = require('node-pty');
     const claudePath = this.findClaudeBinary();
     const { existsSync } = require('fs');
-    const safeCwd = existsSync(cwd) ? cwd : homedir();
+    const cwdExists = existsSync(cwd);
+    const safeCwd = cwdExists ? cwd : homedir();
+    console.log(`[spawnPty] cwd="${cwd}" exists=${cwdExists} safeCwd="${safeCwd}" args=${claudeArgs.join(' ')}`);
     const claudeCmd = `${claudePath} ${claudeArgs.join(' ')}`;
     const env = { ...process.env };
     delete env.CLAUDECODE;
@@ -174,13 +204,19 @@ export class PtyManager {
     if (opts.model) args.push('--model', opts.model);
     if (opts.effort) args.push('--effort', opts.effort);
     if (opts.allowedTools) args.push('--allowedTools', opts.allowedTools);
-    if (opts.systemPrompt) args.push('--append-system-prompt', `"${opts.systemPrompt.replace(/"/g, '\\"')}"`);
+    if (opts.systemPrompt) {
+      // Use single quotes to avoid shell interpretation issues
+      const escaped = opts.systemPrompt.replace(/'/g, "'\\''");
+      args.push('--append-system-prompt', `'${escaped}'`);
+    }
     return this.createPtySession(id, this.spawnPty(opts.cwd, args));
   }
 
   spawnResume(id: string, opts: { cwd?: string; resumeId: string; fork?: boolean }): PtySession {
     if (this.sessions.has(id)) throw new Error(`Session ${id} already exists`);
-    const cwd = this.findSessionCwd(opts.resumeId) ?? opts.cwd ?? homedir();
+    const foundCwd = this.findSessionCwd(opts.resumeId);
+    const cwd = foundCwd ?? opts.cwd ?? homedir();
+    console.log(`[spawnResume] id=${id.slice(0, 12)} resumeId=${opts.resumeId.slice(0, 12)} foundCwd=${foundCwd} optsCwd=${opts.cwd} finalCwd=${cwd}`);
     const args = ['--resume', opts.resumeId, '--dangerously-skip-permissions'];
     if (opts.fork) args.push('--fork-session');
     return this.createPtySession(id, this.spawnPty(cwd, args));

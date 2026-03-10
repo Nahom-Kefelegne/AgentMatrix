@@ -128,7 +128,7 @@ export function useSocket() {
         if (existing) {
           next.set(data.sessionId, {
             ...existing,
-            agents: existing.agents.filter(a => a.id !== data.agentId),
+            agents: existing.agents.filter(a => a.id !== data.agentId && a.name !== data.agentName),
           });
         }
         return next;

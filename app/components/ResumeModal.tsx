@@ -1,6 +1,7 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
+import { useOrchestrator } from '@/lib/hooks/useOrchestrator';
 
 interface SessionInfo {
   id: string;
@@ -16,6 +17,8 @@ interface ResumeModalProps {
   onClose: () => void;
   onResumeInApp?: (sessionId: string) => void;
 }
+
+type SearchMode = 'project' | 'all' | 'deep';
 
 function FolderPicker({ value, onChange }: { value: string; onChange: (path: string) => void }) {
   const [dirs, setDirs] = useState<{ name: string; path: string }[]>([]);
@@ -66,7 +69,7 @@ function FolderPicker({ value, onChange }: { value: string; onChange: (path: str
               onMouseEnter={e => e.currentTarget.style.background = '#222238'}
               onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
             >
-              📁 {d.name}
+              {d.name}
             </div>
           ))}
         </div>
@@ -85,6 +88,55 @@ function formatTimeAgo(ms: number): string {
   return `${Math.floor(hours / 24)}d ago`;
 }
 
+function SessionRow({ s, globalSearch, onResumeInApp, onClose }: {
+  s: SessionInfo;
+  globalSearch: boolean;
+  onResumeInApp?: (id: string) => void;
+  onClose: () => void;
+}) {
+  const [copied, setCopied] = useState(false);
+  return (
+    <div style={{
+      background: '#161625', border: '1px solid #222238', borderRadius: 10,
+      padding: '14px 16px', marginBottom: 10,
+    }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+        <span style={{ fontSize: 17, fontWeight: 700, color: '#eee' }}>{s.name}</span>
+        <span style={{ fontSize: 13, color: '#888' }}>{formatTimeAgo(s.lastModified)}</span>
+      </div>
+      {s.projectDir && globalSearch && (
+        <div style={{ fontSize: 13, color: '#666', marginBottom: 6, fontFamily: "'Courier New', monospace" }}>
+          {s.projectDir.replace(/^-/, '/').replace(/-/g, '/')}
+        </div>
+      )}
+      <div style={{ fontSize: 12, color: '#555', marginBottom: 10, fontFamily: "'Courier New', monospace" }}>
+        {s.id.slice(0, 12)}...
+      </div>
+      <div style={{ display: 'flex', gap: 8 }}>
+        {onResumeInApp && (
+          <button onClick={() => { onResumeInApp(s.id); onClose(); }} style={{
+            flex: 1, padding: '10px 14px', borderRadius: 8, border: 'none',
+            background: '#4a9eff', color: '#fff', fontSize: 15, fontWeight: 600,
+            cursor: 'pointer', fontFamily: 'inherit',
+          }}>Resume in App</button>
+        )}
+        <button onClick={() => {
+          navigator.clipboard.writeText(`claude --resume ${s.id}`);
+          setCopied(true);
+          setTimeout(() => setCopied(false), 3000);
+        }} style={{
+          flex: 1, padding: '10px 14px', borderRadius: 8, border: '1px solid #2a2a3e',
+          background: copied ? '#1a3a1a' : '#1a1a2a',
+          color: copied ? '#51cf66' : '#ccc', fontSize: 15, fontWeight: 600,
+          cursor: 'pointer', fontFamily: 'inherit',
+        }}>
+          {copied ? '✓ Copied!' : 'Copy Command'}
+        </button>
+      </div>
+    </div>
+  );
+}
+
 export default function ResumeModal({ isOpen, onClose, onResumeInApp }: ResumeModalProps) {
   const [cwd, setCwd] = useState('');
   useEffect(() => {
@@ -92,12 +144,22 @@ export default function ResumeModal({ isOpen, onClose, onResumeInApp }: ResumeMo
   }, []);
   const [sessions, setSessions] = useState<SessionInfo[]>([]);
   const [loading, setLoading] = useState(false);
-  const [copied, setCopied] = useState<string | null>(null);
   const [search, setSearch] = useState('');
-  const [globalSearch, setGlobalSearch] = useState(false);
+  const [mode, setMode] = useState<SearchMode>('all');
+
+  // Direct ID resume
   const [directId, setDirectId] = useState('');
   const [directIdError, setDirectIdError] = useState('');
   const [resolving, setResolving] = useState(false);
+  const [copied, setCopied] = useState<string | null>(null);
+
+  // Deep search
+  const { query: queryOrchestrator } = useOrchestrator();
+  const [deepQuery, setDeepQuery] = useState('');
+  const [deepSearching, setDeepSearching] = useState(false);
+  const [deepResults, setDeepResults] = useState<SessionInfo[]>([]);
+  const [deepError, setDeepError] = useState('');
+  const abortRef = useRef(false);
 
   const loadSessions = useCallback(async (path: string, isGlobal: boolean) => {
     setLoading(true);
@@ -108,30 +170,17 @@ export default function ResumeModal({ isOpen, onClose, onResumeInApp }: ResumeMo
       const res = await fetch(url);
       const data = await res.json();
       setSessions(data.sessions || []);
-    } catch {
-      setSessions([]);
-    } finally {
-      setLoading(false);
-    }
+    } catch { setSessions([]); }
+    setLoading(false);
   }, []);
 
   useEffect(() => {
-    if (isOpen) loadSessions(cwd, globalSearch);
-  }, [isOpen, cwd, globalSearch, loadSessions]);
+    if (isOpen && mode !== 'deep') loadSessions(cwd, mode === 'all');
+  }, [isOpen, cwd, mode, loadSessions]);
 
   const handleCwdChange = (path: string) => {
     setCwd(path);
-    if (!globalSearch) loadSessions(path, false);
-  };
-
-  const getCommand = (session: SessionInfo) => {
-    return `cd ${cwd} && agency claude --dangerously-skip-permissions --resume ${session.id}`;
-  };
-
-  const handleCopy = (session: SessionInfo) => {
-    navigator.clipboard.writeText(getCommand(session));
-    setCopied(session.id);
-    setTimeout(() => setCopied(null), 3000);
+    if (mode === 'project') loadSessions(path, false);
   };
 
   const resolveSessionCwd = async (id: string): Promise<string | null> => {
@@ -146,38 +195,83 @@ export default function ResumeModal({ isOpen, onClose, onResumeInApp }: ResumeMo
   const handleDirectResume = async () => {
     const id = directId.trim();
     if (!id) { setDirectIdError('Enter a session ID'); return; }
-    const uuidish = /^[0-9a-f-]{8,}$/i.test(id);
-    if (!uuidish) { setDirectIdError('Invalid session ID format'); return; }
+    if (!/^[0-9a-f-]{8,}$/i.test(id)) { setDirectIdError('Invalid session ID format'); return; }
     setDirectIdError('');
     setResolving(true);
     const sessionCwd = await resolveSessionCwd(id);
     setResolving(false);
-    if (!sessionCwd) { setDirectIdError('Session not found — no transcript for this ID'); return; }
-    if (onResumeInApp) {
-      onResumeInApp(id);
-      onClose();
-    } else {
-      const cmd = `cd ${sessionCwd} && claude --resume ${id}`;
-      navigator.clipboard.writeText(cmd);
+    if (!sessionCwd) { setDirectIdError('Session not found'); return; }
+    if (onResumeInApp) { onResumeInApp(id); onClose(); }
+    else {
+      navigator.clipboard.writeText(`cd ${sessionCwd} && claude --resume ${id}`);
       setCopied(id);
       setTimeout(() => setCopied(null), 3000);
     }
   };
 
-  const handleDirectCopy = async () => {
-    const id = directId.trim();
-    if (!id) { setDirectIdError('Enter a session ID'); return; }
-    const uuidish = /^[0-9a-f-]{8,}$/i.test(id);
-    if (!uuidish) { setDirectIdError('Invalid session ID format'); return; }
-    setDirectIdError('');
-    setResolving(true);
-    const sessionCwd = await resolveSessionCwd(id);
-    setResolving(false);
-    if (!sessionCwd) { setDirectIdError('Session not found — no transcript for this ID'); return; }
-    navigator.clipboard.writeText(`cd ${sessionCwd} && claude --resume ${id}`);
-    setCopied(id);
-    setTimeout(() => setCopied(null), 3000);
-  };
+  // Deep search
+  const handleDeepSearch = useCallback(async () => {
+    if (!deepQuery.trim()) return;
+    setDeepSearching(true);
+    setDeepResults([]);
+    setDeepError('');
+    abortRef.current = false;
+
+    const instruction = [
+      `URGENT: Complete in under 60 seconds.`,
+      `Find sessions related to: "${deepQuery.trim()}"`,
+      `Use grep -rl on ~/.claude/projects/*/*.jsonl with keywords from the query.`,
+      `Spawn maximum subagents to search project directories in parallel.`,
+      `Session ID = filename without .jsonl. Output ONLY session IDs, one per line.`,
+      `No explanation. No reasoning. No thinking. Just IDs.`,
+      `If no matches output "NO_MATCHES". Max 10 results.`,
+    ].join(' ');
+
+    const result = await queryOrchestrator(instruction, 120000);
+
+    if (abortRef.current) return;
+    setDeepSearching(false);
+
+    if (!result.success || result.lines.length === 0 || result.lines[0] === 'NO_MATCHES') {
+      setDeepError('No matching sessions found');
+      return;
+    }
+
+    // Resolve each session ID to get name/project info
+    const ids = result.lines
+      .filter(l => /^[0-9a-f-]{8,}$/i.test(l.trim()))
+      .map(l => l.trim())
+      .slice(0, 10);
+
+    if (ids.length === 0) {
+      setDeepError('No matching sessions found');
+      return;
+    }
+
+    // Resolve all IDs in parallel
+    const resolved = await Promise.all(ids.map(async (id) => {
+      try {
+        const res = await fetch(`/api/sessions/resolve?id=${encodeURIComponent(id)}`);
+        if (!res.ok) return null;
+        const data = await res.json();
+        return {
+          id,
+          name: data.name || `Session-${id.slice(0, 8)}`,
+          slug: '',
+          projectDir: data.projectDir,
+          lastModified: Date.now(),
+          active: false,
+        } as SessionInfo;
+      } catch { return null; }
+    }));
+
+    setDeepResults(resolved.filter(Boolean) as SessionInfo[]);
+  }, [deepQuery, queryOrchestrator]);
+
+  const handleStopSearch = useCallback(() => {
+    abortRef.current = true;
+    setDeepSearching(false);
+  }, []);
 
   if (!isOpen) return null;
 
@@ -186,6 +280,12 @@ export default function ResumeModal({ isOpen, onClose, onResumeInApp }: ResumeMo
      s.slug?.toLowerCase().includes(search.toLowerCase()) ||
      s.id.toLowerCase().includes(search.toLowerCase()))
   );
+
+  const modeButtons: { key: SearchMode; label: string }[] = [
+    { key: 'project', label: 'By Project' },
+    { key: 'all', label: 'All Sessions' },
+    { key: 'deep', label: 'Deep Search' },
+  ];
 
   return (
     <>
@@ -208,7 +308,7 @@ export default function ResumeModal({ isOpen, onClose, onResumeInApp }: ResumeMo
             width: 32, height: 32, borderRadius: 8, border: '1px solid #2a2a3e',
             background: '#1a1a2a', color: '#888', fontSize: 16,
             display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer',
-          }}>✕</button>
+          }}>X</button>
         </div>
 
         {/* Resume by ID */}
@@ -229,146 +329,129 @@ export default function ResumeModal({ isOpen, onClose, onResumeInApp }: ResumeMo
               }}
             />
             {onResumeInApp && (
-              <button
-                onClick={handleDirectResume}
-                disabled={resolving}
-                style={{
-                  padding: '10px 16px', borderRadius: 8, border: 'none',
-                  background: resolving ? '#3a7acc' : '#4a9eff', color: '#fff', fontSize: 14, fontWeight: 600,
-                  cursor: resolving ? 'wait' : 'pointer', fontFamily: 'inherit', whiteSpace: 'nowrap',
-                  opacity: resolving ? 0.7 : 1,
-                }}
-              >
+              <button onClick={handleDirectResume} disabled={resolving} style={{
+                padding: '10px 16px', borderRadius: 8, border: 'none',
+                background: resolving ? '#3a7acc' : '#4a9eff', color: '#fff', fontSize: 14, fontWeight: 600,
+                cursor: resolving ? 'wait' : 'pointer', fontFamily: 'inherit', whiteSpace: 'nowrap',
+                opacity: resolving ? 0.7 : 1,
+              }}>
                 {resolving ? 'Resolving...' : 'Resume'}
               </button>
             )}
-            <button
-              onClick={handleDirectCopy}
-              disabled={resolving}
-              style={{
-                padding: '10px 16px', borderRadius: 8,
-                border: '1px solid #2a2a3e',
-                background: copied === directId.trim() ? '#1a3a1a' : '#1a1a2a',
-                color: copied === directId.trim() ? '#51cf66' : '#ccc',
-                fontSize: 14, fontWeight: 600,
-                cursor: resolving ? 'wait' : 'pointer', fontFamily: 'inherit',
-                whiteSpace: 'nowrap', opacity: resolving ? 0.7 : 1,
-              }}
-            >
-              {copied === directId.trim() ? '✓ Copied' : 'Copy Cmd'}
-            </button>
           </div>
-          {directIdError && (
-            <div style={{ fontSize: 12, color: '#ff6666', marginTop: 6 }}>{directIdError}</div>
-          )}
+          {directIdError && <div style={{ fontSize: 12, color: '#ff6666', marginTop: 6 }}>{directIdError}</div>}
         </div>
 
-        {/* Search mode toggle + path picker */}
+        {/* Mode toggle */}
         <div style={{ padding: '14px 24px', borderBottom: '1px solid #1e1e30' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
-            <button
-              onClick={() => setGlobalSearch(false)}
-              style={{
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: mode === 'project' ? 10 : 0 }}>
+            {modeButtons.map(m => (
+              <button key={m.key} onClick={() => setMode(m.key)} style={{
                 padding: '5px 14px', borderRadius: 6, fontSize: 14, fontWeight: 600,
-                border: !globalSearch ? '1px solid #4a9eff' : '1px solid #2a2a3e',
-                background: !globalSearch ? '#152540' : '#1a1a2a',
-                color: !globalSearch ? '#7aafff' : '#888',
+                border: mode === m.key ? '1px solid #4a9eff' : '1px solid #2a2a3e',
+                background: mode === m.key ? '#152540' : '#1a1a2a',
+                color: mode === m.key ? '#7aafff' : '#888',
                 cursor: 'pointer', fontFamily: 'inherit',
-              }}
-            >By Project</button>
-            <button
-              onClick={() => setGlobalSearch(true)}
-              style={{
-                padding: '5px 14px', borderRadius: 6, fontSize: 14, fontWeight: 600,
-                border: globalSearch ? '1px solid #4a9eff' : '1px solid #2a2a3e',
-                background: globalSearch ? '#152540' : '#1a1a2a',
-                color: globalSearch ? '#7aafff' : '#888',
-                cursor: 'pointer', fontFamily: 'inherit',
-              }}
-            >All Sessions</button>
+              }}>{m.label}</button>
+            ))}
           </div>
-
-          {!globalSearch && (
-            <FolderPicker value={cwd} onChange={handleCwdChange} />
-          )}
+          {mode === 'project' && <FolderPicker value={cwd} onChange={handleCwdChange} />}
         </div>
 
-        {/* Search */}
-        <div style={{ padding: '10px 24px', borderBottom: '1px solid #1e1e30' }}>
-          <input
-            value={search}
-            onChange={e => setSearch(e.target.value)}
-            placeholder="Search by name or ID..."
-            style={{
-              width: '100%', background: '#1a1a2a', border: '1px solid #2a2a3e',
-              color: '#eee', borderRadius: 8, padding: '10px 14px', fontSize: 15,
-              fontFamily: 'inherit',
-            }}
-          />
-        </div>
-
-        {/* Session list */}
-        <div style={{ flex: 1, overflowY: 'auto', padding: '14px 24px' }}>
-          {loading ? (
-            <div style={{ color: '#aaa', fontSize: 15, padding: 20, textAlign: 'center' }}>Loading sessions...</div>
-          ) : filtered.length === 0 ? (
-            <div style={{ color: '#777', fontSize: 15, padding: 20, textAlign: 'center', fontStyle: 'italic' }}>
-              {sessions.length === 0 ? 'No sessions found' : 'No sessions match search'}
-            </div>
-          ) : (
-            filtered.map(s => (
-              <div key={s.id} style={{
-                background: '#161625', border: '1px solid #222238', borderRadius: 10,
-                padding: '14px 16px', marginBottom: 10,
-              }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
-                  <span style={{ fontSize: 17, fontWeight: 700, color: '#eee' }}>{s.name}</span>
-                  <span style={{ fontSize: 13, color: '#888' }}>{formatTimeAgo(s.lastModified)}</span>
-                </div>
-                {s.projectDir && globalSearch && (
-                  <div style={{
-                    fontSize: 13, color: '#666', marginBottom: 6,
-                    fontFamily: "'Courier New', monospace",
-                  }}>
-                    {s.projectDir.replace(/^-/, '/').replace(/-/g, '/')}
-                  </div>
+        {/* Content area */}
+        {mode === 'deep' ? (
+          <>
+            {/* Deep search input */}
+            <div style={{ padding: '14px 24px', borderBottom: '1px solid #1e1e30' }}>
+              <div style={{ display: 'flex', gap: 8 }}>
+                <input
+                  value={deepQuery}
+                  onChange={e => setDeepQuery(e.target.value)}
+                  onKeyDown={e => { if (e.key === 'Enter' && !deepSearching) handleDeepSearch(); }}
+                  placeholder="Describe the work you're looking for..."
+                  style={{
+                    flex: 1, background: '#1a1a2a', border: '1px solid #2a2a3e',
+                    color: '#eee', borderRadius: 8, padding: '10px 14px', fontSize: 15,
+                    fontFamily: 'inherit',
+                  }}
+                />
+                {deepSearching ? (
+                  <button onClick={handleStopSearch} style={{
+                    padding: '10px 16px', borderRadius: 8, border: '1px solid #ff6b6b40',
+                    background: '#1a0e0e', color: '#ff6b6b', fontSize: 14, fontWeight: 600,
+                    cursor: 'pointer', fontFamily: 'inherit', whiteSpace: 'nowrap',
+                  }}>Stop</button>
+                ) : (
+                  <button onClick={handleDeepSearch} disabled={!deepQuery.trim()} style={{
+                    padding: '10px 16px', borderRadius: 8, border: 'none',
+                    background: deepQuery.trim() ? '#4a9eff' : '#1e1e30',
+                    color: deepQuery.trim() ? '#fff' : '#555',
+                    fontSize: 14, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit',
+                    whiteSpace: 'nowrap',
+                  }}>Search</button>
                 )}
-                <div style={{
-                  fontSize: 12, color: '#555', marginBottom: 10,
-                  fontFamily: "'Courier New', monospace",
-                }}>
-                  {s.id.slice(0, 12)}...
-                </div>
-                <div style={{ display: 'flex', gap: 8 }}>
-                  {onResumeInApp && (
-                    <button
-                      onClick={() => { onResumeInApp(s.id); onClose(); }}
-                      style={{
-                        flex: 1, padding: '10px 14px', borderRadius: 8, border: 'none',
-                        background: '#4a9eff', color: '#fff', fontSize: 15, fontWeight: 600,
-                        cursor: 'pointer', fontFamily: 'inherit',
-                      }}
-                    >
-                      Resume in App
-                    </button>
-                  )}
-                  <button
-                    onClick={() => handleCopy(s)}
-                    style={{
-                      flex: 1, padding: '10px 14px', borderRadius: 8,
-                      border: '1px solid #2a2a3e',
-                      background: copied === s.id ? '#1a3a1a' : '#1a1a2a',
-                      color: copied === s.id ? '#51cf66' : '#ccc',
-                      fontSize: 15, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit',
-                    }}
-                  >
-                    {copied === s.id ? '✓ Copied!' : 'Copy Command'}
-                  </button>
-                </div>
               </div>
-            ))
-          )}
-        </div>
+            </div>
+
+            {/* Deep search results */}
+            <div style={{ flex: 1, overflowY: 'auto', padding: '14px 24px' }}>
+              {deepSearching ? (
+                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', padding: '40px 0', gap: 12 }}>
+                  <div style={{
+                    width: 32, height: 32, border: '3px solid #2a2a3e', borderTopColor: '#4a9eff',
+                    borderRadius: '50%', animation: 'spin 0.8s linear infinite',
+                  }} />
+                  <div style={{ fontSize: 16, color: '#aaa' }}>Searching transcripts...</div>
+                  <div style={{ fontSize: 13, color: '#666' }}>Claude is analyzing session history</div>
+                  <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
+                </div>
+              ) : deepError ? (
+                <div style={{ color: '#888', fontSize: 15, padding: 20, textAlign: 'center', fontStyle: 'italic' }}>
+                  {deepError}
+                </div>
+              ) : deepResults.length > 0 ? (
+                deepResults.map(s => (
+                  <SessionRow key={s.id} s={s} globalSearch onResumeInApp={onResumeInApp} onClose={onClose} />
+                ))
+              ) : (
+                <div style={{ color: '#666', fontSize: 15, padding: 40, textAlign: 'center' }}>
+                  Describe what you worked on and Claude will search your session transcripts to find matching sessions.
+                </div>
+              )}
+            </div>
+          </>
+        ) : (
+          <>
+            {/* Regular search input */}
+            <div style={{ padding: '10px 24px', borderBottom: '1px solid #1e1e30' }}>
+              <input
+                value={search}
+                onChange={e => setSearch(e.target.value)}
+                placeholder="Search by name or ID..."
+                style={{
+                  width: '100%', background: '#1a1a2a', border: '1px solid #2a2a3e',
+                  color: '#eee', borderRadius: 8, padding: '10px 14px', fontSize: 15,
+                  fontFamily: 'inherit',
+                }}
+              />
+            </div>
+
+            {/* Session list */}
+            <div style={{ flex: 1, overflowY: 'auto', padding: '14px 24px' }}>
+              {loading ? (
+                <div style={{ color: '#aaa', fontSize: 15, padding: 20, textAlign: 'center' }}>Loading sessions...</div>
+              ) : filtered.length === 0 ? (
+                <div style={{ color: '#777', fontSize: 15, padding: 20, textAlign: 'center', fontStyle: 'italic' }}>
+                  {sessions.length === 0 ? 'No sessions found' : 'No sessions match search'}
+                </div>
+              ) : (
+                filtered.map(s => (
+                  <SessionRow key={s.id} s={s} globalSearch={mode === 'all'} onResumeInApp={onResumeInApp} onClose={onClose} />
+                ))
+              )}
+            </div>
+          </>
+        )}
       </div>
     </>
   );

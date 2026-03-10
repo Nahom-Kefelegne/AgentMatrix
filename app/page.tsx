@@ -14,6 +14,7 @@ import DashboardView from './components/DashboardView';
 import SessionDialog from './components/SessionDialog';
 import SpawnModal from './components/SpawnModal';
 import AppSettingsModal from './components/AppSettingsModal';
+import SplashScreen from './components/SplashScreen';
 
 function OfficeView() {
   const { connected, sessions, onEvent, socketRef } = useSocketContext();
@@ -22,12 +23,13 @@ function OfficeView() {
   const [hoverPos, setHoverPos] = useState({ x: 0, y: 0 });
   const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null);
   const [showSetup, setShowSetup] = useState(false);
-  const [taskTrackerId, setTaskTrackerId] = useState<string | null>(null);
   const [showTaskBoard, setShowTaskBoard] = useState(false);
+  const [openTaskId, setOpenTaskId] = useState<string | null>(null);
   const [showResume, setShowResume] = useState(false);
   const [showSpawn, setShowSpawn] = useState(false);
+  const [orchestratorViewId, setOrchestratorViewId] = useState<string | null>(null);
   const [showSettings, setShowSettings] = useState(false);
-  const [viewMode, setViewMode] = useState<'office' | 'dashboard'>('office');
+  const [viewMode, setViewMode] = useState<'office' | 'dashboard'>('dashboard');
   const canvasRef = useRef<OfficeCanvasHandle>(null);
 
   const handleHover = useCallback((char: CharacterData | null, screenX: number, screenY: number) => {
@@ -36,15 +38,22 @@ function OfficeView() {
   }, []);
 
   const handleClick = useCallback((char: CharacterData | null) => {
-    setSelectedSessionId(char?.id ?? null);
-  }, []);
+    if (!char) { setSelectedSessionId(null); return; }
+    // Agents open their parent session dialog
+    if (char.isAgent) {
+      // Find which session has this agent
+      for (const [sid, s] of sessions) {
+        if (s.agents?.some(a => a.id === char.id || a.name === char.name)) {
+          setSelectedSessionId(sid);
+          return;
+        }
+      }
+    }
+    setSelectedSessionId(char.id);
+  }, [sessions]);
 
   const handleCloseDialog = useCallback(() => {
     setSelectedSessionId(null);
-  }, []);
-
-  const handleSetTaskTracker = useCallback((sessionId: string) => {
-    setTaskTrackerId((prev) => (prev === sessionId ? null : sessionId));
   }, []);
 
   const sessionList = Array.from(sessions.values());
@@ -68,8 +77,6 @@ function OfficeView() {
     if (sessionList.length === 0) return;
     setSelectedSessionId(sessionList[0].id);
   }, [sessionList]);
-
-  const taskTrackerSession = taskTrackerId ? sessions.get(taskTrackerId) : null;
 
   return (
     <>
@@ -114,10 +121,10 @@ function OfficeView() {
         sessionId={selectedSessionId}
         sessions={sessions}
         onClose={handleCloseDialog}
-        isTaskTracker={selectedSessionId ? selectedSessionId === taskTrackerId : false}
-        onSetTaskTracker={handleSetTaskTracker}
         onPrev={handlePrevSession}
         onNext={handleNextSession}
+        onSelectSession={(id) => setSelectedSessionId(id)}
+        onOpenTask={(taskId) => { setOpenTaskId(taskId); setShowTaskBoard(true); }}
         sessionIndex={currentSessionIndex}
         sessionTotal={sessionList.length}
       />
@@ -130,9 +137,9 @@ function OfficeView() {
       />
       <TaskBoard
         isOpen={showTaskBoard}
-        onClose={() => setShowTaskBoard(false)}
-        sessionId={taskTrackerId}
-        sessionName={taskTrackerSession?.name || 'All Tasks'}
+        onClose={() => { setShowTaskBoard(false); setOpenTaskId(null); }}
+        onOpenSession={(id) => setSelectedSessionId(id)}
+        initialTaskId={openTaskId}
       />
       <ResumeModal
         isOpen={showResume}
@@ -151,7 +158,37 @@ function OfficeView() {
       <AppSettingsModal
         isOpen={showSettings}
         onClose={() => setShowSettings(false)}
+        onViewOrchestrator={(id) => setOrchestratorViewId(id)}
       />
+
+      {/* Orchestrator viewer — uses SessionDialog in read-only mode */}
+      {orchestratorViewId && (() => {
+        // Create a synthetic sessions map with the orchestrator entry
+        const orchSessions = new Map(sessions);
+        if (!orchSessions.has(orchestratorViewId)) {
+          orchSessions.set(orchestratorViewId, {
+            id: orchestratorViewId,
+            name: 'Orchestrator',
+            color: '#cc5de8',
+            status: 'idle',
+            deskIndex: -1,
+            deskPosition: { x: 0, y: 0 },
+            spawnPosition: { x: 0, y: 0 },
+            recentActions: [],
+            agents: [],
+            cwd: undefined,
+            createdAt: Date.now(),
+          });
+        }
+        return (
+          <SessionDialog
+            sessionId={orchestratorViewId}
+            sessions={orchSessions}
+            onClose={() => setOrchestratorViewId(null)}
+            readOnly
+          />
+        );
+      })()}
     </>
   );
 }
@@ -159,7 +196,9 @@ function OfficeView() {
 export default function Home() {
   return (
     <SocketProvider>
-      <OfficeView />
+      <SplashScreen>
+        <OfficeView />
+      </SplashScreen>
     </SocketProvider>
   );
 }

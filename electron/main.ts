@@ -10,7 +10,8 @@ import { getCachedName } from '../lib/state/nameCache';
 import { getSettings } from '../lib/state/appSettings';
 import { getActiveSessions } from '../lib/state/activeSessionsCache';
 import { PtyManager } from './pty/PtyManager';
-import { setupTerminalBridge } from './terminalBridge';
+import { setupTerminalBridge, requestSummary } from './terminalBridge';
+import { spawnOrchestrator, killOrchestrator, isOrchestrator } from './services/OrchestratorService';
 
 const isDev = process.env.NODE_ENV !== 'production';
 const port = parseInt(process.env.PORT || '3000', 10);
@@ -81,16 +82,27 @@ function startServer(): Promise<void> {
       (globalThis as Record<string, unknown>).__socketIO = io;
 
       io.on('connection', (socket) => {
-        socket.emit(SOCKET_EVENTS.STATE_SNAPSHOT, getAllSessions());
+        // Exclude orchestrator from client-visible sessions
+        const visible = getAllSessions().filter(s => !isOrchestrator(s.id));
+        socket.emit(SOCKET_EVENTS.STATE_SNAPSHOT, visible);
+        // Send orchestrator ID so client can access it
+        const { getOrchestratorId } = require('./services/OrchestratorService');
+        const orchId = getOrchestratorId();
+        if (orchId) socket.emit('orchestrator:id', { sessionId: orchId });
       });
 
       setupTerminalBridge(io!, ptyManager);
+
+      // Spawn orchestrator session (hidden, app-only)
+      spawnOrchestrator(ptyManager);
 
       httpServer.listen(port, () => {
         console.log(`> Server ready on http://localhost:${port}`);
 
         // Auto-resume sessions from last run
         const settings = getSettings();
+        const summaryPromises: Promise<void>[] = [];
+
         if (settings.autoResume) {
           const cached = getActiveSessions();
           if (cached.length > 0) {
@@ -98,7 +110,6 @@ function startServer(): Promise<void> {
             for (const s of cached) {
               try {
                 const name = getCachedName(s.id) || s.name;
-                // Import createSessionEntry logic inline
                 const { DESK_POSITIONS: DP, OVERFLOW_POSITIONS: OP, ENTRANCE_POINT: EP, CHARACTER_COLORS: CC } = require('../lib/constants');
                 const all = getAllSessions();
                 const used = new Set(all.map((x: any) => x.deskIndex));
@@ -116,13 +127,25 @@ function startServer(): Promise<void> {
                 io!.emit(SOCKET_EVENTS.SESSION_START, sessionData);
 
                 ptyManager.spawnResume(s.id, { cwd: s.cwd, resumeId: s.id });
-                // Wire up callbacks
                 const pty = ptyManager.getSession(s.id);
                 if (pty) {
                   pty.onStateChange = (info) => io!.emit('session:state', { sessionId: s.id, ...info });
                   pty.onContextUpdate = (usage) => {
                     io!.emit('session:context', { sessionId: s.id, usage });
                   };
+                  const sid = s.id;
+                  const summaryP = new Promise<void>((res) => {
+                    setTimeout(async () => {
+                      const p = ptyManager.getSession(sid);
+                      if (p && p.status !== 'closed') {
+                        io!.emit('session:initializing', { sessionId: sid, busy: true });
+                        await requestSummary(io!, ptyManager, sid, { timeoutMs: 60000 });
+                        io!.emit('session:initializing', { sessionId: sid, busy: false });
+                      }
+                      res();
+                    }, 2000);
+                  });
+                  summaryPromises.push(summaryP);
                 }
                 console.log(`[auto-resume] ${name} (${s.id.slice(0, 8)})`);
               } catch (err) {
@@ -131,6 +154,33 @@ function startServer(): Promise<void> {
             }
           }
         }
+
+        // Pre-fetch tasks so TaskBoard doesn't block on open
+        const prefetchTasks = async () => {
+          try {
+            // Trigger the sync + fetch by hitting our own API
+            const res = await fetch(`http://localhost:${port}/api/app-tasks`);
+            const data = await res.json();
+            io!.emit('app:tasks-loaded', { tasks: data.tasks || [] });
+          } catch {}
+          try {
+            const res = await fetch(`http://localhost:${port}/api/ado?action=check`);
+            const data = await res.json();
+            if (data.config?.configured) {
+              const adoRes = await fetch(`http://localhost:${port}/api/ado?action=tasks`);
+              const adoData = await adoRes.json();
+              io!.emit('app:ado-tasks-loaded', { tasks: adoData.tasks || [] });
+            }
+          } catch {}
+        };
+
+        // Signal app ready after summaries + task prefetch complete
+        Promise.all([...summaryPromises, prefetchTasks()]).then(() => {
+          io!.emit('app:ready');
+          console.log('[app] ready');
+        });
+        // Also signal ready after max 90s regardless
+        setTimeout(() => io!.emit('app:ready'), 90000);
 
         resolve();
       });
@@ -154,5 +204,6 @@ app.on('window-all-closed', () => {
 });
 
 app.on('will-quit', () => {
+  killOrchestrator();
   ptyManager.dispose();
 });
