@@ -74,8 +74,7 @@ function parseTranscriptMeta(transcriptPath: string): { cwd?: string; slug?: str
     let cwd = data.cwd;
 
     // If no cwd in transcript, derive from project directory name
-    // e.g. /.../.claude/projects/-Users-nkefelegne-Desktop-DEV-teams-modular-packages/xxx.jsonl
-    // → /Users/nkefelegne/Desktop/DEV/teams-modular-packages
+    // e.g. ~/.claude/projects/-Users-johndoe-projects-myapp/xxx.jsonl → /Users/johndoe/projects/myapp
     if (!cwd) {
       const parts = transcriptPath.split('/');
       const projectsIdx = parts.indexOf('projects');

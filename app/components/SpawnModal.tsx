@@ -91,7 +91,10 @@ const EFFORT_LEVELS = [
 
 export default function SpawnModal({ isOpen, onClose, onSessionSpawned }: SpawnModalProps) {
   const { socketRef } = useSocketContext();
-  const [cwd, setCwd] = useState('/Users/nkefelegne/Desktop/DEV');
+  const [cwd, setCwd] = useState('');
+  useEffect(() => {
+    if (!cwd) fetch('/api/system').then(r => r.json()).then(d => setCwd(d.homedir || '')).catch(() => {});
+  }, []);
   const [sessionName, setSessionName] = useState('');
   const [permissionMode, setPermissionMode] = useState('');
   const [model, setModel] = useState('');

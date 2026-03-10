@@ -86,7 +86,10 @@ function formatTimeAgo(ms: number): string {
 }
 
 export default function ResumeModal({ isOpen, onClose, onResumeInApp }: ResumeModalProps) {
-  const [cwd, setCwd] = useState('/Users/nkefelegne/Desktop/DEV');
+  const [cwd, setCwd] = useState('');
+  useEffect(() => {
+    if (!cwd) fetch('/api/system').then(r => r.json()).then(d => setCwd(d.homedir || '')).catch(() => {});
+  }, []);
   const [sessions, setSessions] = useState<SessionInfo[]>([]);
   const [loading, setLoading] = useState(false);
   const [copied, setCopied] = useState<string | null>(null);

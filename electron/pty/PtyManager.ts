@@ -32,19 +32,56 @@ export class PtyManager {
 
   findSessionCwd(sessionId: string): string | undefined {
     try {
+      const { existsSync, readdirSync, statSync, openSync, readSync, closeSync } = require('fs');
+      const { sep } = require('path');
       const projectsDir = join(homedir(), '.claude', 'projects');
-      const output = execSync(
-        `find "${projectsDir}" -name "${sessionId}.jsonl" -type f 2>/dev/null`,
-        { encoding: 'utf-8', timeout: 5000 },
-      ).trim();
-      if (!output) return undefined;
-      const parts = output.split('/');
-      const idx = parts.indexOf('projects');
-      if (idx < 0 || idx + 1 >= parts.length) return undefined;
-      const derived = parts[idx + 1].replace(/^-/, '/').replace(/-/g, '/');
-      const { existsSync } = require('fs');
-      return existsSync(derived) ? derived : undefined;
+      if (!existsSync(projectsDir)) return undefined;
+
+      // Cross-platform: scan directories instead of using `find`
+      const dirs = readdirSync(projectsDir);
+      for (const dir of dirs) {
+        const dirPath = join(projectsDir, dir);
+        try {
+          if (!statSync(dirPath).isDirectory()) continue;
+          const transcriptPath = join(dirPath, `${sessionId}.jsonl`);
+          if (existsSync(transcriptPath)) {
+            // Try reading cwd from transcript first line
+            try {
+              const fd = openSync(transcriptPath, 'r');
+              const buf = Buffer.alloc(4000);
+              readSync(fd, buf, 0, 4000, 0);
+              closeSync(fd);
+              const firstLine = buf.toString('utf-8').split('\n')[0];
+              const parsed = JSON.parse(firstLine);
+              if (parsed.cwd && existsSync(parsed.cwd)) return parsed.cwd;
+            } catch {}
+
+            // Fall back: decode dir name with greedy path matching
+            const encoded = dir.replace(/^-/, '');
+            const resolved = this.decodeDirName(encoded, existsSync);
+            return resolved || undefined;
+          }
+        } catch {}
+      }
+      return undefined;
     } catch { return undefined; }
+  }
+
+  /** Decode a project dir name back to a real filesystem path (handles hyphens in folder names) */
+  private decodeDirName(encoded: string, existsSync: (p: string) => boolean): string | null {
+    const { sep } = require('path');
+    const segments = encoded.split('-');
+    let p = '';
+    let i = 0;
+    while (i < segments.length) {
+      let found = false;
+      for (let end = segments.length; end > i; end--) {
+        const candidate = p + sep + segments.slice(i, end).join('-');
+        if (existsSync(candidate)) { p = candidate; i = end; found = true; break; }
+      }
+      if (!found) { p += sep + segments[i]; i++; }
+    }
+    return existsSync(p) ? p : null;
   }
 
   private createPtySession(id: string, ptyProcess: IPty): PtySession {

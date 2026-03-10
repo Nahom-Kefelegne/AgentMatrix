@@ -189,7 +189,7 @@ function AssignModal({ task, onSpawn, onReassign, onCancel }: {
   const defaultPrompt = task.subject + (task.description && task.description !== task.subject
     ? '\n\n' + task.description : '');
   const [prompt, setPrompt] = useState(defaultPrompt);
-  const [cwd, setCwd] = useState('/Users/nkefelegne/Desktop/DEV');
+  const [cwd, setCwd] = useState('');
   const [name, setName] = useState(
     task.subject.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 30)
   );
