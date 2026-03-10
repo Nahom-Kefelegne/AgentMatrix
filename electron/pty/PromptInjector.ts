@@ -68,8 +68,10 @@ export async function injectPrompt(
     `Do this now, no questions asked.`,
   ].join(' ');
 
-  // Write prompt text then Enter — use a single write with \r appended
-  ptySession.pty.write(prompt + '\r');
+  // Write prompt text, then send Enter after TUI processes it
+  ptySession.pty.write(prompt);
+  await new Promise(r => setTimeout(r, 1000));
+  ptySession.pty.write('\r');
 
   // Poll for output file
   const startTime = Date.now();

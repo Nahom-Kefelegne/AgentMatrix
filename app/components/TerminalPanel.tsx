@@ -100,6 +100,16 @@ export default function TerminalPanel({ sessionId, sessionName, cwd, visible, re
 
       // Forward keystrokes to PTY via socket (unless read-only)
       if (!readOnly) {
+        // Handle special key combos that xterm doesn't send correctly
+        terminal.attachCustomKeyEventHandler((e: KeyboardEvent) => {
+          if (e.type === 'keydown' && e.key === 'Enter' && e.shiftKey) {
+            // Shift+Enter — send CSI u encoding so Claude TUI gets it as newline
+            socket.emit('terminal:input', { sessionId, data: '\x1b[13;2u' });
+            return false; // prevent xterm default
+          }
+          return true; // let xterm handle everything else
+        });
+
         terminal.onData((data: string) => {
           socket.emit('terminal:input', { sessionId, data });
         });

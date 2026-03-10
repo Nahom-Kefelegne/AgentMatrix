@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback } from 'react';
 import type { SessionData, Action } from '@/lib/types';
 import TerminalPanel from './TerminalPanel';
 import HandoffModal from './HandoffModal';
+import FullscreenTerminal from './FullscreenTerminal';
 import ContextBar from './ContextBar';
 import { useSocketContext } from './SocketProvider';
 import { useSessionContext } from '@/lib/hooks/useSessionContext';
@@ -372,6 +373,7 @@ export default function SessionDialog({
   const [showHandoff, setShowHandoff] = useState(false);
   const [handoffActive, setHandoffActive] = useState(false);
   const [fullscreen, setFullscreen] = useState(false);
+  const [terminalFullscreen, setTerminalFullscreen] = useState(false);
   const isConsole = activeTab === 'console';
   const [, setTick] = useState(0);
   // Live timestamps
@@ -494,6 +496,14 @@ export default function SessionDialog({
                   }}>&#8250;</button>
                 </>
               )}
+            {isConsole && (
+              <button onClick={() => setTerminalFullscreen(true)} title="Terminal fullscreen" style={{
+                width: 36, height: 36, borderRadius: 8, border: '1px solid #3a3a4e',
+                background: '#1e1e30', color: '#ccc', fontSize: 16,
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                cursor: 'pointer', fontFamily: 'inherit',
+              }}>&#9635;</button>
+            )}
             <button onClick={() => setFullscreen(f => !f)} title={fullscreen ? 'Exit fullscreen' : 'Fullscreen'} style={{
               width: 36, height: 36, borderRadius: 8, border: '1px solid #3a3a4e',
               background: '#1e1e30', color: '#ccc', fontSize: 18,
@@ -645,6 +655,16 @@ export default function SessionDialog({
           </button>
         </div>
       </div>
+
+      {/* Terminal fullscreen overlay */}
+      {terminalFullscreen && (
+        <FullscreenTerminal
+          session={session}
+          sessions={sessions}
+          readOnly={readOnly}
+          onExit={() => setTerminalFullscreen(false)}
+        />
+      )}
 
       <HandoffModal
         isOpen={showHandoff}
