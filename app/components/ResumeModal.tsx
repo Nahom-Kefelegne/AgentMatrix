@@ -92,6 +92,9 @@ export default function ResumeModal({ isOpen, onClose, onResumeInApp }: ResumeMo
   const [copied, setCopied] = useState<string | null>(null);
   const [search, setSearch] = useState('');
   const [globalSearch, setGlobalSearch] = useState(false);
+  const [directId, setDirectId] = useState('');
+  const [directIdError, setDirectIdError] = useState('');
+  const [resolving, setResolving] = useState(false);
 
   const loadSessions = useCallback(async (path: string, isGlobal: boolean) => {
     setLoading(true);
@@ -128,6 +131,51 @@ export default function ResumeModal({ isOpen, onClose, onResumeInApp }: ResumeMo
     setTimeout(() => setCopied(null), 3000);
   };
 
+  const resolveSessionCwd = async (id: string): Promise<string | null> => {
+    try {
+      const res = await fetch(`/api/sessions/resolve?id=${encodeURIComponent(id)}`);
+      if (!res.ok) return null;
+      const data = await res.json();
+      return data.cwd || null;
+    } catch { return null; }
+  };
+
+  const handleDirectResume = async () => {
+    const id = directId.trim();
+    if (!id) { setDirectIdError('Enter a session ID'); return; }
+    const uuidish = /^[0-9a-f-]{8,}$/i.test(id);
+    if (!uuidish) { setDirectIdError('Invalid session ID format'); return; }
+    setDirectIdError('');
+    setResolving(true);
+    const sessionCwd = await resolveSessionCwd(id);
+    setResolving(false);
+    if (!sessionCwd) { setDirectIdError('Session not found — no transcript for this ID'); return; }
+    if (onResumeInApp) {
+      onResumeInApp(id);
+      onClose();
+    } else {
+      const cmd = `cd ${sessionCwd} && claude --resume ${id}`;
+      navigator.clipboard.writeText(cmd);
+      setCopied(id);
+      setTimeout(() => setCopied(null), 3000);
+    }
+  };
+
+  const handleDirectCopy = async () => {
+    const id = directId.trim();
+    if (!id) { setDirectIdError('Enter a session ID'); return; }
+    const uuidish = /^[0-9a-f-]{8,}$/i.test(id);
+    if (!uuidish) { setDirectIdError('Invalid session ID format'); return; }
+    setDirectIdError('');
+    setResolving(true);
+    const sessionCwd = await resolveSessionCwd(id);
+    setResolving(false);
+    if (!sessionCwd) { setDirectIdError('Session not found — no transcript for this ID'); return; }
+    navigator.clipboard.writeText(`cd ${sessionCwd} && claude --resume ${id}`);
+    setCopied(id);
+    setTimeout(() => setCopied(null), 3000);
+  };
+
   if (!isOpen) return null;
 
   const filtered = sessions.filter(s => !s.active &&
@@ -158,6 +206,58 @@ export default function ResumeModal({ isOpen, onClose, onResumeInApp }: ResumeMo
             background: '#1a1a2a', color: '#888', fontSize: 16,
             display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer',
           }}>✕</button>
+        </div>
+
+        {/* Resume by ID */}
+        <div style={{ padding: '14px 24px', borderBottom: '1px solid #1e1e30' }}>
+          <div style={{ fontSize: 12, fontWeight: 700, color: '#555', textTransform: 'uppercase', letterSpacing: 1, marginBottom: 8 }}>
+            Resume by Session ID
+          </div>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <input
+              value={directId}
+              onChange={e => { setDirectId(e.target.value); setDirectIdError(''); }}
+              onKeyDown={e => { if (e.key === 'Enter') handleDirectResume(); }}
+              placeholder="Paste session UUID..."
+              style={{
+                flex: 1, background: '#1a1a2a', border: `1px solid ${directIdError ? '#ff4444' : '#2a2a3e'}`,
+                color: '#eee', borderRadius: 8, padding: '10px 14px', fontSize: 14,
+                fontFamily: "'Courier New', monospace",
+              }}
+            />
+            {onResumeInApp && (
+              <button
+                onClick={handleDirectResume}
+                disabled={resolving}
+                style={{
+                  padding: '10px 16px', borderRadius: 8, border: 'none',
+                  background: resolving ? '#3a7acc' : '#4a9eff', color: '#fff', fontSize: 14, fontWeight: 600,
+                  cursor: resolving ? 'wait' : 'pointer', fontFamily: 'inherit', whiteSpace: 'nowrap',
+                  opacity: resolving ? 0.7 : 1,
+                }}
+              >
+                {resolving ? 'Resolving...' : 'Resume'}
+              </button>
+            )}
+            <button
+              onClick={handleDirectCopy}
+              disabled={resolving}
+              style={{
+                padding: '10px 16px', borderRadius: 8,
+                border: '1px solid #2a2a3e',
+                background: copied === directId.trim() ? '#1a3a1a' : '#1a1a2a',
+                color: copied === directId.trim() ? '#51cf66' : '#ccc',
+                fontSize: 14, fontWeight: 600,
+                cursor: resolving ? 'wait' : 'pointer', fontFamily: 'inherit',
+                whiteSpace: 'nowrap', opacity: resolving ? 0.7 : 1,
+              }}
+            >
+              {copied === directId.trim() ? '✓ Copied' : 'Copy Cmd'}
+            </button>
+          </div>
+          {directIdError && (
+            <div style={{ fontSize: 12, color: '#ff6666', marginTop: 6 }}>{directIdError}</div>
+          )}
         </div>
 
         {/* Search mode toggle + path picker */}
