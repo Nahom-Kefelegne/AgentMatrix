@@ -12,8 +12,8 @@ interface HeaderBarProps {
   onResumeClick: () => void;
   onSessionsClick: () => void;
   onNewSessionClick: () => void;
-  viewMode: 'office' | 'dashboard';
-  onToggleView: () => void;
+  viewMode: 'office' | 'dashboard' | 'editor';
+  onViewChange: (mode: 'office' | 'dashboard' | 'editor') => void;
 }
 
 function HeaderButton({ onClick, label, title, badge }: {
@@ -54,7 +54,7 @@ function HeaderButton({ onClick, label, title, badge }: {
 
 export default function HeaderBar({
   connected, sessionCount, onSettingsClick, onSetupClick, onTasksClick, onResumeClick, onSessionsClick,
-  onNewSessionClick, viewMode, onToggleView,
+  onNewSessionClick, viewMode, onViewChange,
 }: HeaderBarProps) {
   const [menuOpen, setMenuOpen] = useState(false);
 
@@ -89,10 +89,10 @@ export default function HeaderBar({
         display: 'flex', background: '#1e1e30', border: '1px solid #3a3a4e',
         borderRadius: 6, padding: 2,
       }}>
-        {(['office', 'dashboard'] as const).map(mode => (
+        {(['dashboard', 'office', 'editor'] as const).map(mode => (
           <button
             key={mode}
-            onClick={viewMode !== mode ? onToggleView : undefined}
+            onClick={() => onViewChange(mode)}
             style={{
               padding: '6px 14px', fontSize: 14, fontWeight: 600, borderRadius: 4,
               border: 'none',
@@ -101,7 +101,7 @@ export default function HeaderBar({
               cursor: 'pointer', fontFamily: 'inherit',
             }}
           >
-            {mode === 'office' ? 'Office' : 'Dashboard'}
+            {mode === 'dashboard' ? 'Dashboard' : mode === 'office' ? 'Office' : 'Editor'}
           </button>
         ))}
       </div>

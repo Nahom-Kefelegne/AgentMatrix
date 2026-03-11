@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useCallback, useRef } from 'react';
+import dynamic from 'next/dynamic';
 import type { CharacterData } from '@/lib/types';
 import { SocketProvider, useSocketContext } from './components/SocketProvider';
 import HeaderBar from './components/HeaderBar';
@@ -16,6 +17,9 @@ import SpawnModal from './components/SpawnModal';
 import AppSettingsModal from './components/AppSettingsModal';
 import SplashScreen from './components/SplashScreen';
 
+// Lazy-load the editor to avoid loading Monaco until needed
+const EditorView = dynamic(() => import('./components/editor/EditorView'), { ssr: false });
+
 function OfficeView() {
   const { connected, sessions, onEvent, socketRef } = useSocketContext();
 
@@ -29,7 +33,7 @@ function OfficeView() {
   const [showSpawn, setShowSpawn] = useState(false);
   const [orchestratorViewId, setOrchestratorViewId] = useState<string | null>(null);
   const [showSettings, setShowSettings] = useState(false);
-  const [viewMode, setViewMode] = useState<'office' | 'dashboard'>('dashboard');
+  const [viewMode, setViewMode] = useState<'office' | 'dashboard' | 'editor'>('dashboard');
   const canvasRef = useRef<OfficeCanvasHandle>(null);
 
   const handleHover = useCallback((char: CharacterData | null, screenX: number, screenY: number) => {
@@ -90,7 +94,7 @@ function OfficeView() {
         onNewSessionClick={() => setShowSpawn(true)}
         onSessionsClick={handleSessionsCycle}
         viewMode={viewMode}
-        onToggleView={() => setViewMode(m => m === 'office' ? 'dashboard' : 'office')}
+        onViewChange={(mode) => setViewMode(mode)}
       />
 
       {/* Office view — keep mounted to preserve canvas engine */}
@@ -115,6 +119,9 @@ function OfficeView() {
           onSelectSession={(id) => setSelectedSessionId(id)}
         />
       )}
+
+      {/* Editor view */}
+      {viewMode === 'editor' && <EditorView />}
 
       {/* Session dialog */}
       <SessionDialog
