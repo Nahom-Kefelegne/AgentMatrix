@@ -15,6 +15,17 @@ interface GitPanelProps {
   onResize: (height: number) => void;
 }
 
+function detectLang(filePath: string): string {
+  const ext = filePath.split('.').pop()?.toLowerCase() || '';
+  const map: Record<string, string> = {
+    ts: 'typescript', tsx: 'typescript', js: 'javascript', jsx: 'javascript',
+    json: 'json', md: 'markdown', css: 'css', html: 'html',
+    py: 'python', rs: 'rust', go: 'go', java: 'java',
+    yaml: 'yaml', yml: 'yaml', sh: 'shell', sql: 'sql',
+  };
+  return map[ext] || 'plaintext';
+}
+
 function statusColor(status: string): string {
   switch (status) {
     case 'M': return '#ff922b';
@@ -150,37 +161,18 @@ export default function GitPanel({ rootPath, height, onResize }: GitPanelProps) 
   const handleViewDiff = useCallback(async (filePath: string) => {
     setSelectedFile(filePath);
     try {
-      // Get original content (HEAD version)
+      // Get HEAD version (original)
+      const showRes = await fetch(
+        `/api/editor/git?action=show&cwd=${encodeURIComponent(rootPath)}&file=${encodeURIComponent(filePath)}`
+      );
+      const showData = await showRes.json();
+      setDiffOriginal(showData.content || '');
+
+      // Get current working copy (modified)
       const fullPath = rootPath + '/' + filePath;
-      let original = '';
-      try {
-        const res = await fetch(`/api/editor?action=read&path=${encodeURIComponent(fullPath)}`);
-        const data = await res.json();
-        if (!data.error) original = data.content || '';
-      } catch {
-        // new file, no original
-      }
-
-      // Get diff from git
-      const diffRes = await fetch(`/api/editor/git?action=diff&cwd=${encodeURIComponent(rootPath)}&file=${encodeURIComponent(filePath)}`);
-      const diffData = await diffRes.json();
-
-      // For the diff editor, we show original vs modified
-      // The "modified" is the current file content, "original" is the last committed version
-      // We can approximate by reading the file and using original = modified - diff
-      // Simpler: just show current file as modified, and use git show for original
-      setDiffModified(original);
-
-      // Try to get HEAD version
-      try {
-        const res2 = await fetch(`/api/editor/git?action=diff&cwd=${encodeURIComponent(rootPath)}&file=${encodeURIComponent(filePath)}`);
-        const d2 = await res2.json();
-        // Use the diff text for display. For proper diff editor, we'd need git show HEAD:file
-        // For now, show the raw diff
-        setDiffOriginal(d2.diff || d2.stagedDiff || '(no changes)');
-      } catch {
-        setDiffOriginal('');
-      }
+      const readRes = await fetch(`/api/editor?action=read&path=${encodeURIComponent(fullPath)}`);
+      const readData = await readRes.json();
+      setDiffModified(readData.error ? '' : readData.content || '');
     } catch {
       setDiffOriginal('');
       setDiffModified('');
@@ -465,7 +457,7 @@ export default function GitPanel({ rootPath, height, onResize }: GitPanelProps) 
             <DiffEditor
               original={diffOriginal}
               modified={diffModified}
-              language="plaintext"
+              language={detectLang(selectedFile)}
               theme="vs-dark"
               options={{
                 readOnly: true,

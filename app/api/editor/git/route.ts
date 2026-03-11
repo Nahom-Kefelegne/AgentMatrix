@@ -144,6 +144,20 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ current, branches });
     }
 
+    if (action === 'show') {
+      // Get file content at HEAD (for diff comparison)
+      const file = searchParams.get('file');
+      if (!file) return NextResponse.json({ error: 'file required' }, { status: 400 });
+      const ref = searchParams.get('ref') || 'HEAD';
+      try {
+        const content = await gitExec(['show', `${ref}:${file}`], cwd);
+        return NextResponse.json({ content });
+      } catch {
+        // File doesn't exist at that ref (new file)
+        return NextResponse.json({ content: '' });
+      }
+    }
+
     if (action === 'blame') {
       const file = searchParams.get('file');
       if (!file) return NextResponse.json({ error: 'file required' }, { status: 400 });
