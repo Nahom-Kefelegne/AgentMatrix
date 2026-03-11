@@ -6,7 +6,27 @@ A desktop app that turns Claude Code into a visual, manageable multi-session pow
 
 ## Quick Start
 
-### Option 1: One command with Claude (recommended)
+### Option 1: Setup script (recommended)
+
+Clone the repo and run the setup script. It checks prerequisites, configures Claude hooks, installs dependencies, and launches the app.
+
+**macOS / Linux:**
+```bash
+git clone https://github.com/Nahom-Kefelegne/AgentMatrix.git
+cd AgentMatrix
+./setup.sh
+```
+
+**Windows (PowerShell):**
+```powershell
+git clone https://github.com/Nahom-Kefelegne/AgentMatrix.git
+cd AgentMatrix
+.\setup.ps1
+```
+
+The script checks for: Node.js, npm, Claude CLI, git, and optionally Azure CLI (for ADO integration). It tells you what's missing and how to install it.
+
+### Option 2: Claude skill
 
 Copy `setup-skill/setup-agentmatrix.md` to `~/.claude/commands/` then run:
 ```bash
@@ -14,11 +34,8 @@ claude
 > /setup-agentmatrix
 ```
 
-Claude will clone the repo, install deps, configure hooks, and launch the app.
+### Option 3: Manual setup
 
-### Option 2: Manual setup
-
-**macOS / Linux:**
 ```bash
 git clone https://github.com/Nahom-Kefelegne/AgentMatrix.git
 cd AgentMatrix
@@ -27,18 +44,7 @@ npx electron-rebuild -m . -o node-pty
 npx electron .
 ```
 
-**Windows (PowerShell):**
-```powershell
-git clone https://github.com/Nahom-Kefelegne/AgentMatrix.git
-cd AgentMatrix
-npm install
-npx electron-rebuild -m . -o node-pty
-npx electron .
-```
-
-> **Windows note:** If `electron-rebuild` fails, install build tools first: `npm install --global windows-build-tools`
-
-On first run, configure hooks from the **Setup** button inside the app, or let the `/setup-agentmatrix` skill handle it.
+Then configure hooks from the **Setup** button inside the app.
 
 ## Features
 
