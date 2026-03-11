@@ -2,6 +2,11 @@ appId: com.agentmatrix.app
 productName: Agent Matrix
 
 asar: true
+asarUnpack:
+  - "node_modules/node-pty/**/*"
+  - ".next/standalone/**/*"
+  - ".next/static/**/*"
+  - "public/**/*"
 
 directories:
   output: dist
@@ -16,6 +21,7 @@ files:
   - "server.ts"
   - "next.config.ts"
   - "package.json"
+  - "node_modules/**/*"
 
 mac:
   target:

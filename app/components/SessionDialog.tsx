@@ -785,10 +785,10 @@ function TasksTab({ sessionId, socketRef, onOpenTask, onSwitchToConsole }: { ses
                 {icon && <span style={{ fontSize: 13 }}>{icon}</span>}
                 <span style={{ fontSize: 15, color: '#eee', fontWeight: 700 }}>{task.subject as string}</span>
               </div>
-              {task.description && <div style={{ fontSize: 13, color: '#777', marginTop: 4, fontWeight: 500 }}>{(task.description as string).slice(0, 80)}</div>}
+              {task.description ? <div style={{ fontSize: 13, color: '#777', marginTop: 4, fontWeight: 500 }}>{(task.description as string).slice(0, 80)}</div> : null}
               <div style={{ display: 'flex', gap: 5, marginTop: 6, alignItems: 'center' }}>
                 <span style={{ fontSize: 10, padding: '2px 8px', borderRadius: 10, background: (TASK_STATE_COLORS[state] || '#888') + '15', color: TASK_STATE_COLORS[state] || '#888', fontWeight: 700 }}>{state}</span>
-                {task.adoId && <span style={{ fontSize: 10, padding: '2px 8px', borderRadius: 10, background: '#4a9eff10', color: '#4a9eff', fontWeight: 700 }}>#{task.adoId as number}</span>}
+                {task.adoId ? <span style={{ fontSize: 10, padding: '2px 8px', borderRadius: 10, background: '#4a9eff10', color: '#4a9eff', fontWeight: 700 }}>#{task.adoId as number}</span> : null}
                 <button onClick={(e) => { e.stopPropagation(); handleSyncWithClaude(task); }} style={{
                   marginLeft: 'auto', padding: '2px 8px', borderRadius: 4, border: '1px solid #51cf6630',
                   background: 'transparent', color: '#51cf66', fontSize: 10, fontWeight: 700, cursor: 'pointer',

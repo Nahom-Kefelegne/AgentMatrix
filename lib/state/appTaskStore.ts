@@ -63,9 +63,9 @@ export function updateAppTask(id: string, changes: Record<string, unknown>): voi
   if (idx >= 0) {
     for (const [key, val] of Object.entries(changes)) {
       if (val === null || val === undefined) {
-        delete (tasks[idx] as Record<string, unknown>)[key];
+        delete (tasks[idx] as any)[key];
       } else {
-        (tasks[idx] as Record<string, unknown>)[key] = val;
+        (tasks[idx] as any)[key] = val;
       }
     }
     writeStore(tasks);

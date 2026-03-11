@@ -1,7 +1,6 @@
 import { app, BrowserWindow, Menu, Tray, nativeImage } from 'electron';
 import path from 'path';
 import { createServer } from 'http';
-import next from 'next';
 import { Server as SocketIOServer } from 'socket.io';
 import { SOCKET_EVENTS } from '../lib/types';
 import { SOCKET_PATH } from '../lib/constants';
@@ -25,8 +24,9 @@ function createWindow() {
   mainWindow = new BrowserWindow({
     width: 1400,
     height: 900,
-    backgroundColor: '#0a0a14',
+    backgroundColor: '#08080f',
     autoHideMenuBar: !isDev,
+    show: false,
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
@@ -34,11 +34,18 @@ function createWindow() {
     },
   });
 
-  mainWindow.loadURL(`http://localhost:${port}`);
-
-  if (isDev) {
-    mainWindow.webContents.openDevTools();
-  }
+  // Show immediately with native splash while server starts
+  const splashHtml = `data:text/html,
+    <html><body style="margin:0;background:#08080f;display:flex;align-items:center;justify-content:center;height:100vh;font-family:-apple-system,BlinkMacSystemFont,sans-serif">
+      <div style="text-align:center">
+        <div style="width:14px;height:14px;border-radius:50%;background:%2351cf66;margin:0 auto 16px;animation:pulse 2.5s ease-in-out infinite"></div>
+        <div style="color:%23eee;font-size:24px;font-weight:800;letter-spacing:-0.5px">Agent Matrix</div>
+        <div style="color:%23555;font-size:13px;margin-top:10px">Starting server...</div>
+      </div>
+      <style>@keyframes pulse{0%,100%{opacity:.3;box-shadow:0 0 4px rgba(81,207,102,.1)}50%{opacity:1;box-shadow:0 0 24px rgba(81,207,102,.7),0 0 8px rgba(81,207,102,.4)}}</style>
+    </body></html>`;
+  mainWindow.loadURL(splashHtml);
+  mainWindow.once('ready-to-show', () => mainWindow?.show());
 
   mainWindow.on('close', (e) => {
     if (process.platform === 'darwin') {
@@ -63,15 +70,38 @@ function createTray() {
   tray.on('click', () => mainWindow?.show());
 }
 
-function startServer(): Promise<void> {
-  return new Promise((resolve) => {
-    const nextApp = next({ dev: isDev, dir: path.join(__dirname, '..') });
-    const handle = nextApp.getRequestHandler();
+async function startServer(): Promise<void> {
+  const appDir = path.join(__dirname, '..');
+  let httpServer: ReturnType<typeof createServer>;
 
-    nextApp.prepare().then(() => {
-      const httpServer = createServer((req, res) => {
-        handle(req, res);
-      });
+  if (isDev) {
+    const next = require('next');
+    const nextApp = next({ dev: true, dir: appDir });
+    const handle = nextApp.getRequestHandler();
+    await nextApp.prepare();
+    httpServer = createServer((req, res) => handle(req, res));
+  } else {
+    const standaloneDir = path.join(appDir, '.next', 'standalone');
+    process.env.PORT = String(port);
+    process.env.HOSTNAME = 'localhost';
+    process.chdir(standaloneDir);
+
+    const { parse } = require('url');
+    const NextServer = require('next/dist/server/next-server').default;
+    const conf = require(path.join(standaloneDir, '.next', 'required-server-files.json')).config;
+    const nextServer = new NextServer({
+      hostname: 'localhost',
+      port,
+      dir: standaloneDir,
+      dev: false,
+      customServer: true,
+      conf,
+    });
+    const handler = nextServer.getRequestHandler();
+    httpServer = createServer((req, res) => handler(req, res, parse(req.url || '', true)));
+  }
+
+  return new Promise((resolve) => {
 
       io = new SocketIOServer(httpServer, {
         path: SOCKET_PATH,
@@ -184,14 +214,16 @@ function startServer(): Promise<void> {
 
         resolve();
       });
-    });
   });
 }
 
 app.whenReady().then(async () => {
-  await startServer();
   createWindow();
   createTray();
+  await startServer();
+  // Navigate to app now that server is ready
+  mainWindow?.loadURL(`http://localhost:${port}`);
+  if (isDev) mainWindow?.webContents.openDevTools();
 
   app.on('activate', () => {
     if (mainWindow) mainWindow.show();
