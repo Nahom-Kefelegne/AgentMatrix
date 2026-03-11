@@ -7,54 +7,140 @@ interface PathPickerProps {
   onSelect: (path: string) => void;
 }
 
-export default function PathPicker({ onSelect }: PathPickerProps) {
-  const [manualPath, setManualPath] = useState('');
-  const [recentPaths, setRecentPaths] = useState<string[]>([]);
-  const [error, setError] = useState('');
+function FolderBrowser({ value, onChange }: { value: string; onChange: (path: string) => void }) {
+  const [dirs, setDirs] = useState<{ name: string; path: string }[]>([]);
+  const [loading, setLoading] = useState(false);
 
-  // Fetch recent paths from active sessions
+  const loadDirs = useCallback(async (parentPath: string) => {
+    setLoading(true);
+    try {
+      const res = await fetch(`/api/dirs?path=${encodeURIComponent(parentPath)}`);
+      const data = await res.json();
+      setDirs(data.dirs || []);
+    } catch { setDirs([]); }
+    setLoading(false);
+  }, []);
+
+  useEffect(() => {
+    loadDirs(value);
+  }, [value, loadDirs]);
+
+  return (
+    <div style={{
+      background: '#0e0e1a',
+      border: '1px solid #2a2a3a',
+      borderRadius: 8,
+      overflow: 'hidden',
+    }}>
+      {/* Current path display */}
+      <div style={{
+        padding: '10px 14px',
+        borderBottom: '1px solid #1a1a2e',
+        display: 'flex',
+        alignItems: 'center',
+        gap: 8,
+      }}>
+        <span style={{
+          fontSize: 13,
+          color: '#4a9eff',
+          fontFamily: "'JetBrains Mono', 'Fira Code', monospace",
+          overflow: 'hidden',
+          textOverflow: 'ellipsis',
+          whiteSpace: 'nowrap',
+          flex: 1,
+        }}>
+          {value}
+        </span>
+      </div>
+
+      {/* Directory list */}
+      <div style={{ maxHeight: 280, overflowY: 'auto' }}>
+        {/* Parent directory */}
+        {value !== '/' && (
+          <div
+            onClick={() => {
+              const parent = value.split('/').slice(0, -1).join('/') || '/';
+              onChange(parent);
+            }}
+            onMouseEnter={e => (e.currentTarget.style.background = '#1a1a2e')}
+            onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
+            style={{
+              padding: '8px 14px',
+              fontSize: 14,
+              color: '#7aafff',
+              cursor: 'pointer',
+              borderBottom: '1px solid #1a1a2e',
+              display: 'flex',
+              alignItems: 'center',
+              gap: 8,
+            }}
+          >
+            <span style={{ fontSize: 12, opacity: 0.7 }}>{'\u2191'}</span> Parent Directory
+          </div>
+        )}
+
+        {loading ? (
+          <div style={{ padding: '16px', color: '#666', fontSize: 13, textAlign: 'center' }}>
+            Loading...
+          </div>
+        ) : dirs.length === 0 ? (
+          <div style={{ padding: '16px', color: '#555', fontSize: 13, textAlign: 'center' }}>
+            No subdirectories
+          </div>
+        ) : (
+          dirs.map(d => (
+            <div
+              key={d.path}
+              onClick={() => onChange(d.path)}
+              onMouseEnter={e => (e.currentTarget.style.background = '#1a1a2e')}
+              onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
+              style={{
+                padding: '8px 14px',
+                fontSize: 14,
+                color: '#d8d8e8',
+                cursor: 'pointer',
+                borderBottom: '1px solid rgba(26,26,46,0.5)',
+                display: 'flex',
+                alignItems: 'center',
+                gap: 8,
+              }}
+            >
+              <span style={{ fontSize: 12, color: '#888' }}>{'\u25B6'}</span>
+              {d.name}
+            </div>
+          ))
+        )}
+      </div>
+    </div>
+  );
+}
+
+export default function PathPicker({ onSelect }: PathPickerProps) {
+  const [currentPath, setCurrentPath] = useState('');
+  const [sessionPaths, setSessionPaths] = useState<string[]>([]);
+
   useEffect(() => {
     (async () => {
       try {
-        // Try to get system default CWD
         const sysRes = await fetch('/api/system');
         const sysData = await sysRes.json();
-        const defaultCwd = sysData.cwd || sysData.defaultCwd;
-
-        // Try to get active sessions for their CWDs
-        const paths: string[] = [];
-        if (defaultCwd) paths.push(defaultCwd);
-
-        // Also try home dir
-        const home = defaultCwd?.split('/').slice(0, 3).join('/') || '/Users';
-        if (home && !paths.includes(home)) paths.push(home);
-
-        setRecentPaths(paths);
-        if (defaultCwd) setManualPath(defaultCwd);
+        setCurrentPath(sysData.homedir || '/');
       } catch {
-        setManualPath('/');
+        setCurrentPath('/');
       }
+
+      // Get active session CWDs as suggestions
+      try {
+        const res = await fetch('/api/sessions/active');
+        const data = await res.json();
+        const cwds: string[] = [];
+        for (const s of data.sessions || []) {
+          if (s.cwd && !cwds.includes(s.cwd)) cwds.push(s.cwd);
+        }
+        setSessionPaths(cwds);
+      } catch {}
     })();
   }, []);
-
-  const handleSubmit = useCallback(async () => {
-    const p = manualPath.trim();
-    if (!p) return;
-
-    // Validate path exists
-    try {
-      const res = await fetch(`/api/editor?action=tree&path=${encodeURIComponent(p)}`);
-      const data = await res.json();
-      if (data.error) {
-        setError(`Cannot open: ${data.error}`);
-        return;
-      }
-      setError('');
-      onSelect(p);
-    } catch {
-      setError('Failed to access path');
-    }
-  }, [manualPath, onSelect]);
 
   return (
     <div style={{
@@ -72,45 +158,26 @@ export default function PathPicker({ onSelect }: PathPickerProps) {
           background: '#12121e',
           border: '1px solid #2a2a3a',
           borderRadius: 12,
-          padding: 32,
-          width: 480,
+          padding: 28,
+          width: 520,
+          maxHeight: '80vh',
+          overflowY: 'auto',
           boxShadow: '0 16px 48px rgba(0,0,0,0.5)',
         }}
       >
         <div style={{ fontSize: 20, fontWeight: 700, color: '#e0e0e0', marginBottom: 4 }}>
           Open Folder
         </div>
-        <div style={{ fontSize: 13, color: '#888', marginBottom: 24 }}>
-          Choose a folder to open in the editor
+        <div style={{ fontSize: 13, color: '#888', marginBottom: 20 }}>
+          Browse to a project folder to open in the editor
         </div>
 
-        {/* Manual path input */}
-        <div style={{ marginBottom: 16 }}>
-          <input
-            value={manualPath}
-            onChange={e => { setManualPath(e.target.value); setError(''); }}
-            onKeyDown={e => { if (e.key === 'Enter') handleSubmit(); }}
-            placeholder="/path/to/project"
-            style={{
-              width: '100%',
-              padding: '10px 14px',
-              borderRadius: 6,
-              border: '1px solid #2a2a3a',
-              background: '#0e0e1a',
-              color: '#e0e0e0',
-              fontSize: 14,
-              outline: 'none',
-              fontFamily: "'JetBrains Mono', 'Fira Code', monospace",
-              boxSizing: 'border-box',
-            }}
-          />
-          {error && (
-            <div style={{ fontSize: 12, color: '#ff6b6b', marginTop: 6 }}>{error}</div>
-          )}
-        </div>
+        {/* Folder browser */}
+        <FolderBrowser value={currentPath} onChange={setCurrentPath} />
 
+        {/* Open button */}
         <button
-          onClick={handleSubmit}
+          onClick={() => onSelect(currentPath)}
           style={{
             width: '100%',
             padding: '10px 0',
@@ -122,14 +189,14 @@ export default function PathPicker({ onSelect }: PathPickerProps) {
             fontWeight: 600,
             cursor: 'pointer',
             fontFamily: 'inherit',
-            marginBottom: 20,
+            marginTop: 16,
           }}
         >
-          Open Folder
+          Open {currentPath.split('/').pop() || currentPath}
         </button>
 
-        {/* Recent paths */}
-        {recentPaths.length > 0 && (
+        {/* Session CWDs as quick picks */}
+        {sessionPaths.length > 0 && (
           <>
             <div style={{
               fontSize: 11,
@@ -137,11 +204,12 @@ export default function PathPicker({ onSelect }: PathPickerProps) {
               color: '#888',
               textTransform: 'uppercase',
               letterSpacing: 1,
+              marginTop: 20,
               marginBottom: 8,
             }}>
-              Suggested Paths
+              Active Session Directories
             </div>
-            {recentPaths.map(p => (
+            {sessionPaths.map(p => (
               <div
                 key={p}
                 onClick={() => onSelect(p)}
