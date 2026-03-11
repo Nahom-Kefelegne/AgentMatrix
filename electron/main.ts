@@ -34,17 +34,9 @@ function createWindow() {
     },
   });
 
-  // Show immediately with native splash while server starts
-  const splashHtml = `data:text/html,
-    <html><body style="margin:0;background:#08080f;display:flex;align-items:center;justify-content:center;height:100vh;font-family:-apple-system,BlinkMacSystemFont,sans-serif">
-      <div style="text-align:center">
-        <div style="width:14px;height:14px;border-radius:50%;background:%2351cf66;margin:0 auto 16px;animation:pulse 2.5s ease-in-out infinite"></div>
-        <div style="color:%23eee;font-size:24px;font-weight:800;letter-spacing:-0.5px">Agent Matrix</div>
-        <div style="color:%23555;font-size:13px;margin-top:10px">Starting server...</div>
-      </div>
-      <style>@keyframes pulse{0%,100%{opacity:.3;box-shadow:0 0 4px rgba(81,207,102,.1)}50%{opacity:1;box-shadow:0 0 24px rgba(81,207,102,.7),0 0 8px rgba(81,207,102,.4)}}</style>
-    </body></html>`;
-  mainWindow.loadURL(splashHtml);
+  // Show immediately with splash while server starts
+  const splashPath = path.join(__dirname, '..', 'public', 'splash.html');
+  mainWindow.loadFile(splashPath);
   mainWindow.once('ready-to-show', () => mainWindow?.show());
 
   mainWindow.on('close', (e) => {

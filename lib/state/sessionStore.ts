@@ -1,5 +1,5 @@
-import type { SessionData, Action, AgentData } from '@/lib/types';
-import { DESK_POSITIONS, OVERFLOW_POSITIONS, MAX_RECENT_ACTIONS } from '@/lib/constants';
+import type { SessionData, Action, AgentData } from '../types';
+import { DESK_POSITIONS, OVERFLOW_POSITIONS, MAX_RECENT_ACTIONS } from '../constants';
 
 // Persist all state on globalThis to survive Next.js dev hot reloads
 const g = globalThis as Record<string, unknown>;

@@ -1,12 +1,7 @@
 appId: com.agentmatrix.app
 productName: Agent Matrix
 
-asar: true
-asarUnpack:
-  - "node_modules/node-pty/**/*"
-  - ".next/standalone/**/*"
-  - ".next/static/**/*"
-  - "public/**/*"
+asar: false
 
 directories:
   output: dist
