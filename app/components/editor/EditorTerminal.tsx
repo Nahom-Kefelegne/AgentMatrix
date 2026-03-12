@@ -9,21 +9,22 @@ interface EditorTerminalProps {
   visible: boolean;
 }
 
+// Identical xterm setup to the working TerminalPanel, just using editor:terminal:* events
 export default function EditorTerminal({ terminalId, cwd, visible }: EditorTerminalProps) {
-  const { socketRef, connected } = useSocketContext();
+  const { socketRef } = useSocketContext();
   const containerRef = useRef<HTMLDivElement>(null);
   const termRef = useRef<any>(null);
   const fitRef = useRef<any>(null);
-  const spawnedRef = useRef(false);
-  const cleanupRef = useRef(false);
+  const [status, setStatus] = useState<'idle' | 'connected' | 'exited'>('idle');
 
-  // Step 1: Initialize xterm.js (once)
   useEffect(() => {
     const container = containerRef.current;
-    if (!container) return;
-    cleanupRef.current = false;
+    const socket = socketRef.current;
+    if (!container || !socket) return;
 
     let terminal: any = null;
+    let fitAddon: any = null;
+    let cleanup = false;
 
     (async () => {
       const { Terminal } = await import('xterm');
@@ -37,8 +38,9 @@ export default function EditorTerminal({ terminalId, cwd, visible }: EditorTermi
         document.head.appendChild(link);
       }
 
-      if (cleanupRef.current) return;
+      if (cleanup) return;
 
+      // Same config as working TerminalPanel
       terminal = new Terminal({
         theme: {
           background: '#0c0c18',
@@ -63,141 +65,133 @@ export default function EditorTerminal({ terminalId, cwd, visible }: EditorTermi
           brightCyan: '#38d9a9',
           brightWhite: '#ffffff',
         },
-        fontSize: 13,
-        fontFamily: "'JetBrains Mono', 'Fira Code', 'Cascadia Code', 'Consolas', monospace",
+        fontSize: 14,
+        fontFamily: "'Menlo', 'Monaco', 'Courier New', monospace",
+        lineHeight: 1.3,
         cursorBlink: true,
         cursorStyle: 'bar',
         scrollback: 5000,
+        scrollOnUserInput: true,
       });
 
-      const fitAddon = new FitAddon();
+      fitAddon = new FitAddon();
       terminal.loadAddon(fitAddon);
       terminal.open(container);
+      fitAddon.fit();
+
       termRef.current = terminal;
       fitRef.current = fitAddon;
 
-      setTimeout(() => { try { fitAddon.fit(); } catch {} }, 50);
+      terminal.focus();
+
+      // Forward keystrokes to PTY
+      terminal.onData((data: string) => {
+        socket.emit('editor:terminal:input' as any, { id: terminalId, data });
+      });
+
+      // Receive output from PTY
+      const handleData = (msg: { id: string; data: string }) => {
+        if (msg.id === terminalId) {
+          terminal.write(msg.data);
+          if (status !== 'connected') setStatus('connected');
+        }
+      };
+
+      const handleExit = (msg: { id: string; exitCode: number }) => {
+        if (msg.id === terminalId) {
+          terminal.writeln(`\r\n\x1b[90m[Process exited with code ${msg.exitCode}]\x1b[0m`);
+          setStatus('exited');
+        }
+      };
+
+      socket.on('editor:terminal:data' as any, handleData);
+      socket.on('editor:terminal:exit' as any, handleExit);
+
+      // Spawn the shell with correct dimensions
+      socket.emit('editor:terminal:spawn' as any, {
+        id: terminalId,
+        cwd,
+        cols: terminal.cols,
+        rows: terminal.rows,
+      });
+
+      // Resize handling — debounced, same pattern as TerminalPanel
+      let resizeTimer: ReturnType<typeof setTimeout> | null = null;
+      const doFit = () => {
+        if (!fitAddon || !terminal) return;
+        try {
+          fitAddon.fit();
+          socket.emit('editor:terminal:resize' as any, {
+            id: terminalId,
+            cols: terminal.cols,
+            rows: terminal.rows,
+          });
+        } catch {}
+      };
+      const resizeObserver = new ResizeObserver(() => {
+        if (resizeTimer) clearTimeout(resizeTimer);
+        resizeTimer = setTimeout(doFit, 50);
+      });
+      resizeObserver.observe(container);
+
+      (terminal as any).__cleanup = () => {
+        socket.off('editor:terminal:data' as any, handleData);
+        socket.off('editor:terminal:exit' as any, handleExit);
+        socket.emit('editor:terminal:kill' as any, { id: terminalId });
+        resizeObserver.disconnect();
+        terminal.dispose();
+      };
     })();
 
     return () => {
-      cleanupRef.current = true;
-      if (termRef.current) {
-        termRef.current.dispose();
+      cleanup = true;
+      if (termRef.current?.__cleanup) {
+        termRef.current.__cleanup();
         termRef.current = null;
       }
       fitRef.current = null;
     };
-  }, []);
+  }, [terminalId, cwd, socketRef]);
 
-  // Step 2: Connect to PTY via socket (when socket is ready + xterm is ready)
+  // Re-fit when panel becomes visible
   useEffect(() => {
-    if (!connected) return;
+    if (!visible || !fitRef.current || !termRef.current) return;
     const socket = socketRef.current;
-    if (!socket) return;
-
-    // Wait for xterm to be initialized
-    const waitForTerm = setInterval(() => {
-      if (termRef.current && !spawnedRef.current) {
-        clearInterval(waitForTerm);
-        spawnedRef.current = true;
-
-        const term = termRef.current;
-
-        // Forward keyboard input to server
-        term.onData((data: string) => {
-          socket.emit('editor:terminal:input' as any, { id: terminalId, data });
-        });
-
-        // Receive PTY output
-        const onData = (payload: { id: string; data: string }) => {
-          if (payload.id === terminalId) {
-            term.write(payload.data);
-          }
-        };
-        socket.on('editor:terminal:data' as any, onData);
-
-        const onExit = (payload: { id: string; exitCode: number }) => {
-          if (payload.id === terminalId) {
-            term.write(`\r\n\x1b[90m[Process exited with code ${payload.exitCode}]\x1b[0m\r\n`);
-          }
-        };
-        socket.on('editor:terminal:exit' as any, onExit);
-
-        // Spawn the shell with actual terminal dimensions
-        const fit = fitRef.current;
-        let spawnCols = 120;
-        let spawnRows = 24;
-        if (fit) {
-          try {
-            const dims = fit.proposeDimensions();
-            if (dims) { spawnCols = dims.cols; spawnRows = dims.rows; }
-          } catch {}
-        }
-        socket.emit('editor:terminal:spawn' as any, { id: terminalId, cwd, cols: spawnCols, rows: spawnRows });
-
-        // Store cleanup
-        term._editorCleanup = () => {
-          socket.off('editor:terminal:data' as any, onData);
-          socket.off('editor:terminal:exit' as any, onExit);
-          socket.emit('editor:terminal:kill' as any, { id: terminalId });
-        };
-      }
-    }, 100);
-
-    return () => {
-      clearInterval(waitForTerm);
-      if (termRef.current?._editorCleanup) {
-        termRef.current._editorCleanup();
-        termRef.current._editorCleanup = null;
-      }
-      spawnedRef.current = false;
-    };
-  }, [connected, terminalId, cwd, socketRef]);
-
-  // Step 3: Refit on visibility or resize
-  useEffect(() => {
-    if (!visible) return;
-    const timer = setTimeout(() => {
+    const fit = () => {
       try {
         fitRef.current?.fit();
-        const dims = fitRef.current?.proposeDimensions();
-        if (dims) {
-          socketRef.current?.emit('editor:terminal:resize' as any, {
-            id: terminalId, cols: dims.cols, rows: dims.rows,
+        const term = termRef.current;
+        if (term && socket) {
+          socket.emit('editor:terminal:resize' as any, {
+            id: terminalId, cols: term.cols, rows: term.rows,
           });
         }
+        term?.focus();
       } catch {}
-    }, 100);
-    return () => clearTimeout(timer);
+    };
+    const t1 = setTimeout(fit, 50);
+    const t2 = setTimeout(fit, 200);
+    return () => { clearTimeout(t1); clearTimeout(t2); };
   }, [visible, terminalId, socketRef]);
 
-  useEffect(() => {
-    const container = containerRef.current;
-    if (!container) return;
-    const observer = new ResizeObserver(() => {
-      try {
-        fitRef.current?.fit();
-        const dims = fitRef.current?.proposeDimensions();
-        if (dims) {
-          socketRef.current?.emit('editor:terminal:resize' as any, {
-            id: terminalId, cols: dims.cols, rows: dims.rows,
-          });
-        }
-      } catch {}
-    });
-    observer.observe(container);
-    return () => observer.disconnect();
-  }, [terminalId, socketRef]);
-
   return (
-    <div
-      ref={containerRef}
-      style={{
-        width: '100%',
-        height: '100%',
-        background: '#0c0c18',
-        overflow: 'hidden',
-      }}
-    />
+    <>
+      <style>{`
+        .xterm-viewport::-webkit-scrollbar { width: 6px; }
+        .xterm-viewport::-webkit-scrollbar-track { background: transparent; }
+        .xterm-viewport::-webkit-scrollbar-thumb { background: #333; border-radius: 3px; }
+        .xterm-viewport::-webkit-scrollbar-thumb:hover { background: #555; }
+      `}</style>
+      <div
+        ref={containerRef}
+        onClick={() => termRef.current?.focus()}
+        style={{
+          width: '100%',
+          height: '100%',
+          background: '#0c0c18',
+          overflow: 'hidden',
+        }}
+      />
+    </>
   );
 }
