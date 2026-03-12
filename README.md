@@ -1,50 +1,46 @@
 # Agent Matrix
 
-A desktop app that turns Claude Code into a visual, manageable multi-session powerhouse. Watch your AI agents work in a pixel RPG office, manage them from a professional dashboard, transfer context between sessions, search across your entire session history, and orchestrate complex workflows — all without leaving the app.
+A desktop app that turns Claude Code into a visual, manageable multi-session powerhouse.
 
 **No API keys needed** — uses your installed Claude CLI directly.
 
-## Quick Start
+---
 
-### Option 1: Setup script (recommended)
+## Setup (One Command)
 
-Clone the repo and run the setup script. It checks prerequisites, configures Claude hooks, installs dependencies, and launches the app.
+### Prerequisites
+
+| Tool | Install |
+|------|---------|
+| **Node.js 18+** | [nodejs.org](https://nodejs.org/) |
+| **Claude CLI** | `npm i -g @anthropic-ai/claude-code` |
+| **Git** | [git-scm.com](https://git-scm.com/) |
+
+### Install & Launch
 
 **macOS / Linux:**
 ```bash
-git clone https://github.com/Nahom-Kefelegne/AgentMatrix.git
-cd AgentMatrix
-./setup.sh
+curl -sO https://raw.githubusercontent.com/Nahom-Kefelegne/AgentMatrix/main/setup.sh && bash setup.sh
 ```
 
 **Windows (PowerShell):**
 ```powershell
-git clone https://github.com/Nahom-Kefelegne/AgentMatrix.git
-cd AgentMatrix
-.\setup.ps1
+Invoke-WebRequest https://raw.githubusercontent.com/Nahom-Kefelegne/AgentMatrix/main/setup.ps1 -OutFile setup.ps1; .\setup.ps1
 ```
 
-The script checks for: Node.js, npm, Claude CLI, git, and optionally Azure CLI (for ADO integration). It tells you what's missing and how to install it.
+This will clone the repo, install dependencies, configure Claude Code hooks, and launch the app.
 
-### Option 2: Claude skill
-
-Copy `setup-skill/setup-agentmatrix.md` to `~/.claude/commands/` then run:
-```bash
-claude
-> /setup-agentmatrix
-```
-
-### Option 3: Manual setup
+### Run Again Later
 
 ```bash
-git clone https://github.com/Nahom-Kefelegne/AgentMatrix.git
-cd AgentMatrix
-npm install
-npx electron-rebuild -m . -o node-pty
-npx electron .
+# macOS / Linux
+~/AgentMatrix/start.sh
+
+# Windows
+~\AgentMatrix\start.ps1
 ```
 
-Then configure hooks from the **Setup** button inside the app.
+---
 
 ## Features
 
