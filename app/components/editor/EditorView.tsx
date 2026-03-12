@@ -8,6 +8,7 @@ import GitPanel from './GitPanel';
 import PathPicker from './PathPicker';
 
 const MonacoWrapper = dynamic(() => import('./MonacoWrapper'), { ssr: false });
+const EditorTerminal = dynamic(() => import('./EditorTerminal'), { ssr: false });
 
 interface OpenFile {
   path: string;
@@ -333,10 +334,12 @@ export default function EditorView() {
   const [openFiles, setOpenFiles] = useState<OpenFile[]>([]);
   const [activeFile, setActiveFile] = useState<string | null>(null);
   const [sidebarWidth, setSidebarWidth] = useState(250);
-  const [showGitPanel, setShowGitPanel] = useState(false);
-  const [gitPanelHeight, setGitPanelHeight] = useState(220);
+  const [bottomPanel, setBottomPanel] = useState<'none' | 'git' | 'terminal'>('none');
+  const [bottomPanelHeight, setBottomPanelHeight] = useState(220);
   const [showFileSearch, setShowFileSearch] = useState(false);
   const [sidebarPanel, setSidebarPanel] = useState<'files' | 'search'>('files');
+  const [terminalId] = useState(() => `editor-term-${Date.now()}`);
+  const [terminalSpawned, setTerminalSpawned] = useState(false);
   const draggingSidebar = useRef(false);
 
   // Global keyboard shortcuts
@@ -353,7 +356,12 @@ export default function EditorView() {
       }
       if (mod && e.shiftKey && e.key === 'g') {
         e.preventDefault();
-        setShowGitPanel(p => !p);
+        setBottomPanel(p => p === 'git' ? 'none' : 'git');
+      }
+      if (mod && e.key === '`') {
+        e.preventDefault();
+        setBottomPanel(p => p === 'terminal' ? 'none' : 'terminal');
+        setTerminalSpawned(true);
       }
       if (mod && e.key === 'b') {
         e.preventDefault();
@@ -514,10 +522,16 @@ export default function EditorView() {
         <div style={{ width: 1, height: 16, background: '#2a2a3a', margin: '0 6px' }} />
 
         <ToolbarButton
-          active={showGitPanel}
+          active={bottomPanel === 'git'}
           label="Git"
           title="Source Control (Cmd+Shift+G)"
-          onClick={() => setShowGitPanel(!showGitPanel)}
+          onClick={() => setBottomPanel(p => p === 'git' ? 'none' : 'git')}
+        />
+        <ToolbarButton
+          active={bottomPanel === 'terminal'}
+          label="Terminal"
+          title="Terminal (Cmd+`)"
+          onClick={() => { setBottomPanel(p => p === 'terminal' ? 'none' : 'terminal'); setTerminalSpawned(true); }}
         />
 
         {/* Spacer */}
@@ -641,19 +655,94 @@ export default function EditorView() {
                     <span>Cmd+P — Search files</span>
                     <span>Cmd+Shift+F — Search in files</span>
                     <span>Cmd+Shift+G — Toggle git panel</span>
+                    <span>Cmd+` — Toggle terminal</span>
                     <span>Cmd+S — Save</span>
                   </div>
                 </div>
               )}
             </div>
 
-            {/* Git panel */}
-            {showGitPanel && (
-              <GitPanel
-                rootPath={rootPath}
-                height={gitPanelHeight}
-                onResize={setGitPanelHeight}
-              />
+            {/* Bottom panel: Git or Terminal */}
+            {bottomPanel !== 'none' && (
+              <div style={{
+                height: bottomPanelHeight,
+                flexShrink: 0,
+                display: 'flex',
+                flexDirection: 'column',
+                borderTop: '1px solid #2a2a3a',
+                position: 'relative',
+              }}>
+                {/* Resize handle */}
+                <div
+                  onMouseDown={(e) => {
+                    e.preventDefault();
+                    const startY = e.clientY;
+                    const startH = bottomPanelHeight;
+                    const onMove = (ev: MouseEvent) => {
+                      setBottomPanelHeight(Math.max(100, Math.min(600, startH + (startY - ev.clientY))));
+                    };
+                    const onUp = () => {
+                      document.removeEventListener('mousemove', onMove);
+                      document.removeEventListener('mouseup', onUp);
+                    };
+                    document.addEventListener('mousemove', onMove);
+                    document.addEventListener('mouseup', onUp);
+                  }}
+                  style={{
+                    height: 4, cursor: 'row-resize', background: '#1a1a2e',
+                    flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  }}
+                >
+                  <div style={{ width: 40, height: 2, background: '#3a3a4e', borderRadius: 1 }} />
+                </div>
+
+                {/* Panel tabs */}
+                <div style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  height: 28,
+                  background: '#0e0e1a',
+                  borderBottom: '1px solid #1a1a2e',
+                  padding: '0 8px',
+                  gap: 2,
+                  flexShrink: 0,
+                }}>
+                  <ToolbarButton
+                    active={bottomPanel === 'terminal'}
+                    label="Terminal"
+                    onClick={() => { setBottomPanel('terminal'); setTerminalSpawned(true); }}
+                  />
+                  <ToolbarButton
+                    active={bottomPanel === 'git'}
+                    label="Source Control"
+                    onClick={() => setBottomPanel('git')}
+                  />
+                  <div style={{ flex: 1 }} />
+                  <ToolbarButton
+                    label={'\u00D7'}
+                    title="Close panel"
+                    onClick={() => setBottomPanel('none')}
+                  />
+                </div>
+
+                {/* Panel content */}
+                <div style={{ flex: 1, minHeight: 0 }}>
+                  {bottomPanel === 'git' && (
+                    <GitPanel
+                      rootPath={rootPath}
+                      height={bottomPanelHeight - 32}
+                      onResize={() => {}}
+                    />
+                  )}
+                  {bottomPanel === 'terminal' && terminalSpawned && (
+                    <EditorTerminal
+                      terminalId={terminalId}
+                      cwd={rootPath}
+                      visible={bottomPanel === 'terminal'}
+                    />
+                  )}
+                </div>
+              </div>
             )}
           </div>
         </div>

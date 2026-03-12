@@ -331,5 +331,83 @@ export function setupTerminalBridge(io: SocketIOServer, ptyManager: PtyManager):
       const result = await queryOrchestrator(query);
       socket.emit('orchestrator:result', { queryId, ...result });
     });
+
+    // ─── Editor shell terminals (raw shell, no Claude) ───
+
+    socket.on('editor:terminal:spawn', ({ id, cwd }: { id: string; cwd: string }) => {
+      try {
+        const pty = require('node-pty');
+        const { existsSync } = require('fs');
+        const safeCwd = existsSync(cwd) ? cwd : homedir();
+        const shell = process.platform === 'win32'
+          ? 'cmd.exe'
+          : (process.env.SHELL || '/bin/bash');
+
+        const proc = pty.spawn(shell, [], {
+          cwd: safeCwd,
+          cols: 120,
+          rows: 24,
+          env: { ...process.env, TERM: 'xterm-256color' },
+        });
+
+        // Store in a map on globalThis for lifecycle management
+        const g = globalThis as Record<string, unknown>;
+        if (!g.__editorTerminals) g.__editorTerminals = new Map();
+        const terminals = g.__editorTerminals as Map<string, { proc: any; buffer: string[] }>;
+
+        const entry = { proc, buffer: [] as string[] };
+        terminals.set(id, entry);
+
+        proc.onData((data: string) => {
+          entry.buffer.push(data);
+          if (entry.buffer.length > 300) entry.buffer = entry.buffer.slice(-200);
+          socket.emit('editor:terminal:data', { id, data });
+        });
+
+        proc.onExit(({ exitCode }: { exitCode: number }) => {
+          socket.emit('editor:terminal:exit', { id, exitCode });
+          terminals.delete(id);
+        });
+
+        socket.emit('editor:terminal:ready', { id });
+      } catch (err) {
+        console.error('[editor:terminal:spawn]', err);
+        socket.emit('editor:terminal:exit', { id, exitCode: 1 });
+      }
+    });
+
+    socket.on('editor:terminal:input', ({ id, data }: { id: string; data: string }) => {
+      const g = globalThis as Record<string, unknown>;
+      const terminals = g.__editorTerminals as Map<string, { proc: any; buffer: string[] }> | undefined;
+      const entry = terminals?.get(id);
+      if (entry) entry.proc.write(data);
+    });
+
+    socket.on('editor:terminal:resize', ({ id, cols, rows }: { id: string; cols: number; rows: number }) => {
+      const g = globalThis as Record<string, unknown>;
+      const terminals = g.__editorTerminals as Map<string, { proc: any; buffer: string[] }> | undefined;
+      const entry = terminals?.get(id);
+      if (entry) entry.proc.resize(cols, rows);
+    });
+
+    socket.on('editor:terminal:kill', ({ id }: { id: string }) => {
+      const g = globalThis as Record<string, unknown>;
+      const terminals = g.__editorTerminals as Map<string, { proc: any; buffer: string[] }> | undefined;
+      const entry = terminals?.get(id);
+      if (entry) {
+        entry.proc.kill();
+        terminals!.delete(id);
+      }
+    });
+
+    // Replay buffer on reconnect
+    socket.on('editor:terminal:attach', ({ id }: { id: string }) => {
+      const g = globalThis as Record<string, unknown>;
+      const terminals = g.__editorTerminals as Map<string, { proc: any; buffer: string[] }> | undefined;
+      const entry = terminals?.get(id);
+      if (entry && entry.buffer.length > 0) {
+        socket.emit('editor:terminal:data', { id, data: entry.buffer.join('') });
+      }
+    });
   });
 }

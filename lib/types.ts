@@ -137,6 +137,10 @@ export interface ServerToClientEvents {
   'terminal:exit': (data: { sessionId: string; exitCode: number }) => void;
   'terminal:consent': (data: { sessionId: string }) => void;
   'session:state': (data: { sessionId: string; state: string; actionType?: string; actionLabel?: string; activity?: string }) => void;
+  // Editor shell terminals
+  'editor:terminal:data': (data: { id: string; data: string }) => void;
+  'editor:terminal:exit': (data: { id: string; exitCode: number }) => void;
+  'editor:terminal:ready': (data: { id: string }) => void;
 }
 
 export interface ClientToServerEvents {
@@ -144,6 +148,12 @@ export interface ClientToServerEvents {
   'terminal:input': (data: { sessionId: string; data: string }) => void;
   'terminal:spawn': (data: { sessionId: string }) => void;
   'terminal:resize': (data: { sessionId: string; cols: number; rows: number }) => void;
+  // Editor shell terminals
+  'editor:terminal:spawn': (data: { id: string; cwd: string }) => void;
+  'editor:terminal:input': (data: { id: string; data: string }) => void;
+  'editor:terminal:resize': (data: { id: string; cols: number; rows: number }) => void;
+  'editor:terminal:kill': (data: { id: string }) => void;
+  'editor:terminal:attach': (data: { id: string }) => void;
 }
 
 // ===== Socket Event Names =====
