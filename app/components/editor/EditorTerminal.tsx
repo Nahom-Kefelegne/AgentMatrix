@@ -123,8 +123,17 @@ export default function EditorTerminal({ terminalId, cwd, visible }: EditorTermi
         };
         socket.on('editor:terminal:exit' as any, onExit);
 
-        // Spawn the shell
-        socket.emit('editor:terminal:spawn' as any, { id: terminalId, cwd });
+        // Spawn the shell with actual terminal dimensions
+        const fit = fitRef.current;
+        let spawnCols = 120;
+        let spawnRows = 24;
+        if (fit) {
+          try {
+            const dims = fit.proposeDimensions();
+            if (dims) { spawnCols = dims.cols; spawnRows = dims.rows; }
+          } catch {}
+        }
+        socket.emit('editor:terminal:spawn' as any, { id: terminalId, cwd, cols: spawnCols, rows: spawnRows });
 
         // Store cleanup
         term._editorCleanup = () => {

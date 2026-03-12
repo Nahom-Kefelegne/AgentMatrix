@@ -334,20 +334,30 @@ export function setupTerminalBridge(io: SocketIOServer, ptyManager: PtyManager):
 
     // ─── Editor shell terminals (raw shell, no Claude) ───
 
-    socket.on('editor:terminal:spawn', ({ id, cwd }: { id: string; cwd: string }) => {
+    socket.on('editor:terminal:spawn', ({ id, cwd, cols, rows }: { id: string; cwd: string; cols?: number; rows?: number }) => {
       try {
         const pty = require('node-pty');
         const { existsSync } = require('fs');
         const safeCwd = existsSync(cwd) ? cwd : homedir();
         const shell = process.platform === 'win32'
           ? 'cmd.exe'
-          : (process.env.SHELL || '/bin/bash');
+          : (process.env.SHELL || '/bin/zsh');
 
-        const proc = pty.spawn(shell, [], {
+        // Clean env: remove Electron/npm vars that break nvm and shell behavior
+        const env: Record<string, string> = {};
+        for (const [k, v] of Object.entries(process.env)) {
+          if (!v) continue;
+          if (k.startsWith('npm_')) continue;
+          if (k === 'NODE_ENV' || k === 'ELECTRON_RUN_AS_NODE' || k === 'ELECTRON_NO_ASAR') continue;
+          env[k] = v;
+        }
+        env.TERM = 'xterm-256color';
+
+        const proc = pty.spawn(shell, ['-l'], {
           cwd: safeCwd,
-          cols: 120,
-          rows: 24,
-          env: { ...process.env, TERM: 'xterm-256color' },
+          cols: cols || 120,
+          rows: rows || 24,
+          env,
         });
 
         // Store in a map on globalThis for lifecycle management

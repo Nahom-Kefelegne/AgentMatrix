@@ -15,21 +15,30 @@ const handle = app.getRequestHandler();
 
 /** Lightweight editor shell terminal management (works without Electron) */
 function setupEditorTerminals(socket: any) {
-  socket.on('editor:terminal:spawn', ({ id, cwd }: { id: string; cwd: string }) => {
+  socket.on('editor:terminal:spawn', ({ id, cwd, cols, rows }: { id: string; cwd: string; cols?: number; rows?: number }) => {
     console.log(`[editor:terminal] spawn id=${id} cwd=${cwd}`);
     try {
       const pty = require('node-pty');
       const safeCwd = existsSync(cwd) ? cwd : homedir();
       const shell = process.platform === 'win32'
         ? 'cmd.exe'
-        : (process.env.SHELL || '/bin/bash');
-      console.log(`[editor:terminal] using shell=${shell} safeCwd=${safeCwd}`);
+        : (process.env.SHELL || '/bin/zsh');
 
-      const proc = pty.spawn(shell, [], {
+      // Clean env: remove npm/Electron vars that break nvm and shell behavior
+      const env: Record<string, string> = {};
+      for (const [k, v] of Object.entries(process.env)) {
+        if (!v) continue;
+        if (k.startsWith('npm_')) continue;
+        if (k === 'NODE_ENV' || k === 'ELECTRON_RUN_AS_NODE') continue;
+        env[k] = v;
+      }
+      env.TERM = 'xterm-256color';
+
+      const proc = pty.spawn(shell, ['-l'], {
         cwd: safeCwd,
-        cols: 120,
-        rows: 24,
-        env: { ...process.env, TERM: 'xterm-256color' },
+        cols: cols || 120,
+        rows: rows || 24,
+        env,
       });
       console.log(`[editor:terminal] spawned pid=${proc.pid}`);
 
