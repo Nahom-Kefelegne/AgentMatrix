@@ -120,6 +120,8 @@ export default function EditorTerminal({ terminalId, cwd, visible }: EditorTermi
 
     return () => {
       cleanup = true;
+      // Kill the PTY on unmount
+      socket.emit('editor:terminal:kill' as any, { id: terminalId });
       if (terminal) {
         if (terminal._cleanupListeners) terminal._cleanupListeners();
         terminal.dispose();
