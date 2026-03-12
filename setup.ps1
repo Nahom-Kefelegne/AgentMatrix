@@ -140,10 +140,10 @@ Write-Host "  ================================" -ForegroundColor Green
 Write-Host "       Setup complete!            " -ForegroundColor Green
 Write-Host "  ================================" -ForegroundColor Green
 Write-Host ""
-Write-Host "  Run: npx electron ." -ForegroundColor Blue
+Write-Host "  To launch anytime, run: $(Get-Location)\start.ps1" -ForegroundColor Blue
 Write-Host ""
 
 $launch = Read-Host "Launch Agent Matrix now? (y/n)"
 if ($launch -eq "y") {
-    npx electron .
+    & "$(Get-Location)\start.ps1"
 }

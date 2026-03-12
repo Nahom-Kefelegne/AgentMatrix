@@ -165,12 +165,11 @@ echo -e "${GREEN}╔════════════════════
 echo -e "${GREEN}║       Setup complete!            ║${NC}"
 echo -e "${GREEN}╚══════════════════════════════════╝${NC}"
 echo ""
-echo -e "  Run: ${BLUE}npx electron .${NC}"
+echo -e "  To launch anytime, run: ${BLUE}$(pwd)/start.sh${NC}"
 echo ""
 
-# Ask to launch
 read -p "Launch Agent Matrix now? (y/n) " -n 1 -r
 echo ""
 if [[ $REPLY =~ ^[Yy]$ ]]; then
-    npx electron .
+    bash "$(pwd)/start.sh"
 fi
