@@ -89,7 +89,7 @@ export default function HeaderBar({
         display: 'flex', background: '#1e1e30', border: '1px solid #3a3a4e',
         borderRadius: 6, padding: 2,
       }}>
-        {(['dashboard', 'office', 'editor'] as const).map(mode => (
+        {(['dashboard', 'office'] as const).map(mode => (
           <button
             key={mode}
             onClick={() => onViewChange(mode)}
@@ -101,7 +101,7 @@ export default function HeaderBar({
               cursor: 'pointer', fontFamily: 'inherit',
             }}
           >
-            {mode === 'dashboard' ? 'Dashboard' : mode === 'office' ? 'Office' : 'Editor'}
+            {mode === 'dashboard' ? 'Dashboard' : 'Office'}
           </button>
         ))}
       </div>

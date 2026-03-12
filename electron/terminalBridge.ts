@@ -352,11 +352,26 @@ export function setupTerminalBridge(io: SocketIOServer, ptyManager: PtyManager):
           env[k] = v;
         }
         env.TERM = 'xterm-256color';
+        const spawnCols = cols || 120;
+        const spawnRows = rows || 24;
+        env.COLUMNS = String(spawnCols);
+        env.LINES = String(spawnRows);
 
-        const proc = pty.spawn(shell, ['-l'], {
+        // Spawn like VS Code does on macOS: use `login` for proper env, or direct shell on other platforms
+        let spawnCmd = shell;
+        let args: string[] = ['-i'];
+        if (process.platform === 'darwin') {
+          spawnCmd = '/usr/bin/login';
+          args = ['-fp', env.USER || env.LOGNAME || 'user'];
+        } else if (process.platform !== 'win32') {
+          args = ['-l', '-i'];
+        } else {
+          args = [];
+        }
+        const proc = pty.spawn(spawnCmd, args, {
           cwd: safeCwd,
-          cols: cols || 120,
-          rows: rows || 24,
+          cols: spawnCols,
+          rows: spawnRows,
           env,
         });
 

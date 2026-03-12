@@ -72,15 +72,20 @@ export default function EditorTerminal({ terminalId, cwd, visible }: EditorTermi
         cursorStyle: 'bar',
         scrollback: 5000,
         scrollOnUserInput: true,
+        macOptionIsMeta: true,
       });
 
       fitAddon = new FitAddon();
       terminal.loadAddon(fitAddon);
       terminal.open(container);
-      fitAddon.fit();
 
       termRef.current = terminal;
       fitRef.current = fitAddon;
+
+      // Fit after xterm is fully rendered
+      await new Promise(r => setTimeout(r, 50));
+      if (cleanup) return;
+      try { fitAddon.fit(); } catch {}
 
       terminal.focus();
 
@@ -90,10 +95,23 @@ export default function EditorTerminal({ terminalId, cwd, visible }: EditorTermi
       });
 
       // Receive output from PTY
+      let firstData = true;
       const handleData = (msg: { id: string; data: string }) => {
         if (msg.id === terminalId) {
           terminal.write(msg.data);
-          if (status !== 'connected') setStatus('connected');
+          // Force resize sync on first output — shell is now running
+          if (firstData) {
+            firstData = false;
+            setTimeout(() => {
+              if (cleanup || !fitAddon || !terminal) return;
+              try {
+                fitAddon.fit();
+                socket.emit('editor:terminal:resize' as any, {
+                  id: terminalId, cols: terminal.cols, rows: terminal.rows,
+                });
+              } catch {}
+            }, 200);
+          }
         }
       };
 
@@ -108,17 +126,32 @@ export default function EditorTerminal({ terminalId, cwd, visible }: EditorTermi
       socket.on('editor:terminal:exit' as any, handleExit);
 
       // Spawn the shell with correct dimensions
+      const spawnCols = terminal.cols;
+      const spawnRows = terminal.rows;
       socket.emit('editor:terminal:spawn' as any, {
         id: terminalId,
         cwd,
-        cols: terminal.cols,
-        rows: terminal.rows,
+        cols: spawnCols,
+        rows: spawnRows,
       });
+
+      // Force a resize after shell starts to ensure PTY size matches
+      setTimeout(() => {
+        if (cleanup || !fitAddon || !terminal) return;
+        try {
+          fitAddon.fit();
+          socket.emit('editor:terminal:resize' as any, {
+            id: terminalId,
+            cols: terminal.cols,
+            rows: terminal.rows,
+          });
+        } catch {}
+      }, 500);
 
       // Resize handling — debounced, same pattern as TerminalPanel
       let resizeTimer: ReturnType<typeof setTimeout> | null = null;
       const doFit = () => {
-        if (!fitAddon || !terminal) return;
+        if (!fitAddon || !terminal || !terminal.element) return;
         try {
           fitAddon.fit();
           socket.emit('editor:terminal:resize' as any, {
