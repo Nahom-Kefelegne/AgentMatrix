@@ -215,7 +215,7 @@ app.whenReady().then(async () => {
   await startServer();
   // Navigate to app now that server is ready
   mainWindow?.loadURL(`http://localhost:${port}`);
-  if (isDev) mainWindow?.webContents.openDevTools();
+  // DevTools available via Cmd+Option+I if needed
 
   app.on('activate', () => {
     if (mainWindow) mainWindow.show();
