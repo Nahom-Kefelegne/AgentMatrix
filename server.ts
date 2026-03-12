@@ -16,12 +16,14 @@ const handle = app.getRequestHandler();
 /** Lightweight editor shell terminal management (works without Electron) */
 function setupEditorTerminals(socket: any) {
   socket.on('editor:terminal:spawn', ({ id, cwd }: { id: string; cwd: string }) => {
+    console.log(`[editor:terminal] spawn id=${id} cwd=${cwd}`);
     try {
       const pty = require('node-pty');
       const safeCwd = existsSync(cwd) ? cwd : homedir();
       const shell = process.platform === 'win32'
         ? 'cmd.exe'
         : (process.env.SHELL || '/bin/bash');
+      console.log(`[editor:terminal] using shell=${shell} safeCwd=${safeCwd}`);
 
       const proc = pty.spawn(shell, [], {
         cwd: safeCwd,
@@ -29,6 +31,7 @@ function setupEditorTerminals(socket: any) {
         rows: 24,
         env: { ...process.env, TERM: 'xterm-256color' },
       });
+      console.log(`[editor:terminal] spawned pid=${proc.pid}`);
 
       const g = globalThis as Record<string, unknown>;
       if (!g.__editorTerminals) g.__editorTerminals = new Map();
