@@ -129,12 +129,28 @@ fi
 echo -e "  ${CHECK} Hooks configured in ${SETTINGS_FILE}"
 echo ""
 
-# Install dependencies if needed
-if [ ! -d "node_modules" ]; then
-    echo -e "${BLUE}Installing dependencies...${NC}"
-    npm install
+# If not in repo, clone it
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+if [ ! -f "$SCRIPT_DIR/electron/main.ts" ]; then
+    REPO_DIR="$HOME/AgentMatrix"
+    if [ -d "$REPO_DIR/.git" ]; then
+        echo -e "${BLUE}Updating repo...${NC}"
+        cd "$REPO_DIR" && git pull
+    else
+        echo -e "${BLUE}Cloning Agent Matrix...${NC}"
+        git clone https://github.com/Nahom-Kefelegne/AgentMatrix.git "$REPO_DIR"
+        cd "$REPO_DIR"
+    fi
+    echo -e "  ${CHECK} Repo at ${REPO_DIR}"
     echo ""
+else
+    cd "$SCRIPT_DIR"
 fi
+
+# Install dependencies
+echo -e "${BLUE}Installing dependencies...${NC}"
+npm install
+echo ""
 
 # Rebuild node-pty for Electron
 echo -e "${BLUE}Rebuilding native modules for Electron...${NC}"

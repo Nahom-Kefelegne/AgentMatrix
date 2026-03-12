@@ -102,12 +102,29 @@ if (Test-Path $settingsFile) {
 Write-Host "  [OK] Hooks configured in $settingsFile" -ForegroundColor Green
 Write-Host ""
 
-# Install dependencies if needed
-if (-not (Test-Path "node_modules")) {
-    Write-Host "Installing dependencies..." -ForegroundColor Blue
-    npm install
+# If not in repo, clone it
+$scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
+if (-not (Test-Path (Join-Path $scriptDir "electron\main.ts"))) {
+    $repoDir = Join-Path $env:USERPROFILE "AgentMatrix"
+    if (Test-Path (Join-Path $repoDir ".git")) {
+        Write-Host "Updating repo..." -ForegroundColor Blue
+        Set-Location $repoDir
+        git pull
+    } else {
+        Write-Host "Cloning Agent Matrix..." -ForegroundColor Blue
+        git clone https://github.com/Nahom-Kefelegne/AgentMatrix.git $repoDir
+        Set-Location $repoDir
+    }
+    Write-Host "  [OK] Repo at $repoDir" -ForegroundColor Green
     Write-Host ""
+} else {
+    Set-Location $scriptDir
 }
+
+# Install dependencies
+Write-Host "Installing dependencies..." -ForegroundColor Blue
+npm install
+Write-Host ""
 
 # Rebuild node-pty for Electron
 Write-Host "Rebuilding native modules for Electron..." -ForegroundColor Blue
