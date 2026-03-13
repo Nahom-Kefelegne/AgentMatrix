@@ -109,7 +109,7 @@ Write-Host ""
 # If not in repo, clone it
 $scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 if (-not (Test-Path (Join-Path $scriptDir "electron\main.ts"))) {
-    $repoDir = Join-Path $env:USERPROFILE "AgentMatrix"
+    $repoDir = Join-Path (Get-Location) "AgentMatrix"
     if (Test-Path (Join-Path $repoDir ".git")) {
         Write-Host "Updating repo..." -ForegroundColor Blue
         Set-Location $repoDir

@@ -132,7 +132,7 @@ echo ""
 # If not in repo, clone it
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 if [ ! -f "$SCRIPT_DIR/electron/main.ts" ]; then
-    REPO_DIR="$HOME/AgentMatrix"
+    REPO_DIR="$(pwd)/AgentMatrix"
     if [ -d "$REPO_DIR/.git" ]; then
         echo -e "${BLUE}Updating repo...${NC}"
         cd "$REPO_DIR" && git pull

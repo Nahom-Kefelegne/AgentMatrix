@@ -34,11 +34,13 @@ This will clone the repo, install dependencies, configure Claude Code hooks, and
 
 ```bash
 # macOS / Linux
-~/AgentMatrix/start.sh
+./AgentMatrix/start.sh
 
 # Windows
-~\AgentMatrix\start.ps1
+.\AgentMatrix\start.ps1
 ```
+
+(From wherever you ran the setup command.)
 
 ---
 
