@@ -192,10 +192,11 @@ export default function TerminalPanel({ sessionId, sessionName, cwd, visible, re
         term?.focus();
       } catch {}
     };
-    // Fit twice — once after layout, once after paint
+    // Fit multiple times — layout, paint, and after dialog animation settles
     const t1 = setTimeout(fit, 50);
     const t2 = setTimeout(fit, 200);
-    return () => { clearTimeout(t1); clearTimeout(t2); };
+    const t3 = setTimeout(fit, 500);
+    return () => { clearTimeout(t1); clearTimeout(t2); clearTimeout(t3); };
   }, [visible, sessionId, socketRef]);
 
   return (

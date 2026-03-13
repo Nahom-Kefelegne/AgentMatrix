@@ -180,15 +180,17 @@ export class PtyManager {
     const env = { ...process.env };
     delete env.CLAUDECODE;
 
+    // Use 80 cols default — Claude TUI renders welcome screen at spawn time.
+    // The terminal panel will resize the PTY to match when it opens.
     if (process.platform === 'win32') {
       // Spawn claude directly — cmd.exe can't handle UNC paths
       return pty.spawn(claudePath, claudeArgs, {
-        cwd: safeCwd, cols: 120, rows: 40, env,
+        cwd: safeCwd, cols: 80, rows: 24, env,
       });
     }
     const shell = process.env.SHELL || '/bin/bash';
     return pty.spawn(shell, ['-c', `cd "${safeCwd}" && ${claudeCmd}`], {
-      cwd: safeCwd, cols: 120, rows: 40, env,
+      cwd: safeCwd, cols: 80, rows: 24, env,
     });
   }
 
