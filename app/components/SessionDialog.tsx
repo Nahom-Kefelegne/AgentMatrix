@@ -565,7 +565,7 @@ export default function SessionDialog({
             display: activeTab === 'console' ? 'flex' : 'none',
             flexDirection: 'column',
           }}>
-            <TerminalPanel sessionId={session.id} sessionName={session.name} cwd={session.cwd} visible={activeTab === 'console'} readOnly={readOnly} />
+            <TerminalPanel sessionId={session.id} sessionName={session.name} cwd={session.cwd} visible={activeTab === 'console' && !terminalFullscreen} readOnly={readOnly} />
           </div>
           <div style={{
             position: 'absolute', inset: 0, padding: '20px 24px',

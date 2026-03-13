@@ -212,7 +212,9 @@ export default function TerminalPanel({ sessionId, sessionName, cwd, visible, re
     const t1 = setTimeout(fit, 50);
     const t2 = setTimeout(fit, 200);
     const t3 = setTimeout(fit, 500);
-    return () => { clearTimeout(t1); clearTimeout(t2); clearTimeout(t3); };
+    // Extra late fit to catch fullscreen→dialog transitions
+    const t4 = setTimeout(fit, 1000);
+    return () => { clearTimeout(t1); clearTimeout(t2); clearTimeout(t3); clearTimeout(t4); };
   }, [visible, sessionId, socketRef]);
 
   return (
