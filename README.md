@@ -4,43 +4,65 @@ A desktop app that turns Claude Code into a visual, manageable multi-session pow
 
 **No API keys needed** — uses your installed Claude CLI directly.
 
+> **Note:** This is in early internal testing. We recommend trying it on your **devbox (Windows)** first rather than your primary machine, since the setup configures Claude Code hooks globally.
+
 ---
 
 ## Setup (One Command)
 
 ### Prerequisites
 
-| Tool | Install |
-|------|---------|
-| **Node.js 18+** | [nodejs.org](https://nodejs.org/) |
-| **Claude CLI** | `npm i -g @anthropic-ai/claude-code` |
-| **Git** | [git-scm.com](https://git-scm.com/) |
+Make sure the following are installed and available on your PATH:
+
+| Tool | Required | How to check |
+|------|----------|-------------|
+| **Node.js 18+** | Yes | `node -v` |
+| **Claude CLI** | Yes | `claude --version` |
+| **Git** | Yes | `git --version` |
+| **Azure CLI** | Optional (ADO integration) | `az --version` |
 
 ### Install & Launch
+
+Open a terminal in the directory where you want to install, then run:
+
+**Windows (PowerShell) — recommended for testing:**
+```powershell
+Invoke-WebRequest https://raw.githubusercontent.com/Nahom-Kefelegne/AgentMatrix/main/setup.ps1 -OutFile setup.ps1; .\setup.ps1
+```
 
 **macOS / Linux:**
 ```bash
 curl -sO https://raw.githubusercontent.com/Nahom-Kefelegne/AgentMatrix/main/setup.sh && bash setup.sh
 ```
 
-**Windows (PowerShell):**
-```powershell
-Invoke-WebRequest https://raw.githubusercontent.com/Nahom-Kefelegne/AgentMatrix/main/setup.ps1 -OutFile setup.ps1; .\setup.ps1
-```
-
-This will clone the repo, install dependencies, configure Claude Code hooks, and launch the app.
+The setup script will:
+1. Verify all prerequisites
+2. Clone this repo into an `AgentMatrix` folder
+3. Install dependencies and rebuild native modules
+4. Configure Claude Code hooks in `~/.claude/settings.json`
+5. Launch the app
 
 ### Run Again Later
 
-```bash
-# macOS / Linux
-./AgentMatrix/start.sh
+From wherever you ran the setup command:
 
+```powershell
 # Windows
 .\AgentMatrix\start.ps1
 ```
 
-(From wherever you ran the setup command.)
+```bash
+# macOS / Linux
+./AgentMatrix/start.sh
+```
+
+### Update
+
+Pull the latest changes and restart:
+```bash
+cd AgentMatrix && git pull && npm install
+```
+Then launch with `start.ps1` or `start.sh`.
 
 ---
 
