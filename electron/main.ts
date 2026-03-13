@@ -155,19 +155,7 @@ async function startServer(): Promise<void> {
                   pty.onContextUpdate = (usage) => {
                     io!.emit('session:context', { sessionId: s.id, usage });
                   };
-                  const sid = s.id;
-                  const summaryP = new Promise<void>((res) => {
-                    setTimeout(async () => {
-                      const p = ptyManager.getSession(sid);
-                      if (p && p.status !== 'closed') {
-                        io!.emit('session:initializing', { sessionId: sid, busy: true });
-                        await requestSummary(io!, ptyManager, sid, { timeoutMs: 60000 });
-                        io!.emit('session:initializing', { sessionId: sid, busy: false });
-                      }
-                      res();
-                    }, 2000);
-                  });
-                  summaryPromises.push(summaryP);
+                  // Summary generation removed from startup — users can generate manually
                 }
                 console.log(`[auto-resume] ${name} (${s.id.slice(0, 8)})`);
               } catch (err) {
