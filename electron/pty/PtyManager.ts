@@ -181,7 +181,8 @@ export class PtyManager {
     delete env.CLAUDECODE;
 
     if (process.platform === 'win32') {
-      return pty.spawn('cmd.exe', ['/c', `cd /d "${safeCwd}" && ${claudeCmd}`], {
+      // Spawn claude directly — cmd.exe can't handle UNC paths
+      return pty.spawn(claudePath, claudeArgs, {
         cwd: safeCwd, cols: 120, rows: 40, env,
       });
     }
