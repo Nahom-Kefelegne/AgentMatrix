@@ -93,10 +93,14 @@ $hooksJson = @'
 
 if (Test-Path $settingsFile) {
     $settings = Get-Content $settingsFile -Raw | ConvertFrom-Json
-    $settings.hooks = $hooksJson
-    $settings | ConvertTo-Json -Depth 10 | Set-Content $settingsFile
+    if ($settings.PSObject.Properties['hooks']) {
+        $settings.hooks = $hooksJson
+    } else {
+        $settings | Add-Member -NotePropertyName 'hooks' -NotePropertyValue $hooksJson
+    }
+    $settings | ConvertTo-Json -Depth 10 | Set-Content $settingsFile -Encoding UTF8
 } else {
-    @{ hooks = $hooksJson } | ConvertTo-Json -Depth 10 | Set-Content $settingsFile
+    @{ hooks = $hooksJson } | ConvertTo-Json -Depth 10 | Set-Content $settingsFile -Encoding UTF8
 }
 
 Write-Host "  [OK] Hooks configured in $settingsFile" -ForegroundColor Green
