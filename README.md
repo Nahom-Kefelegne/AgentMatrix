@@ -58,11 +58,17 @@ From wherever you ran the setup command:
 
 ### Update
 
-Pull the latest changes and restart:
-```bash
-cd AgentMatrix && git pull && npm install
+**Windows (PowerShell):**
+```powershell
+.\AgentMatrix\update.ps1
 ```
-Then launch with `start.ps1` or `start.sh`.
+
+**macOS / Linux:**
+```bash
+bash AgentMatrix/update.sh
+```
+
+This pulls the latest code, reinstalls dependencies, and updates Claude Code hooks.
 
 ---
 
