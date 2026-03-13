@@ -79,29 +79,26 @@ if (-not (Test-Path $claudeDir)) {
     New-Item -ItemType Directory -Path $claudeDir -Force | Out-Null
 }
 
-$hooksJson = @'
-{
-  "SessionStart": [{"matcher": "", "hooks": [{"type": "command", "command": "powershell -Command \"$input | Invoke-RestMethod -Uri http://localhost:3000/api/hooks/session-start -Method POST -ContentType 'application/json'\""}]}],
-  "SessionEnd": [{"matcher": "", "hooks": [{"type": "command", "command": "powershell -Command \"$input | Invoke-RestMethod -Uri http://localhost:3000/api/hooks/session-end -Method POST -ContentType 'application/json'\""}]}],
-  "PreToolUse": [{"matcher": "", "hooks": [{"type": "command", "command": "powershell -Command \"$input | Invoke-RestMethod -Uri http://localhost:3000/api/hooks/tool-use -Method POST -ContentType 'application/json'\""}]}],
-  "PostToolUse": [{"matcher": "", "hooks": [{"type": "command", "command": "powershell -Command \"$input | Invoke-RestMethod -Uri http://localhost:3000/api/hooks/tool-complete -Method POST -ContentType 'application/json'\""}]}],
-  "SubagentStart": [{"matcher": "", "hooks": [{"type": "command", "command": "powershell -Command \"$input | Invoke-RestMethod -Uri http://localhost:3000/api/hooks/agent-start -Method POST -ContentType 'application/json'\""}]}],
-  "SubagentStop": [{"matcher": "", "hooks": [{"type": "command", "command": "powershell -Command \"$input | Invoke-RestMethod -Uri http://localhost:3000/api/hooks/agent-stop -Method POST -ContentType 'application/json'\""}]}],
-  "Stop": [{"matcher": "", "hooks": [{"type": "command", "command": "powershell -Command \"$input | Invoke-RestMethod -Uri http://localhost:3000/api/hooks/stop -Method POST -ContentType 'application/json'\""}]}]
-}
-'@ | ConvertFrom-Json
-
-if (Test-Path $settingsFile) {
-    $settings = Get-Content $settingsFile -Raw | ConvertFrom-Json
-    if ($settings.PSObject.Properties['hooks']) {
-        $settings.hooks = $hooksJson
-    } else {
-        $settings | Add-Member -NotePropertyName 'hooks' -NotePropertyValue $hooksJson
-    }
-    $settings | ConvertTo-Json -Depth 10 | Set-Content $settingsFile -Encoding UTF8
-} else {
-    @{ hooks = $hooksJson } | ConvertTo-Json -Depth 10 | Set-Content $settingsFile -Encoding UTF8
-}
+# Use Node.js to merge hooks (avoids PowerShell ConvertFrom-Json immutability issues)
+$nodeScript = @"
+const fs = require('fs');
+const path = '$($settingsFile -replace '\\','\\\\')';
+let settings = {};
+try { settings = JSON.parse(fs.readFileSync(path, 'utf-8')); } catch {}
+const hooks = {
+  SessionStart: [{matcher: '', hooks: [{type: 'command', command: 'powershell -Command "$input | Invoke-RestMethod -Uri http://localhost:3000/api/hooks/session-start -Method POST -ContentType application/json"'}]}],
+  SessionEnd: [{matcher: '', hooks: [{type: 'command', command: 'powershell -Command "$input | Invoke-RestMethod -Uri http://localhost:3000/api/hooks/session-end -Method POST -ContentType application/json"'}]}],
+  PreToolUse: [{matcher: '', hooks: [{type: 'command', command: 'powershell -Command "$input | Invoke-RestMethod -Uri http://localhost:3000/api/hooks/tool-use -Method POST -ContentType application/json"'}]}],
+  PostToolUse: [{matcher: '', hooks: [{type: 'command', command: 'powershell -Command "$input | Invoke-RestMethod -Uri http://localhost:3000/api/hooks/tool-complete -Method POST -ContentType application/json"'}]}],
+  SubagentStart: [{matcher: '', hooks: [{type: 'command', command: 'powershell -Command "$input | Invoke-RestMethod -Uri http://localhost:3000/api/hooks/agent-start -Method POST -ContentType application/json"'}]}],
+  SubagentStop: [{matcher: '', hooks: [{type: 'command', command: 'powershell -Command "$input | Invoke-RestMethod -Uri http://localhost:3000/api/hooks/agent-stop -Method POST -ContentType application/json"'}]}],
+  Stop: [{matcher: '', hooks: [{type: 'command', command: 'powershell -Command "$input | Invoke-RestMethod -Uri http://localhost:3000/api/hooks/stop -Method POST -ContentType application/json"'}]}]
+};
+settings.hooks = { ...settings.hooks, ...hooks };
+fs.writeFileSync(path, JSON.stringify(settings, null, 2));
+console.log('Hooks configured successfully');
+"@
+node -e $nodeScript
 
 Write-Host "  [OK] Hooks configured in $settingsFile" -ForegroundColor Green
 Write-Host ""
