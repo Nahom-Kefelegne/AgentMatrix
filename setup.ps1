@@ -86,13 +86,13 @@ const path = '$($settingsFile -replace '\\','\\\\')';
 let settings = {};
 try { settings = JSON.parse(fs.readFileSync(path, 'utf-8')); } catch {}
 const hooks = {
-  SessionStart: [{matcher: '', hooks: [{type: 'command', command: 'powershell -Command "$input | Invoke-RestMethod -Uri http://localhost:3000/api/hooks/session-start -Method POST -ContentType application/json"'}]}],
-  SessionEnd: [{matcher: '', hooks: [{type: 'command', command: 'powershell -Command "$input | Invoke-RestMethod -Uri http://localhost:3000/api/hooks/session-end -Method POST -ContentType application/json"'}]}],
-  PreToolUse: [{matcher: '', hooks: [{type: 'command', command: 'powershell -Command "$input | Invoke-RestMethod -Uri http://localhost:3000/api/hooks/tool-use -Method POST -ContentType application/json"'}]}],
-  PostToolUse: [{matcher: '', hooks: [{type: 'command', command: 'powershell -Command "$input | Invoke-RestMethod -Uri http://localhost:3000/api/hooks/tool-complete -Method POST -ContentType application/json"'}]}],
-  SubagentStart: [{matcher: '', hooks: [{type: 'command', command: 'powershell -Command "$input | Invoke-RestMethod -Uri http://localhost:3000/api/hooks/agent-start -Method POST -ContentType application/json"'}]}],
-  SubagentStop: [{matcher: '', hooks: [{type: 'command', command: 'powershell -Command "$input | Invoke-RestMethod -Uri http://localhost:3000/api/hooks/agent-stop -Method POST -ContentType application/json"'}]}],
-  Stop: [{matcher: '', hooks: [{type: 'command', command: 'powershell -Command "$input | Invoke-RestMethod -Uri http://localhost:3000/api/hooks/stop -Method POST -ContentType application/json"'}]}]
+  SessionStart: [{matcher: '', hooks: [{type: 'command', command: 'curl.exe -s -X POST http://localhost:3000/api/hooks/session-start -H "Content-Type: application/json" -d @-'}]}],
+  SessionEnd: [{matcher: '', hooks: [{type: 'command', command: 'curl.exe -s -X POST http://localhost:3000/api/hooks/session-end -H "Content-Type: application/json" -d @-'}]}],
+  PreToolUse: [{matcher: '', hooks: [{type: 'command', command: 'curl.exe -s -X POST http://localhost:3000/api/hooks/tool-use -H "Content-Type: application/json" -d @-'}]}],
+  PostToolUse: [{matcher: '', hooks: [{type: 'command', command: 'curl.exe -s -X POST http://localhost:3000/api/hooks/tool-complete -H "Content-Type: application/json" -d @-'}]}],
+  SubagentStart: [{matcher: '', hooks: [{type: 'command', command: 'curl.exe -s -X POST http://localhost:3000/api/hooks/agent-start -H "Content-Type: application/json" -d @-'}]}],
+  SubagentStop: [{matcher: '', hooks: [{type: 'command', command: 'curl.exe -s -X POST http://localhost:3000/api/hooks/agent-stop -H "Content-Type: application/json" -d @-'}]}],
+  Stop: [{matcher: '', hooks: [{type: 'command', command: 'curl.exe -s -X POST http://localhost:3000/api/hooks/stop -H "Content-Type: application/json" -d @-'}]}]
 };
 settings.hooks = { ...settings.hooks, ...hooks };
 fs.writeFileSync(path, JSON.stringify(settings, null, 2));
