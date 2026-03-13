@@ -75,6 +75,7 @@ export default function FullscreenTerminal({ session, sessions, readOnly, onExit
                   background: '#1a1a2a', border: '1px solid #2a2a3e', borderRadius: 8,
                   minWidth: 220, maxHeight: 300, overflowY: 'auto',
                   boxShadow: '0 8px 24px rgba(0,0,0,0.4)',
+                  zIndex: 9999,
                 }}>
                   {otherSessions.length > 0 ? otherSessions.map(s => (
                     <div key={s.id} onClick={() => { setSplitSessionId(s.id); setShowPicker(false); setSplitRatio(50); }} style={{

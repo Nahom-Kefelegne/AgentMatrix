@@ -42,6 +42,8 @@ export default function TerminalPanel({ sessionId, sessionName, cwd, visible, re
       // Dynamic import xterm (browser-only)
       const { Terminal } = await import('xterm');
       const { FitAddon } = await import('@xterm/addon-fit');
+      let WebglAddon: any = null;
+      try { WebglAddon = (await import('@xterm/addon-webgl')).WebglAddon; } catch {}
 
       // Load CSS
       if (!document.querySelector('link[data-xterm-css]')) {
@@ -90,6 +92,12 @@ export default function TerminalPanel({ sessionId, sessionName, cwd, visible, re
       fitAddon = new FitAddon();
       terminal.loadAddon(fitAddon);
       terminal.open(container);
+
+      // Use WebGL renderer for much faster rendering (especially on Windows)
+      if (WebglAddon) {
+        try { terminal.loadAddon(new WebglAddon()); } catch {}
+      }
+
       fitAddon.fit();
 
       termRef.current = terminal;
@@ -160,10 +168,18 @@ export default function TerminalPanel({ sessionId, sessionName, cwd, visible, re
       });
       resizeObserver.observe(container);
 
+      // Catch browser zoom changes (ResizeObserver misses these sometimes)
+      const onWindowResize = () => {
+        if (resizeTimer) clearTimeout(resizeTimer);
+        resizeTimer = setTimeout(doFit, 100);
+      };
+      window.addEventListener('resize', onWindowResize);
+
       // Store cleanup refs
       (terminal as any).__cleanup = () => {
         socket.off('terminal:data' as any, handleData);
         socket.off('terminal:exit' as any, handleExit);
+        window.removeEventListener('resize', onWindowResize);
         resizeObserver.disconnect();
         terminal.dispose();
       };
