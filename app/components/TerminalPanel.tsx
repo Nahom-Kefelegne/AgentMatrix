@@ -95,8 +95,10 @@ export default function TerminalPanel({ sessionId, sessionName, cwd, visible, re
       terminal.loadAddon(fitAddon);
       terminal.open(container);
 
-      // Use WebGL renderer for much faster rendering (especially on Windows)
-      if (WebglAddon) {
+      // Use WebGL renderer for faster rendering — skip on Windows where it
+      // causes grainy text via remote desktop (no ClearType on GPU textures)
+      const isWindows = navigator.platform?.toLowerCase().includes('win');
+      if (WebglAddon && !isWindows) {
         try { terminal.loadAddon(new WebglAddon()); } catch {}
       }
 
