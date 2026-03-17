@@ -434,8 +434,7 @@ export default function SessionDialog({
       {/* Backdrop */}
       {!noBackdrop && (
         <div onClick={onClose} style={{
-          position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.65)', zIndex: 100,
-          backdropFilter: 'blur(4px)',
+          position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.7)', zIndex: 100,
         }} />
       )}
 
@@ -564,6 +563,8 @@ export default function SessionDialog({
             position: 'absolute', inset: 0, padding: '12px 16px',
             display: activeTab === 'console' ? 'flex' : 'none',
             flexDirection: 'column',
+            willChange: 'transform',
+            contain: 'strict',
           }}>
             <TerminalPanel sessionId={session.id} sessionName={session.name} cwd={session.cwd} visible={activeTab === 'console' && !terminalFullscreen} readOnly={readOnly} />
           </div>

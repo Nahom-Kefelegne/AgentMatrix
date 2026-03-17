@@ -17,6 +17,8 @@ export default function TerminalPanel({ sessionId, sessionName, cwd, visible, re
   const termRef = useRef<any>(null);
   const fitRef = useRef<any>(null);
   const [status, setStatus] = useState<'idle' | 'connecting' | 'connected' | 'exited'>('idle');
+  const statusRef = useRef(status);
+  statusRef.current = status;
   const [initializing, setInitializing] = useState(false);
 
   // Listen for session initializing state (summary generation on startup)
@@ -110,10 +112,13 @@ export default function TerminalPanel({ sessionId, sessionName, cwd, visible, re
       if (!readOnly) {
         // Handle special key combos that xterm doesn't send correctly
         terminal.attachCustomKeyEventHandler((e: KeyboardEvent) => {
-          if (e.type === 'keydown' && e.key === 'Enter' && e.shiftKey) {
-            // Shift+Enter — send CSI u encoding so Claude TUI gets it as newline
-            socket.emit('terminal:input', { sessionId, data: '\x1b[13;2u' });
-            return false; // prevent xterm default
+          if (e.key === 'Enter' && e.shiftKey) {
+            if (e.type === 'keydown') {
+              // Shift+Enter — send CSI u encoding so Claude TUI gets it as newline
+              socket.emit('terminal:input', { sessionId, data: '\x1b[13;2u' });
+            }
+            // Block both keydown and keyup to prevent xterm from sending \r
+            return false;
           }
           return true; // let xterm handle everything else
         });
@@ -131,7 +136,7 @@ export default function TerminalPanel({ sessionId, sessionName, cwd, visible, re
       const handleData = (msg: { sessionId: string; data: string }) => {
         if (msg.sessionId === sessionId) {
           terminal.write(stripClear(msg.data));
-          if (status !== 'connected') setStatus('connected');
+          if (statusRef.current !== 'connected') setStatus('connected');
         }
       };
 
@@ -291,6 +296,8 @@ export default function TerminalPanel({ sessionId, sessionName, cwd, visible, re
           overflow: 'hidden',
           background: '#0c0c18',
           border: '1px solid #1e1e30',
+          willChange: 'transform',
+          contain: 'content',
           pointerEvents: initializing ? 'none' : 'auto',
         }}
       />
