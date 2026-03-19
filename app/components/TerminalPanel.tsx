@@ -156,6 +156,19 @@ export default function TerminalPanel({ sessionId, sessionName, cwd, visible, re
       setStatus('connecting');
       socket.emit('terminal:resume' as any, { sessionId });
 
+      // Send initial resize so PTY matches terminal panel size
+      // This must happen after resume so the PTY exists
+      setTimeout(() => {
+        try {
+          fitAddon.fit();
+          socket.emit('terminal:resize', {
+            sessionId,
+            cols: terminal.cols,
+            rows: terminal.rows,
+          });
+        } catch {}
+      }, 200);
+
       // Handle resize — debounce to avoid flicker
       let resizeTimer: ReturnType<typeof setTimeout> | null = null;
       const doFit = () => {
