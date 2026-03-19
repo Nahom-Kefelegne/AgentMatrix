@@ -53,7 +53,19 @@ function FolderPicker({ value, onChange }: { value: string; onChange: (path: str
           marginTop: 4, maxHeight: 220, overflowY: 'auto',
         }}>
           <div onClick={() => {
-            const parent = value.split('/').slice(0, -1).join('/') || '/';
+            const isWinRoot = /^[A-Za-z]:[\\\/]?$/.test(value);
+            if (isWinRoot || value === '/' || value === '\\') return;
+            const normalized = value.replace(/\\/g, '/');
+            const parts = normalized.split('/').filter(Boolean);
+            parts.pop();
+            let parent: string;
+            if (parts.length === 0) {
+              parent = /^[A-Za-z]:/.test(normalized) ? normalized.slice(0, 2) + '\\' : '/';
+            } else if (/^[A-Za-z]:$/.test(parts[0])) {
+              parent = parts.join('\\') + '\\';
+            } else {
+              parent = '/' + parts.join('/');
+            }
             onChange(parent); loadDirs(parent);
           }} style={{
             padding: '10px 14px', fontSize: 15, color: '#7aafff', cursor: 'pointer',
@@ -61,8 +73,20 @@ function FolderPicker({ value, onChange }: { value: string; onChange: (path: str
           }}>
             ↑ Parent Directory
           </div>
+          <div onClick={async () => {
+            try {
+              const res = await fetch('/api/dirs?drives=true');
+              const data = await res.json();
+              if (data.drives && data.dirs?.length) setDirs(data.dirs);
+            } catch {}
+          }} style={{
+            padding: '10px 14px', fontSize: 15, color: '#ffd43b', cursor: 'pointer',
+            borderBottom: '1px solid #222238',
+          }}>
+            💾 Switch Drive
+          </div>
           {dirs.map(d => (
-            <div key={d.path} onClick={() => { onChange(d.path); setOpen(false); }} style={{
+            <div key={d.path} onClick={() => { onChange(d.path); loadDirs(d.path); }} style={{
               padding: '10px 14px', fontSize: 15, color: '#d8d8e8', cursor: 'pointer',
               borderBottom: '1px solid #222238',
             }}

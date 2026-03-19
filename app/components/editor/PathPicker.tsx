@@ -56,10 +56,20 @@ function FolderBrowser({ value, onChange }: { value: string; onChange: (path: st
       {/* Directory list */}
       <div style={{ maxHeight: 280, overflowY: 'auto' }}>
         {/* Parent directory */}
-        {value !== '/' && (
+        {value !== '/' && !/^[A-Za-z]:[\\\/]?$/.test(value) && (
           <div
             onClick={() => {
-              const parent = value.split('/').slice(0, -1).join('/') || '/';
+              const normalized = value.replace(/\\/g, '/');
+              const parts = normalized.split('/').filter(Boolean);
+              parts.pop();
+              let parent: string;
+              if (parts.length === 0) {
+                parent = /^[A-Za-z]:/.test(normalized) ? normalized.slice(0, 2) + '\\' : '/';
+              } else if (/^[A-Za-z]:$/.test(parts[0])) {
+                parent = parts.join('\\') + '\\';
+              } else {
+                parent = '/' + parts.join('/');
+              }
               onChange(parent);
             }}
             onMouseEnter={e => (e.currentTarget.style.background = '#1a1a2e')}
