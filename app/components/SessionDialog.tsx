@@ -372,6 +372,7 @@ export default function SessionDialog({
   const [restartCommand, setRestartCommand] = useState<string | null>(null);
   const [showHandoff, setShowHandoff] = useState(false);
   const [handoffActive, setHandoffActive] = useState(false);
+  const [showChanges, setShowChanges] = useState(false);
   const [fullscreen, setFullscreen] = useState(false);
   const [terminalFullscreen, setTerminalFullscreen] = useState(false);
   const isConsole = activeTab === 'console';
@@ -607,6 +608,15 @@ export default function SessionDialog({
         }}>
           <CopyButton text={cliCmd} label="Copy Resume Command" successLabel="Copied!" />
 
+          <button onClick={() => setShowChanges(true)} style={{
+            padding: '8px 16px', borderRadius: 6,
+            border: '1px solid #4a9eff40', background: '#0e0e1a',
+            color: '#4a9eff', fontSize: 14, fontWeight: 600, cursor: 'pointer',
+            fontFamily: 'inherit', transition: 'all 0.15s',
+          }}>
+            View Changes
+          </button>
+
           <button onClick={() => setShowHandoff(true)} style={{
             padding: '8px 16px', borderRadius: 6,
             border: handoffActive ? '1px solid #ffd43b40' : '1px solid #cc5de840',
@@ -682,7 +692,183 @@ export default function SessionDialog({
       {restartCommand && (
         <RestartDialog command={restartCommand} onClose={() => setRestartCommand(null)} />
       )}
+
+      {showChanges && (
+        <ChangesViewer sessionId={session.id} sessionName={session.name} onClose={() => setShowChanges(false)} />
+      )}
     </>
+  );
+}
+
+// ===== Changes Viewer =====
+
+function ChangesViewer({ sessionId, sessionName, onClose }: {
+  sessionId: string; sessionName: string; onClose: () => void;
+}) {
+  const [files, setFiles] = useState<Array<{ path: string; status: string; additions: number; deletions: number }>>([]);
+  const [selectedFile, setSelectedFile] = useState<string | null>(null);
+  const [diff, setDiff] = useState<{ original: string; current: string; isNew: boolean } | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    fetch(`/api/sessions/changes?sessionId=${sessionId}`)
+      .then(r => r.json())
+      .then(data => { setFiles(data.files || []); setLoading(false); })
+      .catch(() => setLoading(false));
+  }, [sessionId]);
+
+  useEffect(() => {
+    if (!selectedFile) { setDiff(null); return; }
+    fetch(`/api/sessions/changes?sessionId=${sessionId}&file=${encodeURIComponent(selectedFile)}`)
+      .then(r => r.json())
+      .then(data => setDiff(data))
+      .catch(() => setDiff(null));
+  }, [selectedFile, sessionId]);
+
+  const statusColors: Record<string, string> = {
+    modified: '#ffd43b', new: '#51cf66', deleted: '#ff6b6b', untracked: '#cc5de8',
+  };
+
+  return (
+    <>
+      <div onClick={onClose} style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', zIndex: 200 }} />
+      <div style={{
+        position: 'fixed', top: '5%', left: '5%', right: '5%', bottom: '5%',
+        background: '#0c0c18', border: '1px solid #222235', borderRadius: 14,
+        zIndex: 201, display: 'flex', flexDirection: 'column', overflow: 'hidden',
+        boxShadow: '0 20px 60px rgba(0,0,0,0.5)',
+      }}>
+        {/* Header */}
+        <div style={{
+          padding: '14px 20px', borderBottom: '1px solid #1e1e30',
+          display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexShrink: 0,
+        }}>
+          <span style={{ fontSize: 16, fontWeight: 700, color: '#eee' }}>
+            Changes by {sessionName}
+          </span>
+          <button onClick={onClose} style={{
+            width: 28, height: 28, borderRadius: 6, border: '1px solid #2a2a3e',
+            background: '#1a1a2a', color: '#888', fontSize: 14,
+            display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer',
+          }}>x</button>
+        </div>
+
+        <div style={{ flex: 1, display: 'flex', minHeight: 0 }}>
+          {/* File list */}
+          <div style={{
+            width: 280, borderRight: '1px solid #1e1e30', overflowY: 'auto', flexShrink: 0,
+          }}>
+            {loading ? (
+              <div style={{ padding: 20, color: '#555', textAlign: 'center' }}>Loading...</div>
+            ) : files.length === 0 ? (
+              <div style={{ padding: 20, color: '#555', textAlign: 'center' }}>No file changes tracked yet</div>
+            ) : (
+              files.map(f => {
+                const name = f.path.split('/').pop() || f.path.split('\\').pop() || f.path;
+                const dir = f.path.replace(/[/\\][^/\\]+$/, '');
+                const isSelected = selectedFile === f.path;
+                return (
+                  <div key={f.path} onClick={() => setSelectedFile(f.path)} style={{
+                    padding: '10px 14px', cursor: 'pointer',
+                    background: isSelected ? '#1a1a2e' : 'transparent',
+                    borderBottom: '1px solid #1a1a28',
+                    borderLeft: `3px solid ${statusColors[f.status] || '#888'}`,
+                  }}>
+                    <div style={{ fontSize: 13, fontWeight: 600, color: isSelected ? '#eee' : '#ccc' }}>{name}</div>
+                    <div style={{ fontSize: 11, color: '#555', fontFamily: "'Courier New', monospace", marginTop: 2 }}>
+                      {dir}
+                    </div>
+                    <div style={{ display: 'flex', gap: 8, marginTop: 4, fontSize: 11 }}>
+                      <span style={{ color: statusColors[f.status] || '#888', fontWeight: 700 }}>{f.status}</span>
+                      {f.additions > 0 && <span style={{ color: '#51cf66' }}>+{f.additions}</span>}
+                      {f.deletions > 0 && <span style={{ color: '#ff6b6b' }}>-{f.deletions}</span>}
+                    </div>
+                  </div>
+                );
+              })
+            )}
+          </div>
+
+          {/* Diff view */}
+          <div style={{ flex: 1, overflow: 'auto', padding: 0 }}>
+            {!selectedFile ? (
+              <div style={{ padding: 40, color: '#555', textAlign: 'center' }}>
+                Select a file to view changes
+              </div>
+            ) : !diff ? (
+              <div style={{ padding: 20, color: '#555', textAlign: 'center' }}>Loading diff...</div>
+            ) : (
+              <DiffView original={diff.original} current={diff.current} isNew={diff.isNew} filePath={selectedFile} />
+            )}
+          </div>
+        </div>
+      </div>
+    </>
+  );
+}
+
+function DiffView({ original, current, isNew, filePath }: {
+  original: string; current: string; isNew: boolean; filePath: string;
+}) {
+  const origLines = original.split('\n');
+  const currLines = current.split('\n');
+
+  // Simple line-by-line diff
+  const maxLines = Math.max(origLines.length, currLines.length);
+  const lines: Array<{ type: 'same' | 'add' | 'remove' | 'change'; lineNum: number; orig: string; curr: string }> = [];
+
+  for (let i = 0; i < maxLines; i++) {
+    const o = origLines[i] ?? '';
+    const c = currLines[i] ?? '';
+    if (o === c) {
+      lines.push({ type: 'same', lineNum: i + 1, orig: o, curr: c });
+    } else if (i >= origLines.length) {
+      lines.push({ type: 'add', lineNum: i + 1, orig: '', curr: c });
+    } else if (i >= currLines.length) {
+      lines.push({ type: 'remove', lineNum: i + 1, orig: o, curr: '' });
+    } else {
+      lines.push({ type: 'change', lineNum: i + 1, orig: o, curr: c });
+    }
+  }
+
+  const bgColors: Record<string, string> = {
+    same: 'transparent', add: '#51cf6610', remove: '#ff6b6b10', change: '#ffd43b10',
+  };
+  const gutterColors: Record<string, string> = {
+    same: '#333', add: '#51cf66', remove: '#ff6b6b', change: '#ffd43b',
+  };
+
+  return (
+    <div style={{ fontFamily: "'Menlo', 'Monaco', 'Courier New', monospace", fontSize: 13, lineHeight: 1.5 }}>
+      <div style={{
+        padding: '8px 14px', background: '#111118', borderBottom: '1px solid #1e1e30',
+        fontSize: 12, color: '#888', position: 'sticky', top: 0,
+      }}>
+        {filePath} {isNew && <span style={{ color: '#51cf66', fontWeight: 700 }}>(new file)</span>}
+      </div>
+      {lines.map((line, i) => (
+        <div key={i} style={{ display: 'flex', background: bgColors[line.type] }}>
+          <div style={{
+            width: 50, textAlign: 'right', padding: '0 8px', color: gutterColors[line.type],
+            fontSize: 11, userSelect: 'none', flexShrink: 0, borderRight: '1px solid #1a1a28',
+          }}>
+            {line.lineNum}
+          </div>
+          <div style={{
+            width: 16, textAlign: 'center', color: gutterColors[line.type],
+            fontWeight: 700, fontSize: 12, flexShrink: 0,
+          }}>
+            {line.type === 'add' ? '+' : line.type === 'remove' ? '-' : line.type === 'change' ? '~' : ''}
+          </div>
+          <pre style={{
+            margin: 0, padding: '0 8px', flex: 1, whiteSpace: 'pre-wrap', wordBreak: 'break-all',
+            color: line.type === 'same' ? '#888' : '#eee',
+          }}>
+            {line.type === 'remove' ? line.orig : line.curr}
+          </pre>
+        </div>
+      ))}
+    </div>
   );
 }
 

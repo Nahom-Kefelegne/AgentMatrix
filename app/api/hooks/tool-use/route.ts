@@ -49,11 +49,23 @@ export async function POST(request: Request) {
     const lastToolSummary = buildToolSummary(payload.tool_name, payload.tool_input);
     const lastActivity = Date.now();
 
+    // Track files modified by Write/Edit tools
+    const fileModTools = ['Write', 'Edit'];
+    const filePath = payload.tool_input?.file_path as string | undefined;
+    let filesModified: string[] | undefined;
+    if (fileModTools.includes(payload.tool_name) && filePath) {
+      const existing = session?.filesModified || [];
+      if (!existing.includes(filePath)) {
+        filesModified = [...existing, filePath];
+      }
+    }
+
     updateSession(payload.session_id, {
       status: 'working',
       currentTool: payload.tool_name,
       lastToolSummary,
       lastActivity,
+      ...(filesModified ? { filesModified } : {}),
     });
 
     emitToClients(SOCKET_EVENTS.SESSION_UPDATE, {

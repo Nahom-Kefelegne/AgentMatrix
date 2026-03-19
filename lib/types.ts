@@ -42,6 +42,7 @@ export interface SessionData {
   cwd?: string;
   contextUsage?: number;
   summaryBullets?: string[];
+  filesModified?: string[];
   createdAt: number;
 }
 
