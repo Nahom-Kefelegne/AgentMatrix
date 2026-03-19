@@ -42,7 +42,19 @@ function FolderPicker({ value, onChange }: { value: string; onChange: (path: str
           marginTop: 4, maxHeight: 220, overflowY: 'auto',
         }}>
           <div onClick={() => {
-            const parent = value.split('/').slice(0, -1).join('/') || '/';
+            const isWinRoot = /^[A-Za-z]:[\\\/]?$/.test(value);
+            if (isWinRoot || value === '/' || value === '\\') return;
+            const normalized = value.replace(/\\/g, '/');
+            const parts = normalized.split('/').filter(Boolean);
+            parts.pop();
+            let parent: string;
+            if (parts.length === 0) {
+              parent = /^[A-Za-z]:/.test(normalized) ? normalized.slice(0, 2) + '\\' : '/';
+            } else if (/^[A-Za-z]:$/.test(parts[0])) {
+              parent = parts.join('\\') + '\\';
+            } else {
+              parent = '/' + parts.join('/');
+            }
             onChange(parent); loadDirs(parent);
           }} style={{
             padding: '10px 14px', fontSize: 15, color: '#7aafff', cursor: 'pointer',
