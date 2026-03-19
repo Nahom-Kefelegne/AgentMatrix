@@ -119,10 +119,32 @@ export default function TerminalPanel({ sessionId, sessionName, cwd, visible, re
               // Shift+Enter — send CSI u encoding so Claude TUI gets it as newline
               socket.emit('terminal:input', { sessionId, data: '\x1b[13;2u' });
             }
-            // Block both keydown and keyup to prevent xterm from sending \r
             return false;
           }
-          return true; // let xterm handle everything else
+          // Ctrl+Shift+C — copy selection (Windows/Linux terminal convention)
+          if (e.type === 'keydown' && e.code === 'KeyC' && e.shiftKey && e.ctrlKey) {
+            const sel = terminal.getSelection();
+            if (sel) navigator.clipboard.writeText(sel);
+            return false;
+          }
+          // Ctrl+Shift+V — paste from clipboard
+          if (e.type === 'keydown' && e.code === 'KeyV' && e.shiftKey && e.ctrlKey) {
+            navigator.clipboard.readText().then(text => {
+              if (text) socket.emit('terminal:input', { sessionId, data: text });
+            });
+            return false;
+          }
+          // Cmd+C on Mac — copy selection if text is selected, otherwise send SIGINT
+          if (e.type === 'keydown' && e.code === 'KeyC' && e.metaKey && !e.shiftKey) {
+            const sel = terminal.getSelection();
+            if (sel) {
+              navigator.clipboard.writeText(sel);
+              return false;
+            }
+            // No selection — let it through as Ctrl+C (SIGINT)
+            return true;
+          }
+          return true;
         });
 
         terminal.onData((data: string) => {
