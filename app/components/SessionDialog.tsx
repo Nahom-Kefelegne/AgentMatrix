@@ -564,7 +564,6 @@ export default function SessionDialog({
             display: activeTab === 'console' ? 'flex' : 'none',
             flexDirection: 'column',
             willChange: 'transform',
-            contain: 'strict',
           }}>
             <TerminalPanel sessionId={session.id} sessionName={session.name} cwd={session.cwd} visible={activeTab === 'console' && !terminalFullscreen} readOnly={readOnly} />
           </div>

@@ -312,7 +312,6 @@ export default function TerminalPanel({ sessionId, sessionName, cwd, visible, re
           background: '#0c0c18',
           border: '1px solid #1e1e30',
           willChange: 'transform',
-          contain: 'content',
           pointerEvents: initializing ? 'none' : 'auto',
         }}
       />
