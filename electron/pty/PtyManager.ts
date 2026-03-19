@@ -23,23 +23,36 @@ export class PtyManager {
 
   /**
    * Decode a Claude project dir name back to a real filesystem path.
-   * Claude encodes '/' as '-', but folder names can also contain '-'.
+   * Claude encodes path separators as '-', but folder names can also contain '-'.
    * We greedily try to match existing directories from left to right.
-   * e.g. "Users-johndoe-projects-my-app"
-   *   → try /Users → exists, continue
-   *   → try /Users/johndoe → exists, continue
-   *   → try /Users/johndoe/projects → exists, continue
-   *   → try /Users/johndoe/projects/my-app → exists!
+   *
+   * macOS/Linux: "Users-johndoe-projects-my-app" → /Users/johndoe/projects/my-app
+   * Windows:     "Q-src-teams-modular" → Q:\src\teams-modular
+   *              "C-Users-name-project" → C:\Users\name\project
    */
   private decodeDirName(encoded: string, existsSync: (p: string) => boolean): string | null {
     const segments = encoded.split('-');
+    const isWin = process.platform === 'win32';
+    const sep = isWin ? '\\' : '/';
     let path = '';
     let i = 0;
+
+    // Windows: check if first segment is a drive letter (single letter)
+    if (isWin && segments.length > 0 && /^[A-Za-z]$/.test(segments[0])) {
+      path = segments[0].toUpperCase() + ':';
+      i = 1;
+      // Check if just the drive root exists
+      if (!existsSync(path + '\\')) {
+        path = '';
+        i = 0;
+      }
+    }
+
     while (i < segments.length) {
-      // Try greedily: from longest remaining to single segment
       let found = false;
       for (let end = segments.length; end > i; end--) {
-        const candidate = path + '/' + segments.slice(i, end).join('-');
+        const joined = segments.slice(i, end).join('-');
+        const candidate = path ? path + sep + joined : (isWin ? joined : '/' + joined);
         if (existsSync(candidate)) {
           path = candidate;
           i = end;
@@ -48,8 +61,7 @@ export class PtyManager {
         }
       }
       if (!found) {
-        // No match — just use single segment as separator fallback
-        path += '/' + segments[i];
+        path = path ? path + sep + segments[i] : (isWin ? segments[i] : '/' + segments[i]);
         i++;
       }
     }

@@ -75,12 +75,26 @@ function parseTranscriptMeta(transcriptPath: string): { cwd?: string; slug?: str
 
     // If no cwd in transcript, derive from project directory name
     // e.g. ~/.claude/projects/-Users-johndoe-projects-myapp/xxx.jsonl → /Users/johndoe/projects/myapp
+    // Windows: ~/.claude/projects/-Q-src-teams-modular/xxx.jsonl → Q:\src\teams-modular
     if (!cwd) {
-      const parts = transcriptPath.split('/');
+      const sep = require('path').sep;
+      const parts = transcriptPath.split(sep);
       const projectsIdx = parts.indexOf('projects');
       if (projectsIdx >= 0 && projectsIdx + 1 < parts.length) {
-        const dirName = parts[projectsIdx + 1]; // e.g. -Users-nkefelegne-Desktop-DEV
-        cwd = dirName.replace(/^-/, '/').replace(/-/g, '/');
+        const dirName = parts[projectsIdx + 1]; // e.g. -Users-nkefelegne-Desktop-DEV or -Q-src-teams
+        if (process.platform === 'win32') {
+          // Windows: first segment after leading dash may be a drive letter
+          const stripped = dirName.replace(/^-/, '');
+          const segments = stripped.split('-');
+          if (segments.length > 0 && /^[A-Za-z]$/.test(segments[0])) {
+            // Drive letter path: Q-src-foo → Q:\src\foo
+            cwd = segments[0].toUpperCase() + ':\\' + segments.slice(1).join('\\');
+          } else {
+            cwd = '\\' + stripped.replace(/-/g, '\\');
+          }
+        } else {
+          cwd = dirName.replace(/^-/, '/').replace(/-/g, '/');
+        }
       }
     }
 
