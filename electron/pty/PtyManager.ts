@@ -57,12 +57,39 @@ export class PtyManager {
   }
 
   private findClaudeBinary(): string {
+    // Try PATH first
     try {
       const cmd = process.platform === 'win32' ? 'where claude' : 'which claude';
-      return execSync(cmd, { encoding: 'utf-8' }).trim().split('\n')[0];
-    } catch {
-      throw new Error('Claude CLI not found on PATH.');
+      const result = execSync(cmd, { encoding: 'utf-8' }).trim().split(/\r?\n/)[0].trim();
+      if (result) return result;
+    } catch {}
+
+    // Fallback: check common install locations
+    const { existsSync } = require('fs');
+    const home = homedir();
+    const candidates = process.platform === 'win32'
+      ? [
+          join(home, '.local', 'bin', 'claude.exe'),
+          join(home, '.local', 'bin', 'claude'),
+          join(home, 'AppData', 'Local', 'Programs', 'claude', 'claude.exe'),
+          join(home, 'AppData', 'Roaming', 'npm', 'claude.cmd'),
+          join(home, 'AppData', 'Roaming', 'npm', 'claude'),
+          'C:\\Program Files\\Claude\\claude.exe',
+        ]
+      : [
+          '/usr/local/bin/claude',
+          join(home, '.local', 'bin', 'claude'),
+          join(home, '.npm-global', 'bin', 'claude'),
+        ];
+
+    for (const path of candidates) {
+      if (existsSync(path)) {
+        console.log(`[findClaudeBinary] Found at fallback: ${path}`);
+        return path;
+      }
     }
+
+    throw new Error('Claude CLI not found. Install it or add it to PATH.');
   }
 
   findSessionCwd(sessionId: string): string | undefined {
