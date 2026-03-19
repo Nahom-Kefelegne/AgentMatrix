@@ -710,6 +710,7 @@ function ChangesViewer({ sessionId, sessionName, onClose }: {
   const [diff, setDiff] = useState<{ original: string; current: string; isNew: boolean } | null>(null);
   const [loading, setLoading] = useState(true);
   const [reverting, setReverting] = useState(false);
+  const [diffMode, setDiffMode] = useState<'inline' | 'split'>('inline');
 
   const loadFiles = () => {
     fetch(`/api/sessions/changes?sessionId=${sessionId}`)
@@ -785,6 +786,21 @@ function ChangesViewer({ sessionId, sessionName, onClose }: {
             {files.length > 0 && <span style={{ fontSize: 12, color: '#666', fontWeight: 400, marginLeft: 8 }}>({files.length} files)</span>}
           </span>
           <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+            {/* Diff mode toggle */}
+            <div style={{
+              display: 'flex', background: '#1a1a2a', border: '1px solid #2a2a3e',
+              borderRadius: 6, padding: 2,
+            }}>
+              {(['inline', 'split'] as const).map(mode => (
+                <button key={mode} onClick={() => setDiffMode(mode)} style={{
+                  padding: '4px 10px', fontSize: 11, fontWeight: 600, borderRadius: 4,
+                  border: 'none',
+                  background: diffMode === mode ? '#4a9eff' : 'transparent',
+                  color: diffMode === mode ? '#fff' : '#666',
+                  cursor: 'pointer', fontFamily: 'inherit',
+                }}>{mode === 'inline' ? 'Inline' : 'Split'}</button>
+              ))}
+            </div>
             {files.length > 0 && (
               <button onClick={handleClearTracking} style={{
                 padding: '5px 12px', borderRadius: 6, border: '1px solid #3a3a4e',
@@ -844,7 +860,7 @@ function ChangesViewer({ sessionId, sessionName, onClose }: {
             ) : !diff ? (
               <div style={{ padding: 20, color: '#555', textAlign: 'center' }}>Loading diff...</div>
             ) : (
-              <DiffView original={diff.original} current={diff.current} isNew={diff.isNew} filePath={selectedFile} />
+              <DiffView original={diff.original} current={diff.current} isNew={diff.isNew} filePath={selectedFile} mode={diffMode} />
             )}
           </div>
         </div>
@@ -853,13 +869,12 @@ function ChangesViewer({ sessionId, sessionName, onClose }: {
   );
 }
 
-function DiffView({ original, current, isNew, filePath }: {
-  original: string; current: string; isNew: boolean; filePath: string;
+function DiffView({ original, current, isNew, filePath, mode }: {
+  original: string; current: string; isNew: boolean; filePath: string; mode: 'inline' | 'split';
 }) {
   const origLines = original.split('\n');
   const currLines = current.split('\n');
 
-  // Simple line-by-line diff
   const maxLines = Math.max(origLines.length, currLines.length);
   const lines: Array<{ type: 'same' | 'add' | 'remove' | 'change'; lineNum: number; orig: string; curr: string }> = [];
 
@@ -884,12 +899,59 @@ function DiffView({ original, current, isNew, filePath }: {
     same: '#333', add: '#51cf66', remove: '#ff6b6b', change: '#ffd43b',
   };
 
+  const headerStyle = {
+    padding: '8px 14px', background: '#111118', borderBottom: '1px solid #1e1e30',
+    fontSize: 12, color: '#888', position: 'sticky' as const, top: 0, zIndex: 1,
+  };
+
+  if (mode === 'split') {
+    return (
+      <div style={{ fontFamily: "'Menlo', 'Monaco', 'Courier New', monospace", fontSize: 13, lineHeight: 1.5 }}>
+        <div style={{ ...headerStyle, display: 'flex', justifyContent: 'space-between' }}>
+          <span>Original (HEAD) — {filePath}</span>
+          <span>Current {isNew && <span style={{ color: '#51cf66', fontWeight: 700 }}>(new file)</span>}</span>
+        </div>
+        {lines.map((line, i) => (
+          <div key={i} style={{ display: 'flex' }}>
+            {/* Left: original */}
+            <div style={{
+              flex: 1, display: 'flex',
+              background: line.type === 'remove' || line.type === 'change' ? '#ff6b6b10' : 'transparent',
+              borderRight: '1px solid #1e1e30',
+            }}>
+              <div style={{
+                width: 40, textAlign: 'right', padding: '0 6px', color: '#333',
+                fontSize: 11, userSelect: 'none', flexShrink: 0, borderRight: '1px solid #1a1a28',
+              }}>{line.lineNum}</div>
+              <pre style={{
+                margin: 0, padding: '0 8px', flex: 1, whiteSpace: 'pre-wrap', wordBreak: 'break-all',
+                color: line.type === 'same' ? '#888' : line.type === 'add' ? '#333' : '#eee',
+              }}>{line.orig}</pre>
+            </div>
+            {/* Right: current */}
+            <div style={{
+              flex: 1, display: 'flex',
+              background: line.type === 'add' || line.type === 'change' ? '#51cf6610' : 'transparent',
+            }}>
+              <div style={{
+                width: 40, textAlign: 'right', padding: '0 6px', color: '#333',
+                fontSize: 11, userSelect: 'none', flexShrink: 0, borderRight: '1px solid #1a1a28',
+              }}>{line.lineNum}</div>
+              <pre style={{
+                margin: 0, padding: '0 8px', flex: 1, whiteSpace: 'pre-wrap', wordBreak: 'break-all',
+                color: line.type === 'same' ? '#888' : line.type === 'remove' ? '#333' : '#eee',
+              }}>{line.curr}</pre>
+            </div>
+          </div>
+        ))}
+      </div>
+    );
+  }
+
+  // Inline mode
   return (
     <div style={{ fontFamily: "'Menlo', 'Monaco', 'Courier New', monospace", fontSize: 13, lineHeight: 1.5 }}>
-      <div style={{
-        padding: '8px 14px', background: '#111118', borderBottom: '1px solid #1e1e30',
-        fontSize: 12, color: '#888', position: 'sticky', top: 0,
-      }}>
+      <div style={headerStyle}>
         {filePath} {isNew && <span style={{ color: '#51cf66', fontWeight: 700 }}>(new file)</span>}
       </div>
       {lines.map((line, i) => (
@@ -897,9 +959,7 @@ function DiffView({ original, current, isNew, filePath }: {
           <div style={{
             width: 50, textAlign: 'right', padding: '0 8px', color: gutterColors[line.type],
             fontSize: 11, userSelect: 'none', flexShrink: 0, borderRight: '1px solid #1a1a28',
-          }}>
-            {line.lineNum}
-          </div>
+          }}>{line.lineNum}</div>
           <div style={{
             width: 16, textAlign: 'center', color: gutterColors[line.type],
             fontWeight: 700, fontSize: 12, flexShrink: 0,
