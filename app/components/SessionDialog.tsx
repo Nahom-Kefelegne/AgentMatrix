@@ -711,6 +711,7 @@ function ChangesViewer({ sessionId, sessionName, onClose }: {
   const [loading, setLoading] = useState(true);
   const [reverting, setReverting] = useState(false);
   const [diffMode, setDiffMode] = useState<'inline' | 'split'>('inline');
+  const [loadingDiff, setLoadingDiff] = useState(false);
 
   const loadFiles = () => {
     fetch(`/api/sessions/changes?sessionId=${sessionId}`)
@@ -756,11 +757,12 @@ function ChangesViewer({ sessionId, sessionName, onClose }: {
   };
 
   useEffect(() => {
-    if (!selectedFile) { setDiff(null); return; }
+    if (!selectedFile) { setDiff(null); setLoadingDiff(false); return; }
+    setLoadingDiff(true); setDiff(null);
     fetch(`/api/sessions/changes?sessionId=${sessionId}&file=${encodeURIComponent(selectedFile)}`)
       .then(r => r.json())
-      .then(data => setDiff(data))
-      .catch(() => setDiff(null));
+      .then(data => { setDiff(data); setLoadingDiff(false); })
+      .catch(() => { setDiff(null); setLoadingDiff(false); });
   }, [selectedFile, sessionId]);
 
   const statusColors: Record<string, string> = {
@@ -821,7 +823,13 @@ function ChangesViewer({ sessionId, sessionName, onClose }: {
             width: 280, borderRight: '1px solid #1e1e30', overflowY: 'auto', flexShrink: 0,
           }}>
             {loading ? (
-              <div style={{ padding: 20, color: '#555', textAlign: 'center' }}>Loading...</div>
+              <div style={{ padding: 30, display: 'flex', alignItems: 'center', justifyContent: 'center', flexDirection: 'column', gap: 8 }}>
+                <div style={{
+                  width: 20, height: 20, border: '2px solid #222', borderTopColor: '#4a9eff',
+                  borderRadius: '50%', animation: 'spin 1s linear infinite',
+                }} />
+                <span style={{ fontSize: 12, color: '#555' }}>Loading files...</span>
+              </div>
             ) : files.length === 0 ? (
               <div style={{ padding: 20, color: '#555', textAlign: 'center' }}>No file changes tracked yet</div>
             ) : (
@@ -857,8 +865,15 @@ function ChangesViewer({ sessionId, sessionName, onClose }: {
               <div style={{ padding: 40, color: '#555', textAlign: 'center' }}>
                 Select a file to view changes
               </div>
-            ) : !diff ? (
-              <div style={{ padding: 20, color: '#555', textAlign: 'center' }}>Loading diff...</div>
+            ) : loadingDiff || !diff ? (
+              <div style={{ height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', flexDirection: 'column', gap: 10 }}>
+                <div style={{
+                  width: 24, height: 24, border: '3px solid #222', borderTopColor: '#4a9eff',
+                  borderRadius: '50%', animation: 'spin 1s linear infinite',
+                }} />
+                <span style={{ fontSize: 13, color: '#555' }}>Loading diff...</span>
+                <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
+              </div>
             ) : (
               <DiffView original={diff.original} current={diff.current} isNew={diff.isNew} filePath={selectedFile} mode={diffMode} />
             )}
