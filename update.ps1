@@ -31,6 +31,12 @@ git pull
 Write-Host "  [OK] Code updated" -ForegroundColor Green
 Write-Host ""
 
+# Install dependencies
+Write-Host "Installing dependencies..." -ForegroundColor Blue
+npm install
+Write-Host "  [OK] Dependencies installed" -ForegroundColor Green
+Write-Host ""
+
 # Re-configure hooks
 $claudeDir = Join-Path $env:USERPROFILE ".claude"
 $settingsFile = Join-Path $claudeDir "settings.json"
