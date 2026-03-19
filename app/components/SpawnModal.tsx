@@ -62,8 +62,23 @@ function FolderPicker({ value, onChange }: { value: string; onChange: (path: str
           }}>
             ↑ Parent Directory
           </div>
+          <div onClick={async () => {
+            try {
+              const res = await fetch('/api/dirs?drives=true');
+              const data = await res.json();
+              if (data.drives && data.dirs?.length) setDirs(data.dirs);
+            } catch {}
+          }} style={{
+            padding: '10px 14px', fontSize: 15, color: '#ffd43b', cursor: 'pointer',
+            borderBottom: '1px solid #222238',
+          }}>
+            💾 Switch Drive
+          </div>
           {dirs.map(d => (
-            <div key={d.path} onClick={() => { onChange(d.path); setOpen(false); }} style={{
+            <div key={d.path}
+              onClick={() => { onChange(d.path); loadDirs(d.path); }}
+              onDoubleClick={() => { onChange(d.path); setOpen(false); }}
+              style={{
               padding: '10px 14px', fontSize: 15, color: '#d8d8e8', cursor: 'pointer',
               borderBottom: '1px solid #222238',
             }}
