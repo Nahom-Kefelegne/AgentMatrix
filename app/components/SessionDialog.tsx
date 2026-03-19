@@ -709,13 +709,50 @@ function ChangesViewer({ sessionId, sessionName, onClose }: {
   const [selectedFile, setSelectedFile] = useState<string | null>(null);
   const [diff, setDiff] = useState<{ original: string; current: string; isNew: boolean } | null>(null);
   const [loading, setLoading] = useState(true);
+  const [reverting, setReverting] = useState(false);
 
-  useEffect(() => {
+  const loadFiles = () => {
     fetch(`/api/sessions/changes?sessionId=${sessionId}`)
       .then(r => r.json())
       .then(data => { setFiles(data.files || []); setLoading(false); })
       .catch(() => setLoading(false));
-  }, [sessionId]);
+  };
+
+  useEffect(() => { loadFiles(); }, [sessionId]);
+
+  const handleRevertFile = async (filePath: string) => {
+    setReverting(true);
+    await fetch('/api/sessions/changes', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ sessionId, action: 'revert-file', file: filePath }),
+    });
+    if (selectedFile === filePath) { setSelectedFile(null); setDiff(null); }
+    loadFiles();
+    setReverting(false);
+  };
+
+  const handleRevertAll = async () => {
+    if (!confirm('Revert all changes? This will restore all files to their git HEAD state.')) return;
+    setReverting(true);
+    await fetch('/api/sessions/changes', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ sessionId, action: 'revert-all' }),
+    });
+    setSelectedFile(null); setDiff(null);
+    loadFiles();
+    setReverting(false);
+  };
+
+  const handleClearTracking = async () => {
+    await fetch('/api/sessions/changes', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ sessionId, action: 'clear-tracking' }),
+    });
+    setFiles([]); setSelectedFile(null); setDiff(null);
+  };
 
   useEffect(() => {
     if (!selectedFile) { setDiff(null); return; }
@@ -745,12 +782,28 @@ function ChangesViewer({ sessionId, sessionName, onClose }: {
         }}>
           <span style={{ fontSize: 16, fontWeight: 700, color: '#eee' }}>
             Changes by {sessionName}
+            {files.length > 0 && <span style={{ fontSize: 12, color: '#666', fontWeight: 400, marginLeft: 8 }}>({files.length} files)</span>}
           </span>
-          <button onClick={onClose} style={{
-            width: 28, height: 28, borderRadius: 6, border: '1px solid #2a2a3e',
-            background: '#1a1a2a', color: '#888', fontSize: 14,
-            display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer',
-          }}>x</button>
+          <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+            {files.length > 0 && (
+              <>
+                <button onClick={handleClearTracking} style={{
+                  padding: '5px 12px', borderRadius: 6, border: '1px solid #3a3a4e',
+                  background: 'transparent', color: '#888', fontSize: 12, cursor: 'pointer', fontFamily: 'inherit',
+                }}>Clear Tracking</button>
+                <button onClick={handleRevertAll} disabled={reverting} style={{
+                  padding: '5px 12px', borderRadius: 6, border: '1px solid #ff6b6b30',
+                  background: '#ff6b6b10', color: '#ff6b6b', fontSize: 12, fontWeight: 700,
+                  cursor: reverting ? 'wait' : 'pointer', fontFamily: 'inherit',
+                }}>{reverting ? 'Reverting...' : 'Revert All'}</button>
+              </>
+            )}
+            <button onClick={onClose} style={{
+              width: 28, height: 28, borderRadius: 6, border: '1px solid #2a2a3e',
+              background: '#1a1a2a', color: '#888', fontSize: 14,
+              display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer',
+            }}>x</button>
+          </div>
         </div>
 
         <div style={{ flex: 1, display: 'flex', minHeight: 0 }}>
@@ -778,10 +831,15 @@ function ChangesViewer({ sessionId, sessionName, onClose }: {
                     <div style={{ fontSize: 11, color: '#555', fontFamily: "'Courier New', monospace", marginTop: 2 }}>
                       {dir}
                     </div>
-                    <div style={{ display: 'flex', gap: 8, marginTop: 4, fontSize: 11 }}>
+                    <div style={{ display: 'flex', gap: 8, marginTop: 4, fontSize: 11, alignItems: 'center' }}>
                       <span style={{ color: statusColors[f.status] || '#888', fontWeight: 700 }}>{f.status}</span>
                       {f.additions > 0 && <span style={{ color: '#51cf66' }}>+{f.additions}</span>}
                       {f.deletions > 0 && <span style={{ color: '#ff6b6b' }}>-{f.deletions}</span>}
+                      <span style={{ flex: 1 }} />
+                      <button onClick={(e) => { e.stopPropagation(); handleRevertFile(f.path); }} style={{
+                        padding: '1px 6px', borderRadius: 4, border: '1px solid #ff6b6b30',
+                        background: 'transparent', color: '#ff6b6b', fontSize: 10, cursor: 'pointer', fontFamily: 'inherit',
+                      }}>Revert</button>
                     </div>
                   </div>
                 );

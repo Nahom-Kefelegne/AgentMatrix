@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { getSession } from '@/lib/state/sessionStore';
+import { getSession, updateSession } from '@/lib/state/sessionStore';
 import { execSync } from 'child_process';
 import { readFileSync, existsSync } from 'fs';
 import { dirname } from 'path';
@@ -101,6 +101,69 @@ export async function GET(request: Request) {
     });
   } catch (error: any) {
     console.error('[sessions/changes]', error);
+    return NextResponse.json({ error: error.message }, { status: 500 });
+  }
+}
+
+/**
+ * POST /api/sessions/changes — Revert changes
+ * Body: { sessionId, action: 'revert-file', file } — revert single file to HEAD
+ * Body: { sessionId, action: 'revert-all' } — revert all tracked files
+ * Body: { sessionId, action: 'clear-tracking' } — just clear the tracking list
+ */
+export async function POST(request: Request) {
+  try {
+    const { sessionId, action, file } = await request.json();
+
+    if (!sessionId) {
+      return NextResponse.json({ error: 'Missing sessionId' }, { status: 400 });
+    }
+
+    const session = getSession(sessionId);
+    if (!session) {
+      return NextResponse.json({ error: 'Session not found' }, { status: 404 });
+    }
+
+    if (action === 'clear-tracking') {
+      updateSession(sessionId, { filesModified: [] });
+      return NextResponse.json({ ok: true, message: 'Tracking cleared' });
+    }
+
+    if (action === 'revert-file' && file) {
+      try {
+        const dir = dirname(file);
+        const repoRoot = execSync('git rev-parse --show-toplevel', { cwd: dir, encoding: 'utf-8' }).trim();
+        const relativePath = file.replace(repoRoot + '/', '').replace(repoRoot + '\\', '');
+        execSync(`git checkout HEAD -- "${relativePath}"`, { cwd: repoRoot });
+        // Remove from tracking
+        const updated = (session.filesModified || []).filter((f: string) => f !== file);
+        updateSession(sessionId, { filesModified: updated });
+        return NextResponse.json({ ok: true, message: `Reverted ${relativePath}` });
+      } catch (err: any) {
+        return NextResponse.json({ error: `Revert failed: ${err.message}` }, { status: 500 });
+      }
+    }
+
+    if (action === 'revert-all') {
+      const files = session.filesModified || [];
+      const results: string[] = [];
+      for (const f of files) {
+        try {
+          const dir = dirname(f);
+          const repoRoot = execSync('git rev-parse --show-toplevel', { cwd: dir, encoding: 'utf-8' }).trim();
+          const relativePath = f.replace(repoRoot + '/', '').replace(repoRoot + '\\', '');
+          execSync(`git checkout HEAD -- "${relativePath}"`, { cwd: repoRoot });
+          results.push(`Reverted ${relativePath}`);
+        } catch {
+          results.push(`Failed to revert ${f}`);
+        }
+      }
+      updateSession(sessionId, { filesModified: [] });
+      return NextResponse.json({ ok: true, results });
+    }
+
+    return NextResponse.json({ error: 'Unknown action' }, { status: 400 });
+  } catch (error: any) {
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
 }
