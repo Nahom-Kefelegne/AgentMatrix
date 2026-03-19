@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useCallback, useRef } from 'react';
+import { useState, useCallback, useRef, useEffect } from 'react';
 import dynamic from 'next/dynamic';
 import type { CharacterData } from '@/lib/types';
 import { SocketProvider, useSocketContext } from './components/SocketProvider';
@@ -34,7 +34,25 @@ function OfficeView() {
   const [orchestratorViewId, setOrchestratorViewId] = useState<string | null>(null);
   const [showSettings, setShowSettings] = useState(false);
   const [viewMode, setViewMode] = useState<'office' | 'dashboard' | 'editor'>('dashboard');
+  const [editorUnlocked, setEditorUnlocked] = useState(false);
   const canvasRef = useRef<OfficeCanvasHandle>(null);
+
+  // Secret shortcut to unlock editor: Ctrl+Shift+Alt+3 (Windows) or Cmd+Shift+Option+3 (Mac)
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if (e.key === '3' && e.shiftKey && (e.ctrlKey || e.metaKey) && e.altKey) {
+        e.preventDefault();
+        setEditorUnlocked(prev => {
+          const next = !prev;
+          if (next) setViewMode('editor');
+          else if (viewMode === 'editor') setViewMode('dashboard');
+          return next;
+        });
+      }
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, [viewMode]);
 
   const handleHover = useCallback((char: CharacterData | null, screenX: number, screenY: number) => {
     setHoveredChar(char);
@@ -95,6 +113,7 @@ function OfficeView() {
         onSessionsClick={handleSessionsCycle}
         viewMode={viewMode}
         onViewChange={(mode) => setViewMode(mode)}
+        editorUnlocked={editorUnlocked}
       />
 
       {/* Office view — keep mounted to preserve canvas engine */}

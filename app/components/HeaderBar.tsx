@@ -14,6 +14,7 @@ interface HeaderBarProps {
   onNewSessionClick: () => void;
   viewMode: 'office' | 'dashboard' | 'editor';
   onViewChange: (mode: 'office' | 'dashboard' | 'editor') => void;
+  editorUnlocked?: boolean;
 }
 
 function HeaderButton({ onClick, label, title, badge }: {
@@ -54,7 +55,7 @@ function HeaderButton({ onClick, label, title, badge }: {
 
 export default function HeaderBar({
   connected, sessionCount, onSettingsClick, onSetupClick, onTasksClick, onResumeClick, onSessionsClick,
-  onNewSessionClick, viewMode, onViewChange,
+  onNewSessionClick, viewMode, onViewChange, editorUnlocked,
 }: HeaderBarProps) {
   const [menuOpen, setMenuOpen] = useState(false);
 
@@ -89,7 +90,7 @@ export default function HeaderBar({
         display: 'flex', background: '#1e1e30', border: '1px solid #3a3a4e',
         borderRadius: 6, padding: 2,
       }}>
-        {(['dashboard', 'office'] as const).map(mode => (
+        {([...(['dashboard', 'office'] as const), ...(editorUnlocked ? ['editor' as const] : [])]).map(mode => (
           <button
             key={mode}
             onClick={() => onViewChange(mode)}
@@ -101,7 +102,7 @@ export default function HeaderBar({
               cursor: 'pointer', fontFamily: 'inherit',
             }}
           >
-            {mode === 'dashboard' ? 'Dashboard' : 'Office'}
+            {mode === 'dashboard' ? 'Dashboard' : mode === 'office' ? 'Office' : 'Editor'}
           </button>
         ))}
       </div>
