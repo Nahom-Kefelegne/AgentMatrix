@@ -1,5 +1,4 @@
 # Agent Matrix Update Script (Windows PowerShell)
-# Pulls latest code and re-configures hooks with silent-fail support.
 
 $ErrorActionPreference = "Stop"
 
@@ -27,22 +26,16 @@ Write-Host "  Repo: $repoDir"
 Write-Host ""
 
 # Pull latest
-Write-Host "Pulling latest from main..." -ForegroundColor Blue
-git pull origin main
+Write-Host "Pulling latest..." -ForegroundColor Blue
+git pull
 Write-Host "  [OK] Code updated" -ForegroundColor Green
 Write-Host ""
 
-# Install dependencies
-Write-Host "Installing dependencies..." -ForegroundColor Blue
-npm install
-Write-Host "  [OK] Dependencies installed" -ForegroundColor Green
-Write-Host ""
-
-# Re-configure hooks with silent-fail support
+# Re-configure hooks
 $claudeDir = Join-Path $env:USERPROFILE ".claude"
 $settingsFile = Join-Path $claudeDir "settings.json"
 
-Write-Host "Updating Claude Code hooks (silent-fail when app not running)..." -ForegroundColor Blue
+Write-Host "Configuring hooks..." -ForegroundColor Blue
 
 if (-not (Test-Path $claudeDir)) {
     New-Item -ItemType Directory -Path $claudeDir -Force | Out-Null
@@ -64,17 +57,16 @@ const hooks = {
 };
 settings.hooks = { ...settings.hooks, ...hooks };
 fs.writeFileSync(path, JSON.stringify(settings, null, 2));
-console.log('Hooks updated successfully');
+console.log('Hooks configured');
 "@
 node -e $nodeScript
 
-Write-Host "  [OK] Hooks updated in $settingsFile" -ForegroundColor Green
+Write-Host "  [OK] Hooks configured" -ForegroundColor Green
 Write-Host ""
 
 Write-Host "  ================================" -ForegroundColor Green
 Write-Host "       Update complete!           " -ForegroundColor Green
 Write-Host "  ================================" -ForegroundColor Green
 Write-Host ""
-Write-Host "  Hooks now fail silently when Agent Matrix is not running." -ForegroundColor Cyan
-Write-Host "  Launch with: $repoDir\start.ps1" -ForegroundColor Blue
+Write-Host "  Run to launch: .\start.ps1" -ForegroundColor Blue
 Write-Host ""
