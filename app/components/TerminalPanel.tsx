@@ -102,7 +102,7 @@ export default function TerminalPanel({ sessionId, sessionName, cwd, visible, re
         try { terminal.loadAddon(new WebglAddon()); } catch {}
       }
 
-      fitAddon.fit();
+      try { fitAddon.fit(); } catch {}
 
       termRef.current = terminal;
       fitRef.current = fitAddon;
