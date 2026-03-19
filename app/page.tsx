@@ -37,10 +37,10 @@ function OfficeView() {
   const [editorUnlocked, setEditorUnlocked] = useState(false);
   const canvasRef = useRef<OfficeCanvasHandle>(null);
 
-  // Secret shortcut to unlock editor: Ctrl+Shift+Alt+3 (Windows) or Cmd+Shift+Option+3 (Mac)
+  // Secret shortcut to unlock editor: Ctrl+Shift+E (Windows) or Cmd+Shift+E (Mac)
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
-      if (e.key === '3' && e.shiftKey && (e.ctrlKey || e.metaKey) && e.altKey) {
+      if (e.code === 'KeyE' && e.shiftKey && (e.ctrlKey || e.metaKey)) {
         e.preventDefault();
         setEditorUnlocked(prev => {
           const next = !prev;
