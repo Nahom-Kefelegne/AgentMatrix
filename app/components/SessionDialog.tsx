@@ -786,17 +786,10 @@ function ChangesViewer({ sessionId, sessionName, onClose }: {
           </span>
           <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
             {files.length > 0 && (
-              <>
-                <button onClick={handleClearTracking} style={{
-                  padding: '5px 12px', borderRadius: 6, border: '1px solid #3a3a4e',
-                  background: 'transparent', color: '#888', fontSize: 12, cursor: 'pointer', fontFamily: 'inherit',
-                }}>Clear Tracking</button>
-                <button onClick={handleRevertAll} disabled={reverting} style={{
-                  padding: '5px 12px', borderRadius: 6, border: '1px solid #ff6b6b30',
-                  background: '#ff6b6b10', color: '#ff6b6b', fontSize: 12, fontWeight: 700,
-                  cursor: reverting ? 'wait' : 'pointer', fontFamily: 'inherit',
-                }}>{reverting ? 'Reverting...' : 'Revert All'}</button>
-              </>
+              <button onClick={handleClearTracking} style={{
+                padding: '5px 12px', borderRadius: 6, border: '1px solid #3a3a4e',
+                background: 'transparent', color: '#888', fontSize: 12, cursor: 'pointer', fontFamily: 'inherit',
+              }}>Clear Tracked Changes</button>
             )}
             <button onClick={onClose} style={{
               width: 28, height: 28, borderRadius: 6, border: '1px solid #2a2a3e',
@@ -835,11 +828,6 @@ function ChangesViewer({ sessionId, sessionName, onClose }: {
                       <span style={{ color: statusColors[f.status] || '#888', fontWeight: 700 }}>{f.status}</span>
                       {f.additions > 0 && <span style={{ color: '#51cf66' }}>+{f.additions}</span>}
                       {f.deletions > 0 && <span style={{ color: '#ff6b6b' }}>-{f.deletions}</span>}
-                      <span style={{ flex: 1 }} />
-                      <button onClick={(e) => { e.stopPropagation(); handleRevertFile(f.path); }} style={{
-                        padding: '1px 6px', borderRadius: 4, border: '1px solid #ff6b6b30',
-                        background: 'transparent', color: '#ff6b6b', fontSize: 10, cursor: 'pointer', fontFamily: 'inherit',
-                      }}>Revert</button>
                     </div>
                   </div>
                 );
