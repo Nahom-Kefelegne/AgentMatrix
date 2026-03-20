@@ -128,10 +128,13 @@ export default function TerminalPanel({ sessionId, sessionName, cwd, visible, re
             return false;
           }
           // Ctrl+Shift+V — paste from clipboard
-          if (e.type === 'keydown' && e.code === 'KeyV' && e.shiftKey && e.ctrlKey) {
-            navigator.clipboard.readText().then(text => {
-              if (text) socket.emit('terminal:input', { sessionId, data: text });
-            });
+          if (e.code === 'KeyV' && e.shiftKey && e.ctrlKey) {
+            if (e.type === 'keydown') {
+              e.preventDefault();
+              navigator.clipboard.readText().then(text => {
+                if (text) socket.emit('terminal:input', { sessionId, data: text });
+              });
+            }
             return false;
           }
           // Cmd+C on Mac — copy selection if text is selected, otherwise send SIGINT
