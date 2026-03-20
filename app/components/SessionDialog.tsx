@@ -606,8 +606,6 @@ export default function SessionDialog({
           display: readOnly ? 'none' : 'flex', alignItems: 'center', gap: 10, flexShrink: 0,
           background: '#0e0e16',
         }}>
-          <CopyButton text={cliCmd} label="Copy Resume Command" successLabel="Copied!" />
-
           <button onClick={() => setShowChanges(true)} style={{
             padding: '8px 16px', borderRadius: 6,
             border: '1px solid #4a9eff40', background: '#0e0e1a',
