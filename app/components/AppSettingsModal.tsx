@@ -2,6 +2,9 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import { useSocketContext } from './SocketProvider';
+import { cn } from '@/lib/utils';
+import { Button } from '@/components/ui/button';
+import { Modal, FormField, OptionGroup, OptionButton, TextArea, SelectInput } from './ui/Modal';
 
 interface AppSettings {
   autoResume: boolean;
@@ -41,6 +44,31 @@ const EFFORT_LEVELS = [
   { value: 'high', label: 'High' },
 ];
 
+function ToggleSetting({ label, description, checked, onChange }: {
+  label: string; description: string; checked: boolean; onChange: () => void;
+}) {
+  return (
+    <div className="flex items-start justify-between gap-4 py-3.5">
+      <div className="flex-1">
+        <div className="text-base font-semibold text-foreground mb-1">{label}</div>
+        <div className="text-sm text-muted-foreground leading-relaxed">{description}</div>
+      </div>
+      <button
+        onClick={onChange}
+        className={cn(
+          'w-12 h-[26px] rounded-full relative cursor-pointer shrink-0 mt-0.5 transition-colors duration-200',
+          checked ? 'bg-primary' : 'bg-muted',
+        )}
+      >
+        <div className={cn(
+          'size-5 rounded-full bg-white absolute top-[3px] transition-[left] duration-200',
+          checked ? 'left-[25px]' : 'left-[3px]',
+        )} />
+      </button>
+    </div>
+  );
+}
+
 export default function AppSettingsModal({ isOpen, onClose, onViewOrchestrator }: AppSettingsModalProps) {
   const { socketRef, connected } = useSocketContext();
   const [settings, setSettings] = useState<AppSettings>({
@@ -50,23 +78,19 @@ export default function AppSettingsModal({ isOpen, onClose, onViewOrchestrator }
   const [loaded, setLoaded] = useState(false);
   const [saving, setSaving] = useState(false);
   const [orchestratorId, setOrchestratorId] = useState<string | null>(null);
-  const [showOrchestrator, setShowOrchestrator] = useState(false);
 
-  // Get orchestrator ID from server
   useEffect(() => {
     const socket = socketRef.current;
     if (!socket || !connected) return;
     const handler = (data: { sessionId: string }) => setOrchestratorId(data.sessionId);
     socket.on('orchestrator:id' as any, handler);
-    // Request it now in case we missed the initial emit
     socket.emit('orchestrator:get-id' as any);
     return () => { socket.off('orchestrator:id' as any, handler); };
   }, [socketRef, connected]);
 
   useEffect(() => {
     if (isOpen && !loaded) {
-      fetch('/api/settings')
-        .then(r => r.json())
+      fetch('/api/settings').then(r => r.json())
         .then(data => { setSettings(data); setLoaded(true); })
         .catch(() => setLoaded(true));
     }
@@ -76,269 +100,116 @@ export default function AppSettingsModal({ isOpen, onClose, onViewOrchestrator }
     const updated = { ...settings, ...partial };
     setSettings(updated);
     setSaving(true);
-    await fetch('/api/settings', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(partial),
-    }).catch(() => {});
+    await fetch('/api/settings', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(partial) }).catch(() => {});
     setSaving(false);
   }, [settings]);
 
-  if (!isOpen) return null;
-
   return (
-    <>
-      <div onClick={onClose} style={{
-        position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', zIndex: 58,
-      }} />
-      <div style={{
-        position: 'fixed', top: '50%', left: '50%', transform: 'translate(-50%, -50%)',
-        width: 520, maxHeight: '85vh', background: '#111118', border: '1px solid #222235',
-        borderRadius: 14, zIndex: 59, display: 'flex', flexDirection: 'column',
-        overflow: 'hidden', boxShadow: '0 20px 60px rgba(0,0,0,0.5)',
-      }}>
-        <div style={{
-          padding: '20px 24px', borderBottom: '1px solid #1e1e30',
-          display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-          flexShrink: 0,
-        }}>
-          <span style={{ fontSize: 20, fontWeight: 700, color: '#eee' }}>Settings</span>
-          <button onClick={onClose} style={{
-            width: 36, height: 36, borderRadius: 8, border: '1px solid #3a3a4e',
-            background: '#1e1e30', color: '#ccc', fontSize: 18,
-            display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer',
-          }}>✕</button>
-        </div>
-
-        <div style={{ flex: 1, overflowY: 'auto', padding: '20px 24px' }}>
-          {/* Auto Resume */}
-          <ToggleSetting
-            label="Auto-resume sessions"
-            description="Resume all active sessions when the app starts."
-            checked={settings.autoResume}
-            onChange={() => save({ autoResume: !settings.autoResume })}
-          />
-
-          <Divider />
-
-          {/* Default Model */}
-          <SelectSetting
-            label="Default model"
-            description="Model used for new sessions unless overridden."
-            value={settings.defaultModel}
-            options={MODELS}
-            onChange={(v) => save({ defaultModel: v })}
-          />
-
-          <Divider />
-
-          {/* Default Permission Mode */}
-          <div style={{ padding: '14px 0' }}>
-            <div style={{ fontSize: 16, fontWeight: 600, color: '#eee', marginBottom: 4 }}>
-              Default permission mode
-            </div>
-            <div style={{ fontSize: 14, color: '#888', marginBottom: 10 }}>
-              Permission mode for new sessions.
-            </div>
-            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-              {PERMISSION_MODES.map(pm => (
-                <button
-                  key={pm.value}
-                  onClick={() => save({ defaultPermissionMode: pm.value })}
-                  title={pm.desc}
-                  style={{
-                    padding: '6px 14px', borderRadius: 6, fontSize: 13, fontWeight: 600,
-                    border: settings.defaultPermissionMode === pm.value ? '1px solid #4a9eff' : '1px solid #2a2a3e',
-                    background: settings.defaultPermissionMode === pm.value ? '#152540' : '#1a1a2a',
-                    color: settings.defaultPermissionMode === pm.value ? '#7aafff' : '#888',
-                    cursor: 'pointer', fontFamily: 'inherit',
-                  }}
-                >
-                  {pm.label}
-                </button>
-              ))}
-            </div>
-          </div>
-
-          <Divider />
-
-          {/* Default Effort */}
-          <div style={{ padding: '14px 0' }}>
-            <div style={{ fontSize: 16, fontWeight: 600, color: '#eee', marginBottom: 4 }}>
-              Default effort level
-            </div>
-            <div style={{ fontSize: 14, color: '#888', marginBottom: 10 }}>
-              Effort level for new sessions.
-            </div>
-            <div style={{ display: 'flex', gap: 6 }}>
-              {EFFORT_LEVELS.map(e => (
-                <button
-                  key={e.value}
-                  onClick={() => save({ defaultEffort: e.value })}
-                  style={{
-                    padding: '6px 14px', borderRadius: 6, fontSize: 13, fontWeight: 600,
-                    border: settings.defaultEffort === e.value ? '1px solid #4a9eff' : '1px solid #2a2a3e',
-                    background: settings.defaultEffort === e.value ? '#152540' : '#1a1a2a',
-                    color: settings.defaultEffort === e.value ? '#7aafff' : '#888',
-                    cursor: 'pointer', fontFamily: 'inherit',
-                  }}
-                >
-                  {e.label}
-                </button>
-              ))}
-            </div>
-          </div>
-
-          <Divider />
-
-          {/* Append System Prompt */}
-          <div style={{ padding: '14px 0' }}>
-            <div style={{ fontSize: 16, fontWeight: 600, color: '#eee', marginBottom: 4 }}>
-              Append to system prompt
-            </div>
-            <div style={{ fontSize: 14, color: '#888', marginBottom: 10 }}>
-              Additional instructions appended to Claude&apos;s default system prompt for all new sessions.
-            </div>
-            <textarea
-              value={settings.appendSystemPrompt}
-              onChange={e => setSettings({ ...settings, appendSystemPrompt: e.target.value })}
-              onBlur={() => save({ appendSystemPrompt: settings.appendSystemPrompt })}
-              placeholder="e.g. Always write tests. Use TypeScript. Follow our team conventions..."
-              rows={4}
-              style={{
-                width: '100%', background: '#1a1a2a', border: '1px solid #2a2a3e',
-                color: '#eee', borderRadius: 8, padding: '10px 14px', fontSize: 14,
-                fontFamily: 'inherit', resize: 'vertical', lineHeight: 1.5,
-              }}
-            />
-          </div>
-
-          <Divider />
-
-          {/* Orchestrator */}
-          <div style={{ padding: '14px 0' }}>
-            <div style={{ fontSize: 16, fontWeight: 600, color: '#eee', marginBottom: 4 }}>
-              Orchestrator Session
-            </div>
-            <div style={{ fontSize: 14, color: '#888', marginBottom: 10 }}>
-              Internal Claude session used for deep search and app tasks. View its terminal (read-only).
-            </div>
-            <div style={{ display: 'flex', gap: 8 }}>
-              <button
-                onClick={() => {
-                  if (orchestratorId && onViewOrchestrator) {
-                    onClose();
-                    onViewOrchestrator(orchestratorId);
-                  }
-                }}
-                disabled={!orchestratorId}
-                style={{
-                  padding: '8px 16px', borderRadius: 6,
-                  border: '1px solid #2a2a3e',
-                  background: orchestratorId ? '#1a1a2a' : '#151520',
-                  color: orchestratorId ? '#4a9eff' : '#555',
-                  fontSize: 14, fontWeight: 600, cursor: orchestratorId ? 'pointer' : 'default',
-                  fontFamily: 'inherit',
-                }}
-              >
-                {orchestratorId ? 'View Orchestrator' : 'Not running'}
-              </button>
-              <button
-                onClick={() => {
-                  if (!confirm('This will kill the current orchestrator session and start a fresh one. All orchestrator context will be lost. Continue?')) return;
-                  const socket = socketRef.current;
-                  if (socket) {
-                    socket.emit('orchestrator:reset' as any);
-                  }
-                }}
-                disabled={!orchestratorId}
-                style={{
-                  padding: '8px 16px', borderRadius: 6,
-                  border: '1px solid #ff6b6b30',
-                  background: '#1a0e0e',
-                  color: orchestratorId ? '#ff6b6b' : '#555',
-                  fontSize: 14, fontWeight: 600, cursor: orchestratorId ? 'pointer' : 'default',
-                  fontFamily: 'inherit',
-                }}
-              >
-                Reset
-              </button>
-            </div>
-            {orchestratorId && (
-              <div style={{ fontSize: 12, color: '#555', marginTop: 6, fontFamily: "'Courier New', monospace" }}>
-                {orchestratorId.slice(0, 12)}...
-              </div>
-            )}
-          </div>
-        </div>
-
-        {/* Footer */}
-        <div style={{
-          padding: '12px 24px', borderTop: '1px solid #1e1e30',
-          background: '#0e0e16', flexShrink: 0,
-          display: 'flex', justifyContent: 'flex-end',
-        }}>
-          <span style={{ fontSize: 13, color: saving ? '#4a9eff' : '#555' }}>
+    <Modal
+      isOpen={isOpen}
+      onClose={onClose}
+      title="Settings"
+      width="max-w-[520px]"
+      footer={
+        <div className="flex justify-end">
+          <span className={cn('text-sm', saving ? 'text-primary' : 'text-muted-foreground')}>
             {saving ? 'Saving...' : 'Auto-saved'}
           </span>
         </div>
+      }
+    >
+      <ToggleSetting
+        label="Auto-resume sessions"
+        description="Resume all active sessions when the app starts."
+        checked={settings.autoResume}
+        onChange={() => save({ autoResume: !settings.autoResume })}
+      />
+
+      <div className="border-b border-border/50 my-1" />
+
+      <FormField label="Default model">
+        <div className="text-sm text-muted-foreground mb-2">Model used for new sessions unless overridden.</div>
+        <SelectInput value={settings.defaultModel} onChange={v => save({ defaultModel: v })} options={MODELS} />
+      </FormField>
+
+      <div className="border-b border-border/50 my-1" />
+
+      <FormField label="Default permission mode">
+        <div className="text-sm text-muted-foreground mb-2">Permission mode for new sessions.</div>
+        <OptionGroup>
+          {PERMISSION_MODES.map(pm => (
+            <OptionButton key={pm.value} selected={settings.defaultPermissionMode === pm.value} onClick={() => save({ defaultPermissionMode: pm.value })} title={pm.desc}>
+              {pm.label}
+            </OptionButton>
+          ))}
+        </OptionGroup>
+      </FormField>
+
+      <div className="border-b border-border/50 my-1" />
+
+      <FormField label="Default effort level">
+        <div className="text-sm text-muted-foreground mb-2">Effort level for new sessions.</div>
+        <OptionGroup>
+          {EFFORT_LEVELS.map(e => (
+            <OptionButton key={e.value} selected={settings.defaultEffort === e.value} onClick={() => save({ defaultEffort: e.value })}>
+              {e.label}
+            </OptionButton>
+          ))}
+        </OptionGroup>
+      </FormField>
+
+      <div className="border-b border-border/50 my-1" />
+
+      <FormField label="Append to system prompt">
+        <div className="text-sm text-muted-foreground mb-2">
+          Additional instructions appended to Claude&apos;s default system prompt for all new sessions.
+        </div>
+        <TextArea
+          value={settings.appendSystemPrompt}
+          onChange={v => setSettings({ ...settings, appendSystemPrompt: v })}
+          placeholder="e.g. Always write tests. Use TypeScript..."
+          rows={4}
+        />
+        <Button variant="outline" size="sm" className="mt-2" onClick={() => save({ appendSystemPrompt: settings.appendSystemPrompt })}>
+          Save prompt
+        </Button>
+      </FormField>
+
+      <div className="border-b border-border/50 my-1" />
+
+      {/* Orchestrator */}
+      <div className="py-3.5">
+        <div className="text-base font-semibold text-foreground mb-1">Orchestrator Session</div>
+        <div className="text-sm text-muted-foreground mb-3">
+          Internal Claude session used for deep search and app tasks.
+        </div>
+        <div className="flex gap-2">
+          <Button
+            variant="outline"
+            size="sm"
+            disabled={!orchestratorId}
+            onClick={() => {
+              if (orchestratorId && onViewOrchestrator) { onClose(); onViewOrchestrator(orchestratorId); }
+            }}
+          >
+            {orchestratorId ? 'View Orchestrator' : 'Not running'}
+          </Button>
+          <Button
+            variant="destructive"
+            size="sm"
+            disabled={!orchestratorId}
+            onClick={() => {
+              if (!confirm('Reset orchestrator? All context will be lost.')) return;
+              socketRef.current?.emit('orchestrator:reset' as any);
+            }}
+          >
+            Reset
+          </Button>
+        </div>
+        {orchestratorId && (
+          <div className="text-xs text-muted-foreground mt-2 font-mono">{orchestratorId.slice(0, 12)}...</div>
+        )}
       </div>
-    </>
+    </Modal>
   );
-}
-
-function ToggleSetting({ label, description, checked, onChange }: {
-  label: string; description: string; checked: boolean; onChange: () => void;
-}) {
-  return (
-    <div style={{
-      display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between',
-      padding: '14px 0', gap: 16,
-    }}>
-      <div style={{ flex: 1 }}>
-        <div style={{ fontSize: 16, fontWeight: 600, color: '#eee', marginBottom: 4 }}>{label}</div>
-        <div style={{ fontSize: 14, color: '#888', lineHeight: 1.5 }}>{description}</div>
-      </div>
-      <button onClick={onChange} style={{
-        width: 48, height: 26, borderRadius: 13, border: 'none',
-        background: checked ? '#4a9eff' : '#2a2a3e',
-        position: 'relative', cursor: 'pointer', flexShrink: 0,
-        transition: 'background 0.2s', marginTop: 2,
-      }}>
-        <div style={{
-          width: 20, height: 20, borderRadius: '50%', background: '#fff',
-          position: 'absolute', top: 3,
-          left: checked ? 25 : 3, transition: 'left 0.2s',
-        }} />
-      </button>
-    </div>
-  );
-}
-
-function SelectSetting({ label, description, value, options, onChange }: {
-  label: string; description: string; value: string;
-  options: { value: string; label: string }[];
-  onChange: (value: string) => void;
-}) {
-  return (
-    <div style={{ padding: '14px 0' }}>
-      <div style={{ fontSize: 16, fontWeight: 600, color: '#eee', marginBottom: 4 }}>{label}</div>
-      <div style={{ fontSize: 14, color: '#888', marginBottom: 10 }}>{description}</div>
-      <select
-        value={value}
-        onChange={e => onChange(e.target.value)}
-        style={{
-          width: '100%', background: '#1a1a2a', border: '1px solid #2a2a3e',
-          color: '#eee', borderRadius: 8, padding: '10px 14px', fontSize: 15,
-          fontFamily: 'inherit',
-        }}
-      >
-        {options.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
-      </select>
-    </div>
-  );
-}
-
-function Divider() {
-  return <div style={{ borderBottom: '1px solid #1e1e30' }} />;
 }

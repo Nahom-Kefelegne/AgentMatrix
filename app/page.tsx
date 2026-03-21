@@ -4,6 +4,7 @@ import { useState, useCallback, useRef, useEffect } from 'react';
 import dynamic from 'next/dynamic';
 import type { CharacterData } from '@/lib/types';
 import { SocketProvider, useSocketContext } from './components/SocketProvider';
+import { ThemeProvider } from './components/ThemeProvider';
 import HeaderBar from './components/HeaderBar';
 import OfficeCanvas from './components/OfficeCanvas';
 import type { OfficeCanvasHandle } from './components/OfficeCanvas';
@@ -17,7 +18,6 @@ import SpawnModal from './components/SpawnModal';
 import AppSettingsModal from './components/AppSettingsModal';
 import SplashScreen from './components/SplashScreen';
 
-// Lazy-load the editor to avoid loading Monaco until needed
 const EditorView = dynamic(() => import('./components/editor/EditorView'), { ssr: false });
 
 function OfficeView() {
@@ -37,7 +37,6 @@ function OfficeView() {
   const [editorUnlocked, setEditorUnlocked] = useState(false);
   const canvasRef = useRef<OfficeCanvasHandle>(null);
 
-  // Secret shortcut to unlock editor: Ctrl+Shift+E (Windows) or Cmd+Shift+E (Mac)
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       if (e.code === 'KeyE' && e.shiftKey && (e.ctrlKey || e.metaKey)) {
@@ -61,9 +60,7 @@ function OfficeView() {
 
   const handleClick = useCallback((char: CharacterData | null) => {
     if (!char) { setSelectedSessionId(null); return; }
-    // Agents open their parent session dialog
     if (char.isAgent) {
-      // Find which session has this agent
       for (const [sid, s] of sessions) {
         if (s.agents?.some(a => a.id === char.id || a.name === char.name)) {
           setSelectedSessionId(sid);
@@ -74,9 +71,7 @@ function OfficeView() {
     setSelectedSessionId(char.id);
   }, [sessions]);
 
-  const handleCloseDialog = useCallback(() => {
-    setSelectedSessionId(null);
-  }, []);
+  const handleCloseDialog = useCallback(() => setSelectedSessionId(null), []);
 
   const sessionList = Array.from(sessions.values());
   const currentSessionIndex = selectedSessionId
@@ -131,18 +126,12 @@ function OfficeView() {
         <HoverCard character={hoveredChar} x={hoverPos.x} y={hoverPos.y} />
       </div>
 
-      {/* Dashboard view */}
       {viewMode === 'dashboard' && (
-        <DashboardView
-          sessions={sessions}
-          onSelectSession={(id) => setSelectedSessionId(id)}
-        />
+        <DashboardView sessions={sessions} onSelectSession={(id) => setSelectedSessionId(id)} />
       )}
 
-      {/* Editor view */}
       {viewMode === 'editor' && <EditorView />}
 
-      {/* Session dialog */}
       <SessionDialog
         sessionId={selectedSessionId}
         sessions={sessions}
@@ -155,65 +144,22 @@ function OfficeView() {
         sessionTotal={sessionList.length}
       />
 
-      <SetupModal
-        isOpen={showSetup}
-        onClose={() => setShowSetup(false)}
-        connected={connected}
-        sessionCount={sessions.size}
-      />
-      <TaskBoard
-        isOpen={showTaskBoard}
-        onClose={() => { setShowTaskBoard(false); setOpenTaskId(null); }}
-        onOpenSession={(id) => setSelectedSessionId(id)}
-        initialTaskId={openTaskId}
-      />
-      <ResumeModal
-        isOpen={showResume}
-        onClose={() => setShowResume(false)}
-        onResumeInApp={(sid) => {
-          setSelectedSessionId(sid);
-          const socket = socketRef?.current;
-          if (socket) socket.emit('terminal:resume' as any, { sessionId: sid });
-        }}
-      />
-      <SpawnModal
-        isOpen={showSpawn}
-        onClose={() => setShowSpawn(false)}
-        onSessionSpawned={(sid) => setSelectedSessionId(sid)}
-      />
-      <AppSettingsModal
-        isOpen={showSettings}
-        onClose={() => setShowSettings(false)}
-        onViewOrchestrator={(id) => setOrchestratorViewId(id)}
-      />
+      <SetupModal isOpen={showSetup} onClose={() => setShowSetup(false)} connected={connected} sessionCount={sessions.size} />
+      <TaskBoard isOpen={showTaskBoard} onClose={() => { setShowTaskBoard(false); setOpenTaskId(null); }} onOpenSession={(id) => setSelectedSessionId(id)} initialTaskId={openTaskId} />
+      <ResumeModal isOpen={showResume} onClose={() => setShowResume(false)} onResumeInApp={(sid) => { setSelectedSessionId(sid); socketRef?.current?.emit('terminal:resume' as any, { sessionId: sid }); }} />
+      <SpawnModal isOpen={showSpawn} onClose={() => setShowSpawn(false)} onSessionSpawned={(sid) => setSelectedSessionId(sid)} />
+      <AppSettingsModal isOpen={showSettings} onClose={() => setShowSettings(false)} onViewOrchestrator={(id) => setOrchestratorViewId(id)} />
 
-      {/* Orchestrator viewer — uses SessionDialog in read-only mode */}
       {orchestratorViewId && (() => {
-        // Create a synthetic sessions map with the orchestrator entry
         const orchSessions = new Map(sessions);
         if (!orchSessions.has(orchestratorViewId)) {
           orchSessions.set(orchestratorViewId, {
-            id: orchestratorViewId,
-            name: 'Orchestrator',
-            color: '#cc5de8',
-            status: 'idle',
-            deskIndex: -1,
-            deskPosition: { x: 0, y: 0 },
-            spawnPosition: { x: 0, y: 0 },
-            recentActions: [],
-            agents: [],
-            cwd: undefined,
-            createdAt: Date.now(),
+            id: orchestratorViewId, name: 'Orchestrator', color: '#cc5de8', status: 'idle',
+            deskIndex: -1, deskPosition: { x: 0, y: 0 }, spawnPosition: { x: 0, y: 0 },
+            recentActions: [], agents: [], cwd: undefined, createdAt: Date.now(),
           });
         }
-        return (
-          <SessionDialog
-            sessionId={orchestratorViewId}
-            sessions={orchSessions}
-            onClose={() => setOrchestratorViewId(null)}
-            readOnly
-          />
-        );
+        return <SessionDialog sessionId={orchestratorViewId} sessions={orchSessions} onClose={() => setOrchestratorViewId(null)} readOnly />;
       })()}
     </>
   );
@@ -221,10 +167,12 @@ function OfficeView() {
 
 export default function Home() {
   return (
-    <SocketProvider>
-      <SplashScreen>
-        <OfficeView />
-      </SplashScreen>
-    </SocketProvider>
+    <ThemeProvider>
+      <SocketProvider>
+        <SplashScreen>
+          <OfficeView />
+        </SplashScreen>
+      </SocketProvider>
+    </ThemeProvider>
   );
 }

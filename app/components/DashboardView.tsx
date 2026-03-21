@@ -6,12 +6,9 @@ import type { SessionData } from '@/lib/types';
 import { useSocketContext } from './SocketProvider';
 import ContextBar from './ContextBar';
 import { useSessionContext } from '@/lib/hooks/useSessionContext';
-
-const STATUS: Record<string, { color: string; label: string }> = {
-  idle: { color: '#888', label: 'Idle' },
-  working: { color: '#51cf66', label: 'Working' },
-  meeting: { color: '#4a9eff', label: 'In Meeting' },
-};
+import { cn } from '@/lib/utils';
+import { StatusIndicator } from '@/components/ui/status-indicator';
+import { Button } from '@/components/ui/button';
 
 function ago(ts: number): string {
   const d = Math.floor((Date.now() - ts) / 1000);
@@ -25,6 +22,13 @@ interface Props {
   sessions: Map<string, SessionData>;
   onSelectSession: (id: string) => void;
 }
+
+const FILTERS = [
+  { key: 'all', label: 'All Sessions' },
+  { key: 'working', label: 'Working' },
+  { key: 'idle', label: 'Idle' },
+  { key: 'meeting', label: 'Meeting' },
+] as const;
 
 export default function DashboardView({ sessions, onSelectSession }: Props) {
   const { socketRef, connected } = useSocketContext();
@@ -42,73 +46,92 @@ export default function DashboardView({ sessions, onSelectSession }: Props) {
     meeting: all.filter(s => s.status === 'meeting').length,
   };
 
-  const filters = [
-    { key: 'all', label: 'All Sessions' },
-    { key: 'working', label: 'Working' },
-    { key: 'idle', label: 'Idle' },
-    { key: 'meeting', label: 'Meeting' },
-  ].filter(f => f.key === 'all' || counts[f.key] > 0);
+  const visibleFilters = FILTERS.filter(f => f.key === 'all' || counts[f.key] > 0);
 
   return (
-    <div
-      style={{ marginTop: 'var(--header-height)', height: 'calc(100vh - var(--header-height))', background: '#08080f' }}
-      className="overflow-y-auto"
-    >
-      <div style={{ maxWidth: 1100, margin: '0 auto', padding: '32px 40px 48px' }}>
+    <div className="mt-[var(--header-height)] h-[calc(100vh-var(--header-height))] bg-background overflow-y-auto">
+      <div className="max-w-[1100px] mx-auto px-10 pt-8 pb-12">
         {/* Filter bar */}
-        <motion.div initial={{ opacity: 0, y: -8 }} animate={{ opacity: 1, y: 0 }} style={{ display: 'flex', gap: 10, marginBottom: 28 }}>
-          {filters.map(f => {
-            const active = filter === f.key;
-            const meta = STATUS[f.key];
-            const c = meta?.color || '#4a9eff';
-            return (
-              <motion.button key={f.key} whileHover={{ scale: 1.03 }} whileTap={{ scale: 0.97 }}
-                onClick={() => setFilter(f.key)}
-                style={{
-                  padding: '8px 20px', borderRadius: 24, fontSize: 14, fontWeight: 600,
-                  fontFamily: 'inherit', cursor: 'pointer',
-                  border: active ? `1.5px solid ${c}40` : '1.5px solid #1a1a28',
-                  background: active ? `${c}10` : '#0e0e18',
-                  color: active ? c : '#666', transition: 'all 0.15s',
-                }}
-              >
-                {f.label}
-                <span style={{
-                  marginLeft: 8, fontSize: 12, fontWeight: 700, padding: '2px 8px', borderRadius: 12,
-                  background: active ? `${c}18` : '#151520', color: active ? c : '#444',
-                }}>{counts[f.key]}</span>
-              </motion.button>
-            );
-          })}
+        <motion.div
+          initial={{ opacity: 0, y: -8 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="flex gap-2 mb-7"
+        >
+          {visibleFilters.map(f => (
+            <button
+              key={f.key}
+              onClick={() => setFilter(f.key)}
+              className={cn(
+                'px-5 py-2 rounded-full text-sm font-semibold cursor-pointer',
+                'border transition-all duration-200',
+                filter === f.key
+                  ? 'bg-primary/10 border-primary/30 text-primary'
+                  : 'bg-glass-bg border-glass-border text-muted-foreground hover:text-foreground hover:border-foreground/15',
+              )}
+            >
+              {f.label}
+              <span className={cn(
+                'ml-2 text-xs font-bold px-2 py-0.5 rounded-full',
+                filter === f.key
+                  ? 'bg-primary/15 text-primary'
+                  : 'bg-muted text-muted-foreground',
+              )}>
+                {counts[f.key]}
+              </span>
+            </button>
+          ))}
         </motion.div>
 
         {/* Cards */}
         {list.length === 0 ? (
-          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }}
-            style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '120px 0', gap: 16 }}>
-            <div style={{ fontSize: 56, opacity: 0.08 }}>&#11044;</div>
-            <div style={{ fontSize: 18, color: '#666' }}>{all.length === 0 ? 'No sessions yet' : 'No sessions match filter'}</div>
-            <div style={{ fontSize: 14, color: '#444' }}>Click <strong style={{ color: '#4a9eff' }}>+ New</strong> to launch a session</div>
-          </motion.div>
+          <EmptyState hasAny={all.length > 0} />
         ) : (
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(480px, 1fr))', gap: 20 }}>
+          <div className="grid grid-cols-[repeat(auto-fill,minmax(460px,1fr))] gap-5">
             <AnimatePresence mode="popLayout">
-              {list.map((s, i) => <SessionCard key={s.id} s={s} i={i} contextUsage={contextMap[s.id] ?? null} onClick={() => onSelectSession(s.id)} socketRef={socketRef} />)}
+              {list.map((s, i) => (
+                <SessionCard
+                  key={s.id}
+                  s={s}
+                  i={i}
+                  contextUsage={contextMap[s.id] ?? null}
+                  onClick={() => onSelectSession(s.id)}
+                  socketRef={socketRef}
+                />
+              ))}
             </AnimatePresence>
           </div>
         )}
       </div>
-
-      <style>{`
-        @keyframes cardShimmer { 0%{background-position:-200% 0} 100%{background-position:200% 0} }
-        @keyframes statusPulse { 0%,100%{opacity:.4;transform:scale(.8)} 50%{opacity:1;transform:scale(1.25)} }
-      `}</style>
     </div>
   );
 }
 
-function SessionCard({ s, i, contextUsage, onClick, socketRef }: { s: SessionData; i: number; contextUsage: number | null; onClick: () => void; socketRef: React.RefObject<any> }) {
-  const meta = STATUS[s.status] || STATUS.idle;
+function EmptyState({ hasAny }: { hasAny: boolean }) {
+  return (
+    <motion.div
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      className="flex flex-col items-center justify-center py-28 gap-4"
+    >
+      <div className="size-16 rounded-full bg-muted/50 flex items-center justify-center">
+        <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" className="text-muted-foreground/40">
+          <circle cx="12" cy="12" r="10"/><path d="M12 8v4M12 16h.01"/>
+        </svg>
+      </div>
+      <div className="text-lg text-muted-foreground">
+        {hasAny ? 'No sessions match filter' : 'No sessions yet'}
+      </div>
+      <div className="text-sm text-muted-foreground/60">
+        Click <span className="text-primary font-semibold">+ New</span> to launch a session
+      </div>
+    </motion.div>
+  );
+}
+
+function SessionCard({ s, i, contextUsage, onClick, socketRef }: {
+  s: SessionData; i: number; contextUsage: number | null;
+  onClick: () => void; socketRef: React.RefObject<any>;
+}) {
   const working = s.status === 'working';
   const actions = s.recentActions.slice(0, 4);
   const [summaryRequested, setSummaryRequested] = useState(false);
@@ -124,133 +147,129 @@ function SessionCard({ s, i, contextUsage, onClick, socketRef }: { s: SessionDat
   }, [socketRef, s.id]);
 
   return (
-    <motion.div layout
-      initial={{ opacity: 0, y: 24, scale: 0.97 }}
+    <motion.div
+      layout
+      initial={{ opacity: 0, y: 20, scale: 0.97 }}
       animate={{ opacity: 1, y: 0, scale: 1 }}
       exit={{ opacity: 0, scale: 0.95 }}
-      transition={{ duration: 0.35, delay: i * 0.05, type: 'spring', stiffness: 240, damping: 22 }}
-      whileHover={{ y: -5, transition: { duration: 0.12 } }}
+      transition={{ duration: 0.3, delay: i * 0.04, type: 'spring', stiffness: 260, damping: 24 }}
+      whileHover={{ y: -4, transition: { duration: 0.15 } }}
       onClick={onClick}
-      style={{
-        cursor: 'pointer', borderRadius: 16, overflow: 'hidden', background: '#111120',
-        border: '1px solid #1e1e30', position: 'relative', transition: 'border-color 0.15s',
-      }}
-      onMouseEnter={e => (e.currentTarget.style.borderColor = '#2a2a45')}
-      onMouseLeave={e => (e.currentTarget.style.borderColor = '#1e1e30')}
+      className={cn(
+        'cursor-pointer rounded-2xl overflow-hidden relative group',
+        'bg-card border border-border/60',
+        'hover:border-border hover:shadow-lg',
+        'transition-[border-color,box-shadow] duration-200',
+      )}
     >
       {/* Accent bar */}
-      <div style={{ height: 3, background: `linear-gradient(90deg, ${meta.color}, ${meta.color}66)`, opacity: working ? 1 : 0.3 }} />
+      <div className={cn(
+        'h-[3px]',
+        working ? 'bg-status-working' : s.status === 'meeting' ? 'bg-status-meeting' : 'bg-status-idle',
+        !working && 'opacity-30',
+      )} />
       {working && (
-        <div style={{
-          position: 'absolute', top: 0, left: 0, right: 0, height: 3,
-          background: 'linear-gradient(90deg, transparent, rgba(255,255,255,.4), transparent)',
-          backgroundSize: '200% 100%', animation: 'cardShimmer 2s ease-in-out infinite',
-        }} />
+        <div
+          className="absolute top-0 inset-x-0 h-[3px]"
+          style={{
+            background: 'linear-gradient(90deg, transparent, var(--foreground, white) 50%, transparent)',
+            opacity: 0.2,
+            backgroundSize: '200% 100%',
+            animation: 'shimmer 2s ease-in-out infinite',
+          }}
+        />
       )}
 
-      <div style={{ padding: '20px 24px 22px' }}>
+      <div className="p-5">
         {/* Name + Status */}
-        <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 16, marginBottom: 12 }}>
-          <div style={{ flex: 1, minWidth: 0 }}>
-            <div style={{ fontSize: 20, fontWeight: 700, color: '#eee', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-              {s.name}
-            </div>
+        <div className="flex items-start justify-between gap-4 mb-3">
+          <div className="flex-1 min-w-0">
+            <div className="text-lg font-bold text-foreground truncate">{s.name}</div>
             {s.cwd && (
-              <div style={{ fontSize: 13, color: '#555', marginTop: 4, fontFamily: "'Courier New', monospace", whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                {s.cwd}
-              </div>
+              <div className="text-xs text-muted-foreground mt-1 font-mono truncate">{s.cwd}</div>
             )}
           </div>
-          <div style={{
-            display: 'flex', alignItems: 'center', gap: 7, padding: '5px 14px', borderRadius: 10,
-            background: `${meta.color}0c`, border: `1px solid ${meta.color}20`, flexShrink: 0,
-          }}>
-            <div style={{
-              width: 8, height: 8, borderRadius: '50%', backgroundColor: meta.color,
-              animation: working ? 'statusPulse 1.5s ease-in-out infinite' : 'none',
-            }} />
-            <span style={{ fontSize: 13, fontWeight: 600, color: meta.color }}>{meta.label}</span>
-          </div>
+          <StatusIndicator status={s.status as any} size="sm" />
         </div>
 
         {/* Context bar */}
         {contextUsage !== null && (
-          <div style={{ marginBottom: 14 }}>
+          <div className="mb-3.5">
             <ContextBar usage={contextUsage} compact />
           </div>
         )}
 
         {/* Stats */}
-        <div style={{ display: 'flex', gap: 12, marginBottom: 14 }}>
+        <div className="flex gap-2.5 mb-3.5">
           <StatChip label="Session ID" value={s.id.slice(0, 8) + '...'} />
           {s.lastActivity && <StatChip label="Last Active" value={ago(s.lastActivity)} />}
-          {s.agents && s.agents.length > 0 && <StatChip label="Agents" value={`${s.agents.length} active`} accent />}
+          {s.agents && s.agents.length > 0 && (
+            <StatChip label="Agents" value={`${s.agents.length} active`} accent />
+          )}
         </div>
 
-        {/* Tool summary */}
+        {/* Current work indicator */}
         {working && s.lastToolSummary && (
-          <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }}
-            style={{
-              padding: '10px 14px', borderRadius: 10, marginBottom: 14,
-              background: 'rgba(18, 35, 65, 0.5)', border: '1px solid rgba(74, 158, 255, 0.12)',
-            }}>
-            <div style={{ fontSize: 11, fontWeight: 700, color: '#5a8abf', textTransform: 'uppercase', letterSpacing: 1, marginBottom: 4 }}>
+          <motion.div
+            initial={{ opacity: 0, height: 0 }}
+            animate={{ opacity: 1, height: 'auto' }}
+            className="px-3.5 py-2.5 rounded-xl mb-3.5 bg-primary/5 border border-primary/10"
+          >
+            <div className="text-[11px] font-bold text-primary/60 uppercase tracking-wider mb-1">
               Currently Working On
             </div>
-            <div style={{ fontSize: 14, color: '#a0ccff', fontFamily: "'Courier New', monospace", whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+            <div className="text-sm text-primary/80 font-mono truncate">
               {s.lastToolSummary}
             </div>
           </motion.div>
         )}
 
-        {/* Work summary or recent activity */}
-        {s.summaryBullets && s.summaryBullets.length > 0 ? (
-          <div style={{ borderTop: '1px solid #1a1a28', paddingTop: 12 }}>
-            <div style={{ fontSize: 11, fontWeight: 700, color: '#555', textTransform: 'uppercase', letterSpacing: 1, marginBottom: 6 }}>
-              Work Summary
-            </div>
-            {s.summaryBullets.map((bullet, j) => (
-              <div key={j} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '3px 0', fontSize: 13 }}>
-                <span style={{ color: '#4a9eff', fontSize: 8 }}>●</span>
-                <span style={{ color: '#aaa' }}>{bullet}</span>
+        {/* Summary or activity */}
+        <div className="border-t border-border/50 pt-3">
+          {hasSummary ? (
+            <>
+              <div className="text-[11px] font-bold text-muted-foreground uppercase tracking-wider mb-1.5">
+                Work Summary
               </div>
-            ))}
-          </div>
-        ) : (
-          <div style={{ borderTop: '1px solid #1a1a28', paddingTop: 12 }}>
-            {actions.length > 0 && (
-              <>
-                <div style={{ fontSize: 11, fontWeight: 700, color: '#555', textTransform: 'uppercase', letterSpacing: 1, marginBottom: 6 }}>
-                  Recent Activity
+              {s.summaryBullets!.map((bullet, j) => (
+                <div key={j} className="flex items-center gap-2 py-0.5 text-sm">
+                  <span className="text-primary text-[8px]">●</span>
+                  <span className="text-foreground/70">{bullet}</span>
                 </div>
-                {actions.slice(0, 2).map((a, j) => (
-                  <div key={j} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '3px 0', fontSize: 13, opacity: 1 - j * 0.2 }}>
-                    <span style={{ color: '#333', fontSize: 10 }}>&#9656;</span>
-                    <span style={{ flex: 1, color: '#aaa', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                      {a.summary || a.toolName}
-                    </span>
+              ))}
+            </>
+          ) : (
+            <>
+              {actions.length > 0 && (
+                <>
+                  <div className="text-[11px] font-bold text-muted-foreground uppercase tracking-wider mb-1.5">
+                    Recent Activity
                   </div>
-                ))}
-              </>
-            )}
-            <button
-              onClick={handleRefreshSummary}
-              disabled={summaryLoading}
-              style={{
-                marginTop: 8, padding: '5px 12px', borderRadius: 6,
-                border: '1px solid #2a2a3e', background: '#1a1a2a',
-                color: summaryLoading ? '#555' : '#4a9eff',
-                fontSize: 12, fontWeight: 600, cursor: summaryLoading ? 'wait' : 'pointer',
-                fontFamily: 'inherit', width: '100%',
-              }}
-            >
-              {summaryLoading ? 'Generating...' : 'Generate Summary'}
-            </button>
-          </div>
-        )}
+                  {actions.slice(0, 2).map((a, j) => (
+                    <div key={j} className="flex items-center gap-2 py-0.5 text-sm" style={{ opacity: 1 - j * 0.2 }}>
+                      <span className="text-muted-foreground/40 text-[10px]">▸</span>
+                      <span className="flex-1 text-foreground/60 truncate">
+                        {a.summary || a.toolName}
+                      </span>
+                    </div>
+                  ))}
+                </>
+              )}
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={handleRefreshSummary}
+                disabled={summaryLoading}
+                className="w-full mt-2"
+              >
+                {summaryLoading ? 'Generating...' : 'Generate Summary'}
+              </Button>
+            </>
+          )}
+        </div>
 
         {s.lastActivity && !working && (
-          <div style={{ fontSize: 12, color: '#555', textAlign: 'right', marginTop: 10 }}>
+          <div className="text-xs text-muted-foreground text-right mt-2.5">
             Last active {ago(s.lastActivity)}
           </div>
         )}
@@ -261,13 +280,17 @@ function SessionCard({ s, i, contextUsage, onClick, socketRef }: { s: SessionDat
 
 function StatChip({ label, value, accent }: { label: string; value: string; accent?: boolean }) {
   return (
-    <div style={{
-      padding: '6px 12px', borderRadius: 8, flex: 1,
-      background: accent ? 'rgba(74, 74, 255, 0.06)' : '#0c0c16',
-      border: `1px solid ${accent ? '#2a2a5a' : '#161625'}`,
-    }}>
-      <div style={{ fontSize: 10, fontWeight: 700, color: '#555', textTransform: 'uppercase', letterSpacing: 0.8 }}>{label}</div>
-      <div style={{ fontSize: 13, fontWeight: 600, color: accent ? '#9a9aff' : '#bbb', marginTop: 2 }}>{value}</div>
+    <div className={cn(
+      'px-3 py-1.5 rounded-lg flex-1',
+      accent ? 'bg-primary/5 border border-primary/10' : 'bg-muted/50 border border-border/30',
+    )}>
+      <div className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider">{label}</div>
+      <div className={cn(
+        'text-sm font-semibold mt-0.5',
+        accent ? 'text-primary/80' : 'text-foreground/70',
+      )}>
+        {value}
+      </div>
     </div>
   );
 }
