@@ -1,7 +1,5 @@
 'use client';
 
-import { cn } from '@/lib/utils';
-
 interface ContextBarProps {
   usage: number | null;
   compact?: boolean;
@@ -9,41 +7,22 @@ interface ContextBarProps {
 
 export default function ContextBar({ usage, compact }: ContextBarProps) {
   if (usage === null) return null;
-
   const remaining = 100 - usage;
-  const colorClass = usage > 80
-    ? 'bg-destructive'
-    : usage > 50
-    ? 'bg-amber-500 dark:bg-amber-400'
-    : 'bg-status-working';
+  const color = usage > 80 ? '#ef4444' : usage > 50 ? '#f59e0b' : '#34d399';
 
   return (
-    <div className="w-full">
+    <div style={{ width: '100%' }}>
       {!compact && (
-        <div className="flex justify-between items-center mb-1.5">
-          <span className="text-xs font-bold text-muted-foreground uppercase tracking-wider">Context</span>
-          <span className={cn(
-            'text-sm font-semibold',
-            usage > 80 ? 'text-destructive' : usage > 50 ? 'text-amber-600 dark:text-amber-400' : 'text-status-working',
-          )}>
-            {remaining}% remaining
-          </span>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+          <span style={{ fontSize: 12, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0.8 }} className="muted-text">Context</span>
+          <span style={{ fontSize: 13, fontWeight: 600, color }}>{remaining}% remaining</span>
         </div>
       )}
-      <div className={cn(
-        'w-full rounded-full overflow-hidden',
-        compact ? 'h-1' : 'h-1.5',
-        'bg-muted',
-      )}>
-        <div
-          className={cn('h-full rounded-full transition-all duration-500 ease-out', colorClass)}
-          style={{ width: `${usage}%` }}
-        />
+      <div className="context-bar-track" style={{ height: compact ? 4 : 6 }}>
+        <div className="context-bar-fill" style={{ width: `${usage}%`, background: color }} />
       </div>
       {compact && (
-        <div className="text-[11px] text-muted-foreground mt-1 text-right">
-          {remaining}% left
-        </div>
+        <div className="context-bar-label">{remaining}% left</div>
       )}
     </div>
   );

@@ -2,7 +2,6 @@
 
 import { useState, useCallback, useEffect } from 'react';
 import { useSocketContext } from './SocketProvider';
-import { Button } from '@/components/ui/button';
 import { Modal, FormField, OptionGroup, OptionButton, TextInput, TextArea, SelectInput } from './ui/Modal';
 import { FolderPicker } from './ui/FolderPicker';
 
@@ -55,16 +54,13 @@ export default function SpawnModal({ isOpen, onClose, onSessionSpawned }: SpawnM
 
   useEffect(() => {
     if (isOpen && !defaultsLoaded) {
-      fetch('/api/settings')
-        .then(r => r.json())
-        .then(data => {
-          if (data.defaultModel && !model) setModel(data.defaultModel);
-          if (data.defaultPermissionMode) setPermissionMode(data.defaultPermissionMode);
-          if (data.defaultEffort && !effort) setEffort(data.defaultEffort);
-          if (data.appendSystemPrompt && !systemPrompt) setSystemPrompt(data.appendSystemPrompt);
-          setDefaultsLoaded(true);
-        })
-        .catch(() => setDefaultsLoaded(true));
+      fetch('/api/settings').then(r => r.json()).then(data => {
+        if (data.defaultModel && !model) setModel(data.defaultModel);
+        if (data.defaultPermissionMode) setPermissionMode(data.defaultPermissionMode);
+        if (data.defaultEffort && !effort) setEffort(data.defaultEffort);
+        if (data.appendSystemPrompt && !systemPrompt) setSystemPrompt(data.appendSystemPrompt);
+        setDefaultsLoaded(true);
+      }).catch(() => setDefaultsLoaded(true));
     }
   }, [isOpen, defaultsLoaded]);
 
@@ -89,70 +85,49 @@ export default function SpawnModal({ isOpen, onClose, onSessionSpawned }: SpawnM
   }, [socketRef, cwd, sessionName, permissionMode, model, effort, allowedTools, systemPrompt, onClose, onSessionSpawned]);
 
   return (
-    <Modal
-      isOpen={isOpen}
-      onClose={onClose}
-      title="New Session"
+    <Modal isOpen={isOpen} onClose={onClose} title="New Session"
       footer={
-        <div className="flex justify-end gap-2.5">
-          <Button variant="outline" onClick={onClose}>Cancel</Button>
-          <Button onClick={handleLaunch} disabled={launching}>
+        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10 }}>
+          <button className="btn-outline" onClick={onClose}>Cancel</button>
+          <button className="btn-primary" onClick={handleLaunch} disabled={launching}>
             {launching ? 'Launching...' : 'Launch Session'}
-          </Button>
+          </button>
         </div>
-      }
-    >
+      }>
       <FormField label="Working Directory">
         <FolderPicker value={cwd} onChange={setCwd} />
       </FormField>
-
       <FormField label="Session Name" optional>
         <TextInput value={sessionName} onChange={setSessionName} placeholder="my-session" />
       </FormField>
-
       <FormField label="Permission Mode">
         <OptionGroup>
           {PERMISSION_MODES.map(pm => (
-            <OptionButton
-              key={pm.value}
-              selected={permissionMode === pm.value}
-              onClick={() => setPermissionMode(pm.value)}
-              title={pm.desc}
-            >
-              {pm.label}
-            </OptionButton>
+            <OptionButton key={pm.value} selected={permissionMode === pm.value}
+              onClick={() => setPermissionMode(pm.value)} title={pm.desc}>{pm.label}</OptionButton>
           ))}
         </OptionGroup>
       </FormField>
 
-      <button
-        onClick={() => setShowAdvanced(!showAdvanced)}
-        className="text-sm font-semibold text-primary cursor-pointer mb-4 flex items-center gap-1"
-      >
-        <span className="text-xs">{showAdvanced ? '▼' : '▶'}</span>
-        Advanced Options
+      <button onClick={() => setShowAdvanced(!showAdvanced)}
+        style={{ fontSize: 14, fontWeight: 600, color: '#6366f1', cursor: 'pointer', marginBottom: 16,
+          display: 'flex', alignItems: 'center', gap: 4, background: 'none', border: 'none', fontFamily: 'inherit', padding: 0 }}>
+        <span style={{ fontSize: 10 }}>{showAdvanced ? '▼' : '▶'}</span> Advanced Options
       </button>
 
       {showAdvanced && (
         <>
-          <FormField label="Model">
-            <SelectInput value={model} onChange={setModel} options={MODELS} />
-          </FormField>
-
+          <FormField label="Model"><SelectInput value={model} onChange={setModel} options={MODELS} /></FormField>
           <FormField label="Effort Level">
             <OptionGroup>
               {EFFORT_LEVELS.map(e => (
-                <OptionButton key={e.value} selected={effort === e.value} onClick={() => setEffort(e.value)}>
-                  {e.label}
-                </OptionButton>
+                <OptionButton key={e.value} selected={effort === e.value} onClick={() => setEffort(e.value)}>{e.label}</OptionButton>
               ))}
             </OptionGroup>
           </FormField>
-
           <FormField label="Allowed Tools" optional>
             <TextInput value={allowedTools} onChange={setAllowedTools} placeholder="e.g. Bash,Read,Edit" />
           </FormField>
-
           <FormField label="Append System Prompt" optional>
             <TextArea value={systemPrompt} onChange={setSystemPrompt} placeholder="Additional instructions..." />
           </FormField>

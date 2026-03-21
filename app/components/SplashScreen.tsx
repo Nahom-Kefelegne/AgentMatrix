@@ -12,11 +12,7 @@ export default function SplashScreen({ children }: { children: React.ReactNode }
 
   useEffect(() => {
     const fallback = setTimeout(() => {
-      if (!readyRef.current) {
-        readyRef.current = true;
-        setReady(true);
-        setTimeout(() => setShowSplash(false), 400);
-      }
+      if (!readyRef.current) { readyRef.current = true; setReady(true); setTimeout(() => setShowSplash(false), 400); }
     }, 20000);
     return () => clearTimeout(fallback);
   }, []);
@@ -26,9 +22,7 @@ export default function SplashScreen({ children }: { children: React.ReactNode }
     if (!socket || !connected) return;
     const handler = () => {
       if (readyRef.current) return;
-      readyRef.current = true;
-      setReady(true);
-      setTimeout(() => setShowSplash(false), 800);
+      readyRef.current = true; setReady(true); setTimeout(() => setShowSplash(false), 800);
     };
     socket.on('app:ready' as any, handler);
     return () => { socket.off('app:ready' as any, handler); };
@@ -38,55 +32,32 @@ export default function SplashScreen({ children }: { children: React.ReactNode }
     <>
       <AnimatePresence>
         {showSplash && (
-          <motion.div
-            initial={{ opacity: 1 }}
-            exit={{ opacity: 0, scale: 1.02 }}
-            transition={{ duration: 0.6, ease: 'easeInOut' }}
-            className="fixed inset-0 z-[9999] bg-background flex flex-col items-center justify-center gap-5"
-          >
-            <motion.div
-              className="flex items-center gap-3.5"
-              initial={{ opacity: 0, y: 10 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.5, delay: 0.1 }}
-            >
+          <motion.div initial={{ opacity: 1 }} exit={{ opacity: 0, scale: 1.02 }}
+            transition={{ duration: 0.6, ease: 'easeInOut' }} className="splash">
+            <motion.div style={{ display: 'flex', alignItems: 'center', gap: 14 }}
+              initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.5, delay: 0.1 }}>
               <motion.div
                 animate={{
                   opacity: [0.3, 1, 0.3],
-                  boxShadow: [
-                    '0 0 4px var(--status-working)',
-                    '0 0 24px var(--status-working), 0 0 8px var(--status-working)',
-                    '0 0 4px var(--status-working)',
-                  ],
+                  boxShadow: ['0 0 4px #34d399', '0 0 24px #34d399, 0 0 8px #34d39966', '0 0 4px #34d399'],
                 }}
                 transition={{ duration: 2.5, repeat: Infinity, ease: 'easeInOut' }}
-                className="size-3.5 rounded-full bg-status-working"
+                style={{ width: 14, height: 14, borderRadius: '50%', background: '#34d399' }}
               />
-              <span className="text-[28px] font-extrabold text-foreground tracking-tight">
-                Agent Matrix
-              </span>
+              <span className="splash-title">Agent Matrix</span>
             </motion.div>
-
-            <motion.div
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              transition={{ duration: 0.5, delay: 0.4 }}
-              className="text-sm text-muted-foreground font-medium"
-            >
+            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }}
+              transition={{ duration: 0.5, delay: 0.4 }} className="splash-status">
               {ready ? 'Ready' : connected ? 'Initializing sessions...' : 'Connecting...'}
             </motion.div>
-
             {!ready && (
-              <motion.div
-                initial={{ opacity: 0 }}
-                animate={{ opacity: 1 }}
-                transition={{ delay: 0.6 }}
-                className="w-48 h-0.5 bg-muted rounded-full overflow-hidden mt-1"
-              >
+              <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.6 }}
+                className="splash-bar" style={{ marginTop: 4 }}>
                 <motion.div
                   animate={{ x: ['-100%', '100%'] }}
                   transition={{ duration: 1.5, repeat: Infinity, ease: 'easeInOut' }}
-                  className="w-2/5 h-full rounded-full bg-gradient-to-r from-transparent via-primary to-transparent"
+                  style={{ width: '40%', height: '100%', background: 'linear-gradient(90deg, transparent, #6366f1, transparent)' }}
                 />
               </motion.div>
             )}

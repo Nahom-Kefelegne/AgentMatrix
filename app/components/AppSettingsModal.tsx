@@ -2,8 +2,6 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import { useSocketContext } from './SocketProvider';
-import { cn } from '@/lib/utils';
-import { Button } from '@/components/ui/button';
 import { Modal, FormField, OptionGroup, OptionButton, TextArea, SelectInput } from './ui/Modal';
 
 interface AppSettings {
@@ -44,31 +42,6 @@ const EFFORT_LEVELS = [
   { value: 'high', label: 'High' },
 ];
 
-function ToggleSetting({ label, description, checked, onChange }: {
-  label: string; description: string; checked: boolean; onChange: () => void;
-}) {
-  return (
-    <div className="flex items-start justify-between gap-4 py-3.5">
-      <div className="flex-1">
-        <div className="text-base font-semibold text-foreground mb-1">{label}</div>
-        <div className="text-sm text-muted-foreground leading-relaxed">{description}</div>
-      </div>
-      <button
-        onClick={onChange}
-        className={cn(
-          'w-12 h-[26px] rounded-full relative cursor-pointer shrink-0 mt-0.5 transition-colors duration-200',
-          checked ? 'bg-primary' : 'bg-muted',
-        )}
-      >
-        <div className={cn(
-          'size-5 rounded-full bg-white absolute top-[3px] transition-[left] duration-200',
-          checked ? 'left-[25px]' : 'left-[3px]',
-        )} />
-      </button>
-    </div>
-  );
-}
-
 export default function AppSettingsModal({ isOpen, onClose, onViewOrchestrator }: AppSettingsModalProps) {
   const { socketRef, connected } = useSocketContext();
   const [settings, setSettings] = useState<AppSettings>({
@@ -105,109 +78,91 @@ export default function AppSettingsModal({ isOpen, onClose, onViewOrchestrator }
   }, [settings]);
 
   return (
-    <Modal
-      isOpen={isOpen}
-      onClose={onClose}
-      title="Settings"
-      width="max-w-[520px]"
+    <Modal isOpen={isOpen} onClose={onClose} title="Settings" maxWidth={520}
       footer={
-        <div className="flex justify-end">
-          <span className={cn('text-sm', saving ? 'text-primary' : 'text-muted-foreground')}>
+        <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+          <span className={saving ? 'subtle-text' : 'muted-text'} style={{ fontSize: 13 }}>
             {saving ? 'Saving...' : 'Auto-saved'}
           </span>
         </div>
-      }
-    >
-      <ToggleSetting
-        label="Auto-resume sessions"
-        description="Resume all active sessions when the app starts."
-        checked={settings.autoResume}
-        onChange={() => save({ autoResume: !settings.autoResume })}
-      />
+      }>
 
-      <div className="border-b border-border/50 my-1" />
+      {/* Auto Resume */}
+      <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 16, padding: '14px 0' }}>
+        <div style={{ flex: 1 }}>
+          <div className="section-title">Auto-resume sessions</div>
+          <div className="section-desc" style={{ marginBottom: 0 }}>Resume all active sessions when the app starts.</div>
+        </div>
+        <button className={`toggle-switch ${settings.autoResume ? 'toggle-switch--on' : 'toggle-switch--off'}`}
+          onClick={() => save({ autoResume: !settings.autoResume })}>
+          <div className="toggle-switch-knob" style={{ left: settings.autoResume ? 25 : 3 }} />
+        </button>
+      </div>
+
+      <hr className="divider" />
 
       <FormField label="Default model">
-        <div className="text-sm text-muted-foreground mb-2">Model used for new sessions unless overridden.</div>
+        <div className="section-desc">Model used for new sessions unless overridden.</div>
         <SelectInput value={settings.defaultModel} onChange={v => save({ defaultModel: v })} options={MODELS} />
       </FormField>
 
-      <div className="border-b border-border/50 my-1" />
+      <hr className="divider" />
 
       <FormField label="Default permission mode">
-        <div className="text-sm text-muted-foreground mb-2">Permission mode for new sessions.</div>
+        <div className="section-desc">Permission mode for new sessions.</div>
         <OptionGroup>
           {PERMISSION_MODES.map(pm => (
-            <OptionButton key={pm.value} selected={settings.defaultPermissionMode === pm.value} onClick={() => save({ defaultPermissionMode: pm.value })} title={pm.desc}>
-              {pm.label}
-            </OptionButton>
+            <OptionButton key={pm.value} selected={settings.defaultPermissionMode === pm.value}
+              onClick={() => save({ defaultPermissionMode: pm.value })} title={pm.desc}>{pm.label}</OptionButton>
           ))}
         </OptionGroup>
       </FormField>
 
-      <div className="border-b border-border/50 my-1" />
+      <hr className="divider" />
 
       <FormField label="Default effort level">
-        <div className="text-sm text-muted-foreground mb-2">Effort level for new sessions.</div>
+        <div className="section-desc">Effort level for new sessions.</div>
         <OptionGroup>
           {EFFORT_LEVELS.map(e => (
-            <OptionButton key={e.value} selected={settings.defaultEffort === e.value} onClick={() => save({ defaultEffort: e.value })}>
-              {e.label}
-            </OptionButton>
+            <OptionButton key={e.value} selected={settings.defaultEffort === e.value}
+              onClick={() => save({ defaultEffort: e.value })}>{e.label}</OptionButton>
           ))}
         </OptionGroup>
       </FormField>
 
-      <div className="border-b border-border/50 my-1" />
+      <hr className="divider" />
 
       <FormField label="Append to system prompt">
-        <div className="text-sm text-muted-foreground mb-2">
-          Additional instructions appended to Claude&apos;s default system prompt for all new sessions.
-        </div>
-        <TextArea
-          value={settings.appendSystemPrompt}
+        <div className="section-desc">Additional instructions appended to Claude&apos;s default system prompt.</div>
+        <TextArea value={settings.appendSystemPrompt}
           onChange={v => setSettings({ ...settings, appendSystemPrompt: v })}
-          placeholder="e.g. Always write tests. Use TypeScript..."
-          rows={4}
-        />
-        <Button variant="outline" size="sm" className="mt-2" onClick={() => save({ appendSystemPrompt: settings.appendSystemPrompt })}>
-          Save prompt
-        </Button>
+          placeholder="e.g. Always write tests. Use TypeScript..." rows={4} />
+        <div style={{ marginTop: 8 }}>
+          <button className="btn-outline" style={{ padding: '6px 14px', fontSize: 13 }}
+            onClick={() => save({ appendSystemPrompt: settings.appendSystemPrompt })}>Save prompt</button>
+        </div>
       </FormField>
 
-      <div className="border-b border-border/50 my-1" />
+      <hr className="divider" />
 
       {/* Orchestrator */}
-      <div className="py-3.5">
-        <div className="text-base font-semibold text-foreground mb-1">Orchestrator Session</div>
-        <div className="text-sm text-muted-foreground mb-3">
-          Internal Claude session used for deep search and app tasks.
-        </div>
-        <div className="flex gap-2">
-          <Button
-            variant="outline"
-            size="sm"
+      <div style={{ padding: '14px 0' }}>
+        <div className="section-title">Orchestrator Session</div>
+        <div className="section-desc">Internal Claude session used for deep search and app tasks.</div>
+        <div style={{ display: 'flex', gap: 8 }}>
+          <button className="btn-outline" style={{ padding: '6px 14px', fontSize: 13 }}
             disabled={!orchestratorId}
-            onClick={() => {
-              if (orchestratorId && onViewOrchestrator) { onClose(); onViewOrchestrator(orchestratorId); }
-            }}
-          >
+            onClick={() => { if (orchestratorId && onViewOrchestrator) { onClose(); onViewOrchestrator(orchestratorId); } }}>
             {orchestratorId ? 'View Orchestrator' : 'Not running'}
-          </Button>
-          <Button
-            variant="destructive"
-            size="sm"
+          </button>
+          <button className="btn-destructive" style={{ padding: '6px 14px', fontSize: 13 }}
             disabled={!orchestratorId}
-            onClick={() => {
-              if (!confirm('Reset orchestrator? All context will be lost.')) return;
-              socketRef.current?.emit('orchestrator:reset' as any);
-            }}
-          >
+            onClick={() => { if (!confirm('Reset orchestrator? All context will be lost.')) return; socketRef.current?.emit('orchestrator:reset' as any); }}>
             Reset
-          </Button>
+          </button>
         </div>
         {orchestratorId && (
-          <div className="text-xs text-muted-foreground mt-2 font-mono">{orchestratorId.slice(0, 12)}...</div>
+          <div className="subtle-text" style={{ fontSize: 12, marginTop: 6, fontFamily: 'monospace' }}>{orchestratorId.slice(0, 12)}...</div>
         )}
       </div>
     </Modal>

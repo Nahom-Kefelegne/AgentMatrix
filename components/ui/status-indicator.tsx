@@ -4,10 +4,10 @@ import { cn } from '@/lib/utils';
 
 type Status = 'working' | 'idle' | 'meeting';
 
-const statusConfig: Record<Status, { label: string; colorClass: string }> = {
-  working: { label: 'Working', colorClass: 'bg-status-working' },
-  idle: { label: 'Idle', colorClass: 'bg-status-idle' },
-  meeting: { label: 'In Meeting', colorClass: 'bg-status-meeting' },
+const statusConfig: Record<Status, { label: string; dotClass: string }> = {
+  working: { label: 'Working', dotClass: 'bg-emerald-400' },
+  idle: { label: 'Idle', dotClass: 'bg-zinc-500 dark:bg-zinc-400' },
+  meeting: { label: 'In Meeting', dotClass: 'bg-violet-400' },
 };
 
 interface StatusIndicatorProps {
@@ -28,19 +28,14 @@ export function StatusIndicator({ status, showLabel = true, size = 'md', classNa
   return (
     <div className={cn(
       'inline-flex items-center gap-2 rounded-full',
-      'bg-glass-bg backdrop-blur-sm border border-glass-border',
+      'bg-secondary/60 dark:bg-secondary/50 border border-border',
       padSize,
       className,
     )}>
       <span className="relative flex">
-        <span className={cn(
-          dotSize, 'rounded-full', config.colorClass,
-          isActive && 'animate-[status-pulse_1.5s_ease-in-out_infinite]',
-        )} />
+        <span className={cn(dotSize, 'rounded-full', config.dotClass)} />
         {isActive && (
-          <span className={cn(
-            'absolute inset-0 rounded-full', config.colorClass, 'opacity-40 animate-ping',
-          )} />
+          <span className={cn('absolute inset-0 rounded-full', config.dotClass, 'opacity-40 animate-ping')} />
         )}
       </span>
       {showLabel && (
@@ -52,16 +47,11 @@ export function StatusIndicator({ status, showLabel = true, size = 'md', classNa
   );
 }
 
-interface ConnectionDotProps {
-  connected: boolean;
-  className?: string;
-}
-
-export function ConnectionDot({ connected, className }: ConnectionDotProps) {
+export function ConnectionDot({ connected, className }: { connected: boolean; className?: string }) {
   return (
     <span className={cn(
       'inline-block size-2.5 rounded-full border-2 border-background transition-colors duration-300',
-      connected ? 'bg-status-working' : 'bg-destructive',
+      connected ? 'bg-emerald-400' : 'bg-destructive',
       className,
     )} />
   );

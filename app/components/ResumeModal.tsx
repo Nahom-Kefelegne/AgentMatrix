@@ -2,9 +2,8 @@
 
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { useOrchestrator } from '@/lib/hooks/useOrchestrator';
-import { cn } from '@/lib/utils';
-import { Button } from '@/components/ui/button';
-import { Modal, FormField, OptionGroup, OptionButton, TextInput } from './ui/Modal';
+import { Modal, OptionGroup, OptionButton, TextInput } from './ui/Modal';
+import { useThemeContext } from './ThemeProvider';
 import { FolderPicker } from './ui/FolderPicker';
 
 interface SessionInfo {
@@ -37,36 +36,35 @@ function formatTimeAgo(ms: number): string {
 function SessionRow({ s, globalSearch, onResumeInApp, onClose }: {
   s: SessionInfo; globalSearch: boolean; onResumeInApp?: (id: string) => void; onClose: () => void;
 }) {
+  const { theme } = useThemeContext();
+  const dark = theme === 'dark';
   const [copied, setCopied] = useState(false);
   return (
-    <div className="bg-muted/30 border border-border/50 rounded-xl p-4 mb-2.5">
-      <div className="flex justify-between items-center mb-1.5">
-        <span className="text-base font-bold text-foreground">{s.name}</span>
-        <span className="text-xs text-muted-foreground">{formatTimeAgo(s.lastModified)}</span>
+    <div style={{
+      background: dark ? '#111' : '#fafafa', border: `1px solid ${dark ? '#1c1c1e' : '#e5e5e5'}`,
+      borderRadius: 12, padding: 16, marginBottom: 10,
+    }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+        <span style={{ fontSize: 16, fontWeight: 700, color: dark ? '#fafafa' : '#0a0a0a' }}>{s.name}</span>
+        <span style={{ fontSize: 12, color: dark ? '#52525b' : '#a1a1aa' }}>{formatTimeAgo(s.lastModified)}</span>
       </div>
       {s.projectDir && globalSearch && (
-        <div className="text-xs text-muted-foreground mb-1.5 font-mono">
+        <div style={{ fontSize: 12, color: dark ? '#52525b' : '#a1a1aa', marginBottom: 6, fontFamily: 'monospace' }}>
           {s.projectDir.replace(/^-/, '/').replace(/-/g, '/')}
         </div>
       )}
-      <div className="text-xs text-muted-foreground/60 mb-3 font-mono">{s.id.slice(0, 12)}...</div>
-      <div className="flex gap-2">
+      <div style={{ fontSize: 12, color: dark ? '#3f3f46' : '#d4d4d8', marginBottom: 12, fontFamily: 'monospace' }}>{s.id.slice(0, 12)}...</div>
+      <div style={{ display: 'flex', gap: 8 }}>
         {onResumeInApp && (
-          <Button onClick={() => { onResumeInApp(s.id); onClose(); }} className="flex-1">
-            Resume in App
-          </Button>
+          <button className="btn-primary" onClick={() => { onResumeInApp(s.id); onClose(); }}>Resume in App</button>
         )}
-        <Button
-          variant="outline"
-          className="flex-1"
-          onClick={() => {
-            navigator.clipboard.writeText(`claude --resume ${s.id}`);
-            setCopied(true);
-            setTimeout(() => setCopied(false), 3000);
-          }}
-        >
+        <button className="btn-outline" onClick={() => {
+          navigator.clipboard.writeText(`claude --resume ${s.id}`);
+          setCopied(true);
+          setTimeout(() => setCopied(false), 3000);
+        }}>
           {copied ? '✓ Copied!' : 'Copy Command'}
-        </Button>
+        </button>
       </div>
     </div>
   );
@@ -182,71 +180,64 @@ export default function ResumeModal({ isOpen, onClose, onResumeInApp }: ResumeMo
     { key: 'deep', label: 'Deep Search' },
   ];
 
+  const { theme } = useThemeContext();
+  const dark = theme === 'dark';
+  const muted = dark ? '#71717a' : '#a1a1aa';
+  const subtle = dark ? '#3f3f46' : '#d4d4d8';
+
   return (
-    <Modal isOpen={isOpen} onClose={onClose} title="Resume Session" width="max-w-[650px]">
+    <Modal isOpen={isOpen} onClose={onClose} title="Resume Session" maxWidth={650}>
       {/* Resume by ID */}
-      <div className="pb-4 mb-4 border-b border-border/50">
-        <div className="text-xs font-bold text-muted-foreground uppercase tracking-wider mb-2">
+      <div style={{ paddingBottom: 16, marginBottom: 16, borderBottom: `1px solid ${dark ? '#1c1c1e' : '#f0f0f0'}` }}>
+        <div style={{ fontSize: 11, fontWeight: 700, color: muted, textTransform: 'uppercase', letterSpacing: 1, marginBottom: 8 }}>
           Resume by Session ID
         </div>
-        <div className="flex gap-2">
-          <TextInput
-            value={directId}
-            onChange={(v) => { setDirectId(v); setDirectIdError(''); }}
+        <div style={{ display: 'flex', gap: 8 }}>
+          <TextInput value={directId} onChange={v => { setDirectId(v); setDirectIdError(''); }}
             onKeyDown={(e: any) => { if (e.key === 'Enter') handleDirectResume(); }}
-            placeholder="Paste session UUID..."
-            mono
-            error={!!directIdError}
-          />
+            placeholder="Paste session UUID..." mono error={!!directIdError} />
           {onResumeInApp && (
-            <Button onClick={handleDirectResume} disabled={resolving}>
+            <button className="btn-primary" onClick={handleDirectResume} disabled={resolving}>
               {resolving ? 'Resolving...' : 'Resume'}
-            </Button>
+            </button>
           )}
         </div>
-        {directIdError && <div className="text-xs text-destructive mt-1.5">{directIdError}</div>}
+        {directIdError && <div style={{ fontSize: 12, color: '#f87171', marginTop: 6 }}>{directIdError}</div>}
       </div>
 
       {/* Mode toggle */}
-      <div className="mb-4">
-        <OptionGroup className="mb-3">
+      <div style={{ marginBottom: 16 }}>
+        <div style={{ display: 'flex', gap: 6, marginBottom: mode === 'project' ? 10 : 0 }}>
           {modeButtons.map(m => (
-            <OptionButton key={m.key} selected={mode === m.key} onClick={() => setMode(m.key)}>
-              {m.label}
-            </OptionButton>
+            <OptionButton key={m.key} selected={mode === m.key} onClick={() => setMode(m.key)}>{m.label}</OptionButton>
           ))}
-        </OptionGroup>
-        {mode === 'project' && <FolderPicker value={cwd} onChange={handleCwdChange} />}
+        </div>
+        {mode === 'project' && <div style={{ marginTop: 10 }}><FolderPicker value={cwd} onChange={handleCwdChange} /></div>}
       </div>
 
       {/* Content */}
       {mode === 'deep' ? (
         <>
-          <div className="flex gap-2 mb-4">
-            <TextInput
-              value={deepQuery}
-              onChange={setDeepQuery}
+          <div style={{ display: 'flex', gap: 8, marginBottom: 16 }}>
+            <TextInput value={deepQuery} onChange={setDeepQuery}
               onKeyDown={(e: any) => { if (e.key === 'Enter' && !deepSearching) handleDeepSearch(); }}
-              placeholder="Describe the work you're looking for..."
-            />
-            {deepSearching ? (
-              <Button variant="destructive" onClick={() => { abortRef.current = true; setDeepSearching(false); }}>Stop</Button>
-            ) : (
-              <Button onClick={handleDeepSearch} disabled={!deepQuery.trim()}>Search</Button>
-            )}
+              placeholder="Describe the work you're looking for..." />
+            {deepSearching
+              ? <button className="btn-destructive" onClick={() => { abortRef.current = true; setDeepSearching(false); }}>Stop</button>
+              : <button className="btn-primary" onClick={handleDeepSearch} disabled={!deepQuery.trim()}>Search</button>
+            }
           </div>
           {deepSearching ? (
-            <div className="flex flex-col items-center py-10 gap-3">
-              <div className="size-8 border-3 border-muted border-t-primary rounded-full animate-spin" />
-              <div className="text-base text-foreground/60">Searching transcripts...</div>
-              <div className="text-sm text-muted-foreground">Claude is analyzing session history</div>
+            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', padding: '40px 0', gap: 12 }}>
+              <div style={{ width: 32, height: 32, border: `3px solid ${subtle}`, borderTopColor: '#6366f1', borderRadius: '50%', animation: 'spin 0.8s linear infinite' }} />
+              <div style={{ fontSize: 15, color: muted }}>Searching transcripts...</div>
             </div>
           ) : deepError ? (
-            <div className="text-muted-foreground text-sm text-center py-8 italic">{deepError}</div>
+            <div style={{ color: muted, fontSize: 14, textAlign: 'center', padding: '32px 0', fontStyle: 'italic' }}>{deepError}</div>
           ) : deepResults.length > 0 ? (
             deepResults.map(s => <SessionRow key={s.id} s={s} globalSearch onResumeInApp={onResumeInApp} onClose={onClose} />)
           ) : (
-            <div className="text-muted-foreground text-sm text-center py-10">
+            <div style={{ color: muted, fontSize: 14, textAlign: 'center', padding: '40px 0' }}>
               Describe what you worked on and Claude will search your session transcripts.
             </div>
           )}
@@ -254,11 +245,11 @@ export default function ResumeModal({ isOpen, onClose, onResumeInApp }: ResumeMo
       ) : (
         <>
           <TextInput value={search} onChange={setSearch} placeholder="Search by name or ID..." />
-          <div className="mt-4">
+          <div style={{ marginTop: 16 }}>
             {loading ? (
-              <div className="text-foreground/60 text-sm text-center py-6">Loading sessions...</div>
+              <div style={{ color: muted, fontSize: 14, textAlign: 'center', padding: '24px 0' }}>Loading sessions...</div>
             ) : filtered.length === 0 ? (
-              <div className="text-muted-foreground text-sm text-center py-6 italic">
+              <div style={{ color: subtle, fontSize: 14, textAlign: 'center', padding: '24px 0', fontStyle: 'italic' }}>
                 {sessions.length === 0 ? 'No sessions found' : 'No sessions match search'}
               </div>
             ) : (
