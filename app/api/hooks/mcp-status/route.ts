@@ -37,6 +37,17 @@ export async function POST(request: Request) {
       return NextResponse.json({ ok: true, status: 'done' });
     }
 
+    if (tool === '__clear_status') {
+      const session = getSession(sid);
+      if (session && (session.status === 'done' || session.status === 'attention')) {
+        const changes = { status: 'idle' as const, statusReason: undefined };
+        updateSession(sid, changes);
+        emitToClients(SOCKET_EVENTS.SESSION_UPDATE, { sessionId: sid, changes });
+        console.log(`[mcp-status] Session ${sid.slice(0, 8)} → cleared to idle`);
+      }
+      return NextResponse.json({ ok: true, status: 'idle' });
+    }
+
     return NextResponse.json({ error: 'Unknown tool' }, { status: 400 });
   } catch (err) {
     console.error('[mcp-status] Error:', err);

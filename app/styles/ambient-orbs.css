@@ -1,0 +1,74 @@
+/* ═══════════════════════════════════════════════
+   Ambient Gradient Orbs — floating background blobs
+   ═══════════════════════════════════════════════ */
+
+.ambient-orbs {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  overflow: hidden;
+}
+
+.ambient-orb {
+  position: absolute;
+  border-radius: 50%;
+  filter: blur(80px);
+  opacity: 0.12;
+  will-change: transform;
+}
+
+.dark .ambient-orb {
+  opacity: 0.08;
+}
+
+/* Orb 1 — indigo, top-left drift */
+.ambient-orb--1 {
+  width: 500px;
+  height: 500px;
+  background: radial-gradient(circle, #6366f1 0%, transparent 70%);
+  top: -10%;
+  left: -5%;
+  animation: orb-drift-1 25s ease-in-out infinite;
+}
+
+/* Orb 2 — cyan, center-right drift */
+.ambient-orb--2 {
+  width: 400px;
+  height: 400px;
+  background: radial-gradient(circle, #06b6d4 0%, transparent 70%);
+  top: 30%;
+  right: -8%;
+  animation: orb-drift-2 30s ease-in-out infinite;
+}
+
+/* Orb 3 — purple, bottom-left drift */
+.ambient-orb--3 {
+  width: 450px;
+  height: 450px;
+  background: radial-gradient(circle, #8b5cf6 0%, transparent 70%);
+  bottom: -15%;
+  left: 20%;
+  animation: orb-drift-3 28s ease-in-out infinite;
+}
+
+@keyframes orb-drift-1 {
+  0%, 100% { transform: translate(0, 0) scale(1); }
+  25% { transform: translate(60px, 40px) scale(1.1); }
+  50% { transform: translate(30px, 80px) scale(0.95); }
+  75% { transform: translate(-20px, 50px) scale(1.05); }
+}
+
+@keyframes orb-drift-2 {
+  0%, 100% { transform: translate(0, 0) scale(1); }
+  25% { transform: translate(-50px, 30px) scale(1.08); }
+  50% { transform: translate(-80px, -20px) scale(0.92); }
+  75% { transform: translate(-30px, -50px) scale(1.03); }
+}
+
+@keyframes orb-drift-3 {
+  0%, 100% { transform: translate(0, 0) scale(1); }
+  25% { transform: translate(40px, -30px) scale(1.06); }
+  50% { transform: translate(-30px, -60px) scale(0.97); }
+  75% { transform: translate(20px, -20px) scale(1.1); }
+}

@@ -247,11 +247,13 @@ export class PtyManager {
     if (opts.effort) args.push('--effort', opts.effort);
     if (opts.allowedTools) args.push('--allowedTools', opts.allowedTools);
     // Always inject MCP status instructions + user's custom prompt
-    const mcpInstructions = 'You have access to Agent Matrix MCP tools. When you need user input (questions, decisions, approvals), call mcp__agentmatrix__request_attention with a reason. When you finish the task the user assigned, call mcp__agentmatrix__work_complete with a summary.';
+    const { MCP_SYSTEM_PROMPT: mcpInstructions } = require('../../lib/constants/mcpPrompt');
     const fullPrompt = opts.systemPrompt
-      ? `${mcpInstructions}\n\n${opts.systemPrompt}`
+      ? `${mcpInstructions} ${opts.systemPrompt}`
       : mcpInstructions;
-    const escaped = fullPrompt.replace(/'/g, "'\\''");
+    // Flatten to single line to avoid shell escaping issues
+    const oneLine = fullPrompt.replace(/\n/g, ' ').replace(/\s+/g, ' ').trim();
+    const escaped = oneLine.replace(/'/g, "'\\''");
     args.push('--append-system-prompt', `'${escaped}'`);
     return this.createPtySession(id, this.spawnPty(opts.cwd, args));
   }
@@ -263,8 +265,10 @@ export class PtyManager {
     console.log(`[spawnResume] id=${id.slice(0, 12)} resumeId=${opts.resumeId.slice(0, 12)} foundCwd=${foundCwd} optsCwd=${opts.cwd} finalCwd=${cwd}`);
     const args = ['--resume', opts.resumeId, '--dangerously-skip-permissions'];
     if (opts.fork) args.push('--fork-session');
-    if (opts.fork && opts.systemPrompt) {
-      const escaped = opts.systemPrompt.replace(/'/g, "'\\''");
+    if (opts.systemPrompt) {
+      // Flatten to single line to avoid shell issues
+      const oneLine = opts.systemPrompt.replace(/\n/g, ' ').replace(/\s+/g, ' ').trim();
+      const escaped = oneLine.replace(/'/g, "'\\''");
       args.push('--append-system-prompt', `'${escaped}'`);
     }
     return this.createPtySession(id, this.spawnPty(cwd, args));

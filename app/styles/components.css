@@ -376,11 +376,26 @@
   overflow: hidden;
   background: #fff;
   border: 1px solid #e5e5e5;
-  transition: all 0.25s ease;
+  transition: all 0.3s ease;
+}
+/* Glow halo underneath (idle = subtle, working/attention/done = colored) */
+.session-card::after {
+  content: '';
+  position: absolute;
+  inset: 8px;
+  border-radius: 16px;
+  z-index: -1;
+  opacity: 0;
+  transition: opacity 0.3s;
+  filter: blur(24px);
+  background: rgba(99, 102, 241, 0.15);
+}
+.session-card:hover::after {
+  opacity: 1;
 }
 .session-card:hover {
-  transform: translateY(-4px);
-  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.06);
+  transform: translateY(-6px);
+  box-shadow: 0 24px 48px rgba(0, 0, 0, 0.08);
   border-color: #d4d4d8;
 }
 .dark .session-card {
@@ -388,11 +403,25 @@
   border-color: #2a2a30;
 }
 .dark .session-card:hover {
-  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.35);
+  box-shadow: 0 24px 48px rgba(0, 0, 0, 0.4);
   border-color: #3a3a42;
 }
 
-/* Working card — rotating gradient border */
+/* Gradient accent strip at top of every card */
+.session-card-body::before {
+  content: '';
+  display: block;
+  height: 2px;
+  margin: -24px -28px 20px;
+  background: linear-gradient(90deg, #6366f1 0%, #a78bfa 40%, transparent 100%);
+  opacity: 0.15;
+  transition: opacity 0.3s;
+}
+.session-card:hover .session-card-body::before {
+  opacity: 0.35;
+}
+
+/* Working card — rotating gradient border + green glow */
 .session-card--working {
   border: none;
   --angle: 0deg;
@@ -411,26 +440,61 @@
   pointer-events: none;
   z-index: 1;
 }
+.session-card--working::after {
+  background: rgba(52, 211, 153, 0.2);
+  opacity: 0.6;
+}
+.session-card--working:hover::after {
+  opacity: 1;
+}
+.session-card--working .session-card-body::before {
+  background: linear-gradient(90deg, #34d399, #06b6d4, transparent);
+  opacity: 0.6;
+  animation: shimmer-strip 2s ease-in-out infinite;
+}
+@keyframes shimmer-strip {
+  0%, 100% { opacity: 0.4; }
+  50% { opacity: 0.8; }
+}
 .session-card--working:hover {
-  box-shadow: 0 20px 60px rgba(52, 211, 153, 0.08);
+  box-shadow: 0 24px 48px rgba(52, 211, 153, 0.1);
 }
 .dark .session-card--working:hover {
-  box-shadow: 0 20px 60px rgba(52, 211, 153, 0.12);
+  box-shadow: 0 24px 48px rgba(52, 211, 153, 0.15);
 }
 
-/* Attention card — pulsing amber border */
+/* Attention card — pulsing amber glow */
 .session-card--attention {
   border-color: rgba(245, 158, 11, 0.35);
   animation: attention-pulse 2s ease-in-out infinite;
 }
+.session-card--attention::after {
+  background: rgba(245, 158, 11, 0.2);
+  opacity: 0.5;
+}
+.session-card--attention:hover::after { opacity: 1; }
+.session-card--attention .session-card-body::before {
+  background: linear-gradient(90deg, #f59e0b, #fbbf24, transparent);
+  opacity: 0.5;
+  animation: shimmer-strip 1.5s ease-in-out infinite;
+}
 @keyframes attention-pulse {
   0%, 100% { box-shadow: 0 0 0 rgba(245, 158, 11, 0); }
-  50% { box-shadow: 0 0 20px rgba(245, 158, 11, 0.1); }
+  50% { box-shadow: 0 0 24px rgba(245, 158, 11, 0.12); }
 }
 
-/* Done card — subtle blue border */
+/* Done card — blue glow */
 .session-card--done {
   border-color: rgba(59, 130, 246, 0.3);
+}
+.session-card--done::after {
+  background: rgba(59, 130, 246, 0.15);
+  opacity: 0.4;
+}
+.session-card--done:hover::after { opacity: 1; }
+.session-card--done .session-card-body::before {
+  background: linear-gradient(90deg, #3b82f6, #60a5fa, transparent);
+  opacity: 0.4;
 }
 
 /* Status reason strip */
@@ -473,10 +537,49 @@
   to { --angle: 360deg; }
 }
 
+/* Card inner gradient mesh — subtle color in corners */
 .session-card-body {
   padding: 24px 28px 20px;
   position: relative;
   z-index: 2;
+  background: radial-gradient(ellipse at 0% 0%, rgba(99, 102, 241, 0.03) 0%, transparent 50%),
+              radial-gradient(ellipse at 100% 100%, rgba(139, 92, 246, 0.02) 0%, transparent 50%);
+}
+.dark .session-card-body {
+  background: radial-gradient(ellipse at 0% 0%, rgba(99, 102, 241, 0.04) 0%, transparent 50%),
+              radial-gradient(ellipse at 100% 100%, rgba(139, 92, 246, 0.03) 0%, transparent 50%);
+}
+.session-card--working .session-card-body {
+  background: radial-gradient(ellipse at 0% 0%, rgba(52, 211, 153, 0.05) 0%, transparent 50%),
+              radial-gradient(ellipse at 100% 100%, rgba(6, 182, 212, 0.03) 0%, transparent 50%);
+}
+.dark .session-card--working .session-card-body {
+  background: radial-gradient(ellipse at 0% 0%, rgba(52, 211, 153, 0.06) 0%, transparent 50%),
+              radial-gradient(ellipse at 100% 100%, rgba(6, 182, 212, 0.04) 0%, transparent 50%);
+}
+.session-card--attention .session-card-body {
+  background: radial-gradient(ellipse at 0% 0%, rgba(245, 158, 11, 0.05) 0%, transparent 50%),
+              radial-gradient(ellipse at 100% 100%, rgba(251, 191, 36, 0.03) 0%, transparent 50%);
+}
+.session-card--done .session-card-body {
+  background: radial-gradient(ellipse at 0% 0%, rgba(59, 130, 246, 0.04) 0%, transparent 50%),
+              radial-gradient(ellipse at 100% 100%, rgba(96, 165, 250, 0.02) 0%, transparent 50%);
+}
+
+/* Heartbeat — working cards gently pulse their background */
+.session-card--working .session-card-body {
+  animation: card-heartbeat 3s ease-in-out infinite;
+}
+@keyframes card-heartbeat {
+  0%, 100% { background-color: transparent; }
+  50% { background-color: rgba(52, 211, 153, 0.02); }
+}
+.dark .session-card--working .session-card-body {
+  animation: card-heartbeat-dark 3s ease-in-out infinite;
+}
+@keyframes card-heartbeat-dark {
+  0%, 100% { background-color: transparent; }
+  50% { background-color: rgba(52, 211, 153, 0.03); }
 }
 
 .session-name {
@@ -1208,6 +1311,18 @@
 .terminal-fullscreen-btn:hover {
   background: rgba(0, 0, 0, 0.5);
   color: rgba(255, 255, 255, 0.9);
+}
+
+/* ─── Dashboard Background ─── */
+.dashboard-bg {
+  background-color: #fafaf9;
+  background-image: radial-gradient(circle, rgba(0, 0, 0, 0.06) 1px, transparent 1px);
+  background-size: 24px 24px;
+}
+.dark .dashboard-bg {
+  background-color: #000;
+  background-image: radial-gradient(circle, rgba(255, 255, 255, 0.04) 1px, transparent 1px);
+  background-size: 24px 24px;
 }
 
 /* ─── Misc ─── */

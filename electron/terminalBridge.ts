@@ -111,50 +111,49 @@ export function setupTerminalBridge(io: SocketIOServer, ptyManager: PtyManager):
     // Fork an existing session — creates a new session branching from the source
     socket.on('terminal:fork', (opts: { sourceSessionId: string; name?: string }) => {
       try {
-        const newId = randomUUID();
-        const name = opts.name || `Fork of ${opts.sourceSessionId.slice(0, 8)}`;
-        console.log(`[terminal:fork] source=${opts.sourceSessionId.slice(0, 12)} newId=${newId.slice(0, 8)}`);
-
-        // Find the source session's cwd
+        const sessionUuid = randomUUID();
         const sourceSession = getSession(opts.sourceSessionId);
         const cwd = sourceSession?.cwd || homedir();
+        const name = opts.name || `Fork-${opts.sourceSessionId.slice(0, 8)}`;
+        console.log(`[terminal:fork] source=${opts.sourceSessionId.slice(0, 12)} newId=${sessionUuid.slice(0, 8)} cwd=${cwd}`);
 
-        const sessionData = createSessionEntry(newId, name, cwd);
+        // Create session entry so sprite appears (same pattern as terminal:new)
+        const sessionData = createSessionEntry(sessionUuid, name, cwd);
         addSession(sessionData);
-        setCachedName(newId, name);
+        setCachedName(sessionUuid, name);
         io.emit(SOCKET_EVENTS.SESSION_START, sessionData);
 
-        // MCP instructions for forked sessions
-        const mcpInstructions = 'You have access to Agent Matrix MCP tools. When you need user input (questions, decisions, approvals), call mcp__agentmatrix__request_attention with a reason. When you finish the task the user assigned, call mcp__agentmatrix__work_complete with a summary.';
-
-        ptyManager.spawnResume(newId, {
+        // Fork via resume --fork-session (same pattern as terminal:resume but with fork flag)
+        ptyManager.spawnResume(sessionUuid, {
           cwd,
           resumeId: opts.sourceSessionId,
           fork: true,
-          systemPrompt: mcpInstructions,
         });
 
-        ptyManager.onOutput(newId, (data) => {
-          socket.emit('terminal:data', { sessionId: newId, data });
+        // Wire up output (same pattern as terminal:new)
+        ptyManager.onOutput(sessionUuid, (data) => {
+          socket.emit('terminal:data', { sessionId: sessionUuid, data });
         });
 
-        const newPty = ptyManager.getSession(newId);
+        const newPty = ptyManager.getSession(sessionUuid);
         if (newPty) {
           newPty.onStateChange = (info) => {
-            io.emit('session:state', { sessionId: newId, ...info });
+            io.emit('session:state', { sessionId: sessionUuid, ...info });
           };
           newPty.onContextUpdate = (usage) => {
-            io.emit('session:context', { sessionId: newId, usage });
+            io.emit('session:context', { sessionId: sessionUuid, usage });
           };
         }
 
-        const active = getActiveSessions().filter(s => s.id !== newId);
-        active.push({ id: newId, name, cwd });
+        // Track for auto-resume
+        const active = getActiveSessions().filter(s => s.id !== sessionUuid);
+        active.push({ id: sessionUuid, name, cwd });
         saveActiveSessions(active);
 
-        socket.emit('terminal:forked', { sessionId: newId, sourceSessionId: opts.sourceSessionId, name });
+        socket.emit('terminal:forked', { sessionId: sessionUuid, sourceSessionId: opts.sourceSessionId, name });
       } catch (err) {
-        console.error('[terminal:fork]', err);
+        console.error('[terminal:fork] ERROR:', err);
+        socket.emit('terminal:fork-error', { error: String(err) });
       }
     });
 

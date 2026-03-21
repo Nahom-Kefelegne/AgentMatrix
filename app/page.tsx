@@ -75,6 +75,19 @@ function OfficeView() {
 
   const handleCloseDialog = useCallback(() => setSelectedSessionId(null), []);
 
+  // Clear done/attention status when user opens a session
+  useEffect(() => {
+    if (!selectedSessionId) return;
+    const session = sessions.get(selectedSessionId);
+    if (session && (session.status === 'done' || session.status === 'attention')) {
+      fetch('/api/hooks/mcp-status', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ tool: '__clear_status', sessionId: selectedSessionId }),
+      }).catch(() => {});
+    }
+  }, [selectedSessionId, sessions]);
+
   const sessionList = Array.from(sessions.values());
   const currentSessionIndex = selectedSessionId
     ? sessionList.findIndex(s => s.id === selectedSessionId)

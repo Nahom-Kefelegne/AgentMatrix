@@ -2,6 +2,9 @@
 @import "tw-animate-css";
 @import "shadcn/tailwind.css";
 @import "./styles/components.css";
+@import "./styles/ambient-orbs.css";
+@import "./styles/noise.css";
+@import "./styles/activity-ticker.css";
 
 @custom-variant dark (&:is(.dark *));
 

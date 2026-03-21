@@ -1,0 +1,101 @@
+/* ═══════════════════════════════════════════════
+   Activity Ticker — live session activity feed
+   ═══════════════════════════════════════════════ */
+
+.activity-ticker {
+  position: relative;
+  overflow: hidden;
+  height: 32px;
+  margin-bottom: 24px;
+  border-radius: 10px;
+  background: rgba(0, 0, 0, 0.03);
+  border: 1px solid rgba(0, 0, 0, 0.04);
+}
+.dark .activity-ticker {
+  background: rgba(255, 255, 255, 0.03);
+  border-color: rgba(255, 255, 255, 0.04);
+}
+
+/* Fade edges */
+.activity-ticker::before,
+.activity-ticker::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 48px;
+  z-index: 2;
+  pointer-events: none;
+}
+.activity-ticker::before {
+  left: 0;
+  background: linear-gradient(90deg, #fafaf9, transparent);
+}
+.activity-ticker::after {
+  right: 0;
+  background: linear-gradient(270deg, #fafaf9, transparent);
+}
+.dark .activity-ticker::before {
+  background: linear-gradient(90deg, #000, transparent);
+}
+.dark .activity-ticker::after {
+  background: linear-gradient(270deg, #000, transparent);
+}
+
+.activity-ticker-track {
+  display: flex;
+  align-items: center;
+  height: 100%;
+  padding: 0 16px;
+  gap: 20px;
+  overflow-x: hidden;
+  white-space: nowrap;
+  animation: ticker-scroll 30s linear infinite;
+}
+
+/* Pause on hover */
+.activity-ticker:hover .activity-ticker-track {
+  animation-play-state: paused;
+}
+
+.activity-ticker-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+  font-size: 12px;
+  animation: ticker-fade-in 0.3s ease;
+}
+
+.activity-ticker-dot {
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: #6366f1;
+  flex-shrink: 0;
+}
+
+.activity-ticker-name {
+  font-weight: 700;
+  color: #3f3f46;
+}
+.dark .activity-ticker-name {
+  color: #d4d4d8;
+}
+
+.activity-ticker-text {
+  color: #a1a1aa;
+}
+.dark .activity-ticker-text {
+  color: #71717a;
+}
+
+@keyframes ticker-fade-in {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes ticker-scroll {
+  0% { transform: translateX(0); }
+  100% { transform: translateX(-50%); }
+}

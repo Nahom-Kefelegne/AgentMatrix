@@ -1,10 +1,12 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import type { SessionData } from '@/lib/types';
 import { useSocketContext } from './SocketProvider';
 import ContextBar from './ContextBar';
+import AmbientOrbs from './AmbientOrbs';
+import ActivityTicker from './ActivityTicker';
 
 const STATUS: Record<string, { label: string; dotClass: string }> = {
   working: { label: 'Working', dotClass: 'status-dot--working' },
@@ -32,10 +34,31 @@ export default function DashboardView({ sessions, contextMap, onSelectSession }:
   const { socketRef } = useSocketContext();
   const all = Array.from(sessions.values());
   const [filter, setFilter] = useState('all');
+  const [order, setOrder] = useState<string[]>([]);
+  const dragItem = useRef<string | null>(null);
+  const dragOverItem = useRef<string | null>(null);
+  const [dragId, setDragId] = useState<string | null>(null);
   const [, tick] = useState(0);
   useEffect(() => { const i = setInterval(() => tick(t => t + 1), 5000); return () => clearInterval(i); }, []);
 
-  const list = filter === 'all' ? all : all.filter(s => s.status === filter);
+  // Keep order in sync with sessions
+  const sessionIds = all.map(s => s.id).join(',');
+  useEffect(() => {
+    const ids = sessionIds.split(',').filter(Boolean);
+    const currentIds = new Set(ids);
+    setOrder(prev => {
+      const kept = prev.filter(id => currentIds.has(id));
+      const newIds = ids.filter(id => !prev.includes(id));
+      const merged = [...kept, ...newIds];
+      if (merged.length === prev.length && merged.every((id, i) => prev[i] === id)) return prev;
+      return merged;
+    });
+  }, [sessionIds]);
+
+  const filtered = filter === 'all' ? all : all.filter(s => s.status === filter);
+  const filteredIds = new Set(filtered.map(s => s.id));
+  const orderedList = order.filter(id => filteredIds.has(id)).map(id => sessions.get(id)!).filter(Boolean);
+
   const counts: Record<string, number> = {
     all: all.length, working: all.filter(s => s.status === 'working').length,
     idle: all.filter(s => s.status === 'idle').length, meeting: all.filter(s => s.status === 'meeting').length,
@@ -46,10 +69,47 @@ export default function DashboardView({ sessions, contextMap, onSelectSession }:
     { key: 'idle', label: 'Idle' }, { key: 'meeting', label: 'Meeting' },
   ].filter(f => f.key === 'all' || counts[f.key] > 0);
 
+  const [dragOverId, setDragOverId] = useState<string | null>(null);
+
+  const handleDragStart = (e: React.DragEvent, id: string) => {
+    dragItem.current = id;
+    setDragId(id);
+    e.dataTransfer.effectAllowed = 'move';
+  };
+  const handleDragOver = (e: React.DragEvent, id: string) => {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+    if (!dragItem.current || dragItem.current === id) {
+      setDragOverId(null);
+      return;
+    }
+    setDragOverId(id);
+    if (dragOverItem.current === id) return;
+    dragOverItem.current = id;
+    setOrder(prev => {
+      const from = prev.indexOf(dragItem.current!);
+      const to = prev.indexOf(id);
+      if (from === -1 || to === -1) return prev;
+      const next = [...prev];
+      next.splice(from, 1);
+      next.splice(to, 0, dragItem.current!);
+      return next;
+    });
+  };
+  const handleDragEnd = () => {
+    dragItem.current = null;
+    dragOverItem.current = null;
+    setDragId(null);
+    setDragOverId(null);
+  };
+
   return (
-    <div data-scroll-area style={{ height: '100vh' }}
-      className="overflow-y-auto">
-      <div style={{ maxWidth: 1200, margin: '0 auto', padding: '72px 36px 80px' }}>
+    <div data-scroll-area style={{ height: '100vh', position: 'relative' }}
+      className="overflow-y-auto dashboard-bg">
+      <AmbientOrbs />
+      <div className="noise-overlay" />
+      <div style={{ maxWidth: 1200, margin: '0 auto', padding: '72px 36px 80px', position: 'relative', zIndex: 2 }}>
+        <ActivityTicker sessions={sessions} />
         <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="filter-bar">
           {filters.map(f => (
             <button key={f.key} onClick={() => setFilter(f.key)}
@@ -59,20 +119,25 @@ export default function DashboardView({ sessions, contextMap, onSelectSession }:
           ))}
         </motion.div>
 
-        {list.length === 0 ? (
+        {orderedList.length === 0 ? (
           <div style={{ textAlign: 'center', padding: '140px 0' }} className="subtle-text">
             <div style={{ fontSize: 48, marginBottom: 16 }}>○</div>
             <div style={{ fontSize: 16 }}>{all.length ? 'No matches' : 'No sessions running'}</div>
           </div>
         ) : (
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(420px, 1fr))', gap: 20 }}>
-            <AnimatePresence mode="popLayout">
-              {list.map((s, i) => (
-                <SessionCard key={s.id} s={s} i={i}
-                  contextUsage={contextMap[s.id] ?? null}
-                  onClick={() => onSelectSession(s.id)} socketRef={socketRef} />
-              ))}
-            </AnimatePresence>
+            {orderedList.map((s, i) => (
+              <SessionCard key={s.id} s={s} i={i}
+                contextUsage={contextMap[s.id] ?? null}
+                onClick={() => { if (!dragId) onSelectSession(s.id); }}
+                socketRef={socketRef}
+                isDragging={dragId === s.id}
+                isDragOver={dragOverId === s.id}
+                anyDragging={!!dragId}
+                onDragStart={(e) => handleDragStart(e, s.id)}
+                onDragOver={(e) => handleDragOver(e, s.id)}
+                onDragEnd={handleDragEnd} />
+            ))}
           </div>
         )}
       </div>
@@ -80,9 +145,15 @@ export default function DashboardView({ sessions, contextMap, onSelectSession }:
   );
 }
 
-function SessionCard({ s, i, contextUsage, onClick, socketRef }: {
+function SessionCard({ s, i, contextUsage, onClick, socketRef, isDragging, isDragOver, anyDragging, onDragStart, onDragOver, onDragEnd }: {
   s: SessionData; i: number; contextUsage: number | null;
   onClick: () => void; socketRef: React.RefObject<any>;
+  isDragging?: boolean;
+  isDragOver?: boolean;
+  anyDragging?: boolean;
+  onDragStart?: (e: React.DragEvent) => void;
+  onDragOver?: (e: React.DragEvent) => void;
+  onDragEnd?: () => void;
 }) {
   const meta = STATUS[s.status] || STATUS.idle;
   const working = s.status === 'working';
@@ -100,10 +171,23 @@ function SessionCard({ s, i, contextUsage, onClick, socketRef }: {
     <motion.div
       layout
       initial={{ opacity: 0, y: 16 }}
-      animate={{ opacity: 1, y: 0 }}
+      animate={{
+        opacity: isDragging ? 0.3 : 1,
+        y: 0,
+        scale: isDragging ? 0.98 : 1,
+      }}
       exit={{ opacity: 0, y: -8 }}
-      transition={{ duration: 0.35, delay: i * 0.05, type: 'spring', stiffness: 300, damping: 28 }}
+      transition={{ layout: { type: 'spring', stiffness: 500, damping: 35 }, default: { duration: 0.15 } }}
+      {...{
+        draggable: true,
+        onDragStart: onDragStart as any,
+        onDragOver: onDragOver as any,
+        onDragEnd: onDragEnd as any,
+      }}
       onClick={onClick}
+      style={{
+        cursor: isDragging ? 'grabbing' : 'grab',
+      }}
       className={`session-card ${working ? 'session-card--working' : ''} ${s.status === 'attention' ? 'session-card--attention' : ''} ${s.status === 'done' ? 'session-card--done' : ''}`}
     >
       <div className="session-card-body">

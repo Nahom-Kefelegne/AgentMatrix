@@ -506,7 +506,7 @@ export default function SessionDialog({
             overflowY: 'auto',
             display: activeTab === 'info' ? 'block' : 'none',
           }}>
-            <InfoTab session={session} cliCmd={cliCmd} contextUsage={sessionId ? contextMap[sessionId] ?? null : null} socketRef={socketRef} />
+            <InfoTab session={session} cliCmd={cliCmd} contextUsage={sessionId ? contextMap[sessionId] ?? null : null} socketRef={socketRef} onSelectSession={onSelectSession} />
           </div>
           <div style={{
             position: 'absolute', inset: 0, padding: '20px 24px',
@@ -1047,21 +1047,23 @@ function ActionRow({ action, isLast }: { action: Action; isLast: boolean }) {
   );
 }
 
-function ForkSection({ session, socketRef }: { session: SessionData; socketRef: React.RefObject<any> }) {
+function ForkSection({ session, socketRef, onSelectSession }: {
+  session: SessionData; socketRef: React.RefObject<any>;
+  onSelectSession?: (id: string) => void;
+}) {
   const [forking, setForking] = useState(false);
   const [forkName, setForkName] = useState('');
-  const [forkedId, setForkedId] = useState<string | null>(null);
 
   const handleFork = useCallback(() => {
     const socket = socketRef.current;
     if (!socket) return;
     setForking(true);
-    setForkedId(null);
 
     const handler = (data: { sessionId: string; name: string }) => {
       socket.off('terminal:forked' as any, handler);
       setForking(false);
-      setForkedId(data.sessionId);
+      // Navigate to the new forked session
+      if (onSelectSession) onSelectSession(data.sessionId);
     };
     socket.on('terminal:forked' as any, handler);
 
@@ -1074,7 +1076,7 @@ function ForkSection({ session, socketRef }: { session: SessionData; socketRef: 
       socket.off('terminal:forked' as any, handler);
       setForking(false);
     }, 10000);
-  }, [socketRef, session.id, forkName]);
+  }, [socketRef, session.id, forkName, onSelectSession]);
 
   return (
     <div style={{ marginBottom: 20 }}>
@@ -1099,17 +1101,14 @@ function ForkSection({ session, socketRef }: { session: SessionData; socketRef: 
           {forking ? 'Forking...' : 'Fork'}
         </button>
       </div>
-      {forkedId && (
-        <div style={{ fontSize: 13, padding: '8px 12px', borderRadius: 8 }}
-          className="status-reason--done">
-          Forked! New session: {forkedId.slice(0, 12)}...
-        </div>
-      )}
     </div>
   );
 }
 
-function InfoTab({ session, cliCmd, contextUsage, socketRef }: { session: SessionData; cliCmd: string; contextUsage: number | null; socketRef: React.RefObject<any> }) {
+function InfoTab({ session, cliCmd, contextUsage, socketRef, onSelectSession }: {
+  session: SessionData; cliCmd: string; contextUsage: number | null;
+  socketRef: React.RefObject<any>; onSelectSession?: (id: string) => void;
+}) {
   const [summaryLoading, setSummaryLoading] = useState(false);
 
   useEffect(() => {
@@ -1275,7 +1274,7 @@ function InfoTab({ session, cliCmd, contextUsage, socketRef }: { session: Sessio
       )}
 
       {/* Fork Session */}
-      <ForkSection session={session} socketRef={socketRef} />
+      <ForkSection session={session} socketRef={socketRef} onSelectSession={onSelectSession} />
 
       {/* Recent Actions */}
       {session.recentActions.length > 0 && (
