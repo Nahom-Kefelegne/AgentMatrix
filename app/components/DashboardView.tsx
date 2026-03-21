@@ -5,12 +5,13 @@ import { motion, AnimatePresence } from 'framer-motion';
 import type { SessionData } from '@/lib/types';
 import { useSocketContext } from './SocketProvider';
 import ContextBar from './ContextBar';
-import { useSessionContext } from '@/lib/hooks/useSessionContext';
 
 const STATUS: Record<string, { label: string; dotClass: string }> = {
   working: { label: 'Working', dotClass: 'status-dot--working' },
   idle: { label: 'Idle', dotClass: 'status-dot--idle' },
   meeting: { label: 'Meeting', dotClass: 'status-dot--meeting' },
+  attention: { label: 'Needs You', dotClass: 'status-dot--attention' },
+  done: { label: 'Done', dotClass: 'status-dot--done' },
 };
 
 function ago(ts: number): string {
@@ -23,12 +24,12 @@ function ago(ts: number): string {
 
 interface Props {
   sessions: Map<string, SessionData>;
+  contextMap: Record<string, number>;
   onSelectSession: (id: string) => void;
 }
 
-export default function DashboardView({ sessions, onSelectSession }: Props) {
-  const { socketRef, connected } = useSocketContext();
-  const contextMap = useSessionContext(socketRef, connected);
+export default function DashboardView({ sessions, contextMap, onSelectSession }: Props) {
+  const { socketRef } = useSocketContext();
   const all = Array.from(sessions.values());
   const [filter, setFilter] = useState('all');
   const [, tick] = useState(0);
@@ -46,9 +47,9 @@ export default function DashboardView({ sessions, onSelectSession }: Props) {
   ].filter(f => f.key === 'all' || counts[f.key] > 0);
 
   return (
-    <div style={{ marginTop: 'var(--header-height)', height: 'calc(100vh - var(--header-height))' }}
+    <div data-scroll-area style={{ height: '100vh' }}
       className="overflow-y-auto">
-      <div style={{ maxWidth: 1200, margin: '0 auto', padding: '36px 36px 80px' }}>
+      <div style={{ maxWidth: 1200, margin: '0 auto', padding: '72px 36px 80px' }}>
         <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="filter-bar">
           {filters.map(f => (
             <button key={f.key} onClick={() => setFilter(f.key)}
@@ -103,14 +104,17 @@ function SessionCard({ s, i, contextUsage, onClick, socketRef }: {
       exit={{ opacity: 0, y: -8 }}
       transition={{ duration: 0.35, delay: i * 0.05, type: 'spring', stiffness: 300, damping: 28 }}
       onClick={onClick}
-      className={`session-card ${working ? 'session-card--working' : ''}`}
+      className={`session-card ${working ? 'session-card--working' : ''} ${s.status === 'attention' ? 'session-card--attention' : ''} ${s.status === 'done' ? 'session-card--done' : ''}`}
     >
       <div className="session-card-body">
         {/* Header */}
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
           <h3 className="session-name" style={{ flex: 1, marginRight: 16 }}>{s.name}</h3>
           <div className="status-badge">
-            <span className="status-label" style={{ color: working ? '#34d399' : s.status === 'meeting' ? '#a78bfa' : undefined }}>
+            <span className="status-label" style={{
+              color: working ? '#34d399' : s.status === 'meeting' ? '#a78bfa'
+                : s.status === 'attention' ? '#f59e0b' : s.status === 'done' ? '#3b82f6' : undefined
+            }}>
               {meta.label}
             </span>
             <div className={`status-dot ${meta.dotClass}`} />
@@ -119,6 +123,13 @@ function SessionCard({ s, i, contextUsage, onClick, socketRef }: {
 
         {/* Path */}
         <div className="session-path">{s.cwd || '~'}</div>
+
+        {/* Status reason (attention/done) */}
+        {s.statusReason && (s.status === 'attention' || s.status === 'done') && (
+          <div className={`status-reason ${s.status === 'attention' ? 'status-reason--attention' : 'status-reason--done'}`}>
+            {s.statusReason}
+          </div>
+        )}
 
         {/* Context bar */}
         {contextUsage !== null && (

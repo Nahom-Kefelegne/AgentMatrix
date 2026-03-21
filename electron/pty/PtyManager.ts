@@ -246,21 +246,27 @@ export class PtyManager {
     if (opts.model) args.push('--model', opts.model);
     if (opts.effort) args.push('--effort', opts.effort);
     if (opts.allowedTools) args.push('--allowedTools', opts.allowedTools);
-    if (opts.systemPrompt) {
-      // Use single quotes to avoid shell interpretation issues
-      const escaped = opts.systemPrompt.replace(/'/g, "'\\''");
-      args.push('--append-system-prompt', `'${escaped}'`);
-    }
+    // Always inject MCP status instructions + user's custom prompt
+    const mcpInstructions = 'You have access to Agent Matrix MCP tools. When you need user input (questions, decisions, approvals), call mcp__agentmatrix__request_attention with a reason. When you finish the task the user assigned, call mcp__agentmatrix__work_complete with a summary.';
+    const fullPrompt = opts.systemPrompt
+      ? `${mcpInstructions}\n\n${opts.systemPrompt}`
+      : mcpInstructions;
+    const escaped = fullPrompt.replace(/'/g, "'\\''");
+    args.push('--append-system-prompt', `'${escaped}'`);
     return this.createPtySession(id, this.spawnPty(opts.cwd, args));
   }
 
-  spawnResume(id: string, opts: { cwd?: string; resumeId: string; fork?: boolean }): PtySession {
+  spawnResume(id: string, opts: { cwd?: string; resumeId: string; fork?: boolean; systemPrompt?: string }): PtySession {
     if (this.sessions.has(id)) throw new Error(`Session ${id} already exists`);
     const foundCwd = this.findSessionCwd(opts.resumeId);
     const cwd = foundCwd ?? opts.cwd ?? homedir();
     console.log(`[spawnResume] id=${id.slice(0, 12)} resumeId=${opts.resumeId.slice(0, 12)} foundCwd=${foundCwd} optsCwd=${opts.cwd} finalCwd=${cwd}`);
     const args = ['--resume', opts.resumeId, '--dangerously-skip-permissions'];
     if (opts.fork) args.push('--fork-session');
+    if (opts.fork && opts.systemPrompt) {
+      const escaped = opts.systemPrompt.replace(/'/g, "'\\''");
+      args.push('--append-system-prompt', `'${escaped}'`);
+    }
     return this.createPtySession(id, this.spawnPty(cwd, args));
   }
 

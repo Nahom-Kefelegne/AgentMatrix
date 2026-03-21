@@ -5,7 +5,7 @@ export interface Point {
   y: number;
 }
 
-export type SessionStatus = 'idle' | 'working' | 'meeting';
+export type SessionStatus = 'idle' | 'working' | 'meeting' | 'attention' | 'done';
 
 export interface Action {
   toolName: string;
@@ -43,6 +43,7 @@ export interface SessionData {
   contextUsage?: number;
   summaryBullets?: string[];
   filesModified?: string[];
+  statusReason?: string;
   createdAt: number;
 }
 

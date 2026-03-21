@@ -3,6 +3,7 @@
 import { useState, useCallback, useRef, useEffect } from 'react';
 import dynamic from 'next/dynamic';
 import type { CharacterData } from '@/lib/types';
+import { useSessionContext } from '@/lib/hooks/useSessionContext';
 import { SocketProvider, useSocketContext } from './components/SocketProvider';
 import { ThemeProvider } from './components/ThemeProvider';
 import HeaderBar from './components/HeaderBar';
@@ -22,6 +23,7 @@ const EditorView = dynamic(() => import('./components/editor/EditorView'), { ssr
 
 function OfficeView() {
   const { connected, sessions, onEvent, socketRef } = useSocketContext();
+  const contextMap = useSessionContext(socketRef, connected);
 
   const [hoveredChar, setHoveredChar] = useState<CharacterData | null>(null);
   const [hoverPos, setHoverPos] = useState({ x: 0, y: 0 });
@@ -127,7 +129,7 @@ function OfficeView() {
       </div>
 
       {viewMode === 'dashboard' && (
-        <DashboardView sessions={sessions} onSelectSession={(id) => setSelectedSessionId(id)} />
+        <DashboardView sessions={sessions} contextMap={contextMap} onSelectSession={(id) => setSelectedSessionId(id)} />
       )}
 
       {viewMode === 'editor' && <EditorView />}
