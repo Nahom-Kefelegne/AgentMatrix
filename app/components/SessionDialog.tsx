@@ -380,17 +380,13 @@ export default function SessionDialog({
 
   const handleRestart = async () => {
     if (!confirm(`Restart "${session.name}"?`)) return;
-    try {
-      const res = await fetch('/api/sessions/restart', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ sessionId: session.id }),
-      });
-      const data = await res.json();
-      if (data.command) setRestartCommand(data.command);
-    } catch (err) {
-      console.error('Failed to restart:', err);
-    }
+    const socket = socketRef.current;
+    if (!socket) return;
+    // End current session, then resume it after PTY cleanup
+    socket.emit('terminal:end' as any, { sessionId: session.id });
+    setTimeout(() => {
+      socket.emit('terminal:resume' as any, { sessionId: session.id });
+    }, 5000);
   };
 
   const cliCmd = `cd ${session.cwd || '~'} && claude --dangerously-skip-permissions --resume ${session.name}`;

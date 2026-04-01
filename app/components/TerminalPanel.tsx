@@ -102,7 +102,24 @@ export default function TerminalPanel({ sessionId, sessionName, cwd, visible, re
         try { terminal.loadAddon(new WebglAddon()); } catch {}
       }
 
-      try { fitAddon.fit(); } catch {}
+      // Delay initial fit until container has real dimensions
+      // (dialog animation may not have settled yet)
+      const tryFit = () => {
+        if (container.clientWidth > 0 && container.clientHeight > 0) {
+          try { fitAddon.fit(); } catch {}
+          return true;
+        }
+        return false;
+      };
+      if (!tryFit()) {
+        // Container has no size yet — wait for layout
+        const layoutObserver = new ResizeObserver(() => {
+          if (tryFit()) layoutObserver.disconnect();
+        });
+        layoutObserver.observe(container);
+        // Safety: disconnect after 3s regardless
+        setTimeout(() => layoutObserver.disconnect(), 3000);
+      }
 
       termRef.current = terminal;
       fitRef.current = fitAddon;

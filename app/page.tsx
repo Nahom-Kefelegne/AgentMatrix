@@ -75,6 +75,13 @@ function OfficeView() {
 
   const handleCloseDialog = useCallback(() => setSelectedSessionId(null), []);
 
+  // Auto-clear selectedSessionId when the session is removed (ended/killed)
+  useEffect(() => {
+    if (selectedSessionId && !sessions.has(selectedSessionId)) {
+      setSelectedSessionId(null);
+    }
+  }, [selectedSessionId, sessions]);
+
   // Clear done/attention status when user opens a session
   useEffect(() => {
     if (!selectedSessionId) return;
@@ -141,8 +148,10 @@ function OfficeView() {
         <HoverCard character={hoveredChar} x={hoverPos.x} y={hoverPos.y} />
       </div>
 
-      {viewMode === 'dashboard' && !selectedSessionId && (
-        <DashboardView sessions={sessions} contextMap={contextMap} onSelectSession={(id) => setSelectedSessionId(id)} />
+      {viewMode === 'dashboard' && (
+        <div style={{ display: selectedSessionId ? 'none' : 'contents' }}>
+          <DashboardView sessions={sessions} contextMap={contextMap} onSelectSession={(id) => setSelectedSessionId(id)} />
+        </div>
       )}
 
       {viewMode === 'editor' && <EditorView />}
