@@ -110,14 +110,20 @@ export default function TerminalPanel({ sessionId, sessionName, cwd, visible, re
       // Focus the terminal so keyboard works immediately
       terminal.focus();
 
-      // Forward keystrokes to PTY via socket (unless read-only)
+      // Forward keystrokes to PTY (unless read-only)
+      // Use Electron IPC when available (direct, no Socket.io hop) — falls back to socket
+      const electronAPI = (window as any).electronAPI;
+      const writeToTerminal = electronAPI?.terminalWrite
+        ? (data: string) => electronAPI.terminalWrite(sessionId, data)
+        : (data: string) => socket.emit('terminal:input', { sessionId, data });
+
       if (!readOnly) {
         // Handle special key combos that xterm doesn't send correctly
         terminal.attachCustomKeyEventHandler((e: KeyboardEvent) => {
           if (e.key === 'Enter' && e.shiftKey) {
             if (e.type === 'keydown') {
               // Shift+Enter — send CSI u encoding so Claude TUI gets it as newline
-              socket.emit('terminal:input', { sessionId, data: '\x1b[13;2u' });
+              writeToTerminal('\x1b[13;2u');
             }
             return false;
           }
@@ -132,7 +138,7 @@ export default function TerminalPanel({ sessionId, sessionName, cwd, visible, re
             if (e.type === 'keydown') {
               e.preventDefault();
               navigator.clipboard.readText().then(text => {
-                if (text) socket.emit('terminal:input', { sessionId, data: text });
+                if (text) writeToTerminal(text);
               });
             }
             return false;
@@ -151,7 +157,7 @@ export default function TerminalPanel({ sessionId, sessionName, cwd, visible, re
         });
 
         terminal.onData((data: string) => {
-          socket.emit('terminal:input', { sessionId, data });
+          writeToTerminal(data);
         });
       }
 

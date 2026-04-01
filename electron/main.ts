@@ -1,4 +1,4 @@
-import { app, BrowserWindow, Menu, Tray, nativeImage } from 'electron';
+import { app, BrowserWindow, Menu, Tray, nativeImage, ipcMain } from 'electron';
 import path from 'path';
 import { createServer } from 'http';
 import { Server as SocketIOServer } from 'socket.io';
@@ -19,6 +19,14 @@ let mainWindow: BrowserWindow | null = null;
 let tray: Tray | null = null;
 export let io: SocketIOServer | null = null;
 const ptyManager = new PtyManager();
+
+// Direct IPC for terminal keystrokes — bypasses Socket.io for zero-latency input
+ipcMain.on('terminal:write', (_event, sessionId: string, data: string) => {
+  const session = ptyManager.getSession(sessionId);
+  if (session && session.status !== 'closed') {
+    session.pty.write(data);
+  }
+});
 
 function createWindow() {
   mainWindow = new BrowserWindow({

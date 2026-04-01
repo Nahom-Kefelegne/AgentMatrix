@@ -141,7 +141,7 @@ function OfficeView() {
         <HoverCard character={hoveredChar} x={hoverPos.x} y={hoverPos.y} />
       </div>
 
-      {viewMode === 'dashboard' && (
+      {viewMode === 'dashboard' && !selectedSessionId && (
         <DashboardView sessions={sessions} contextMap={contextMap} onSelectSession={(id) => setSelectedSessionId(id)} />
       )}
 
