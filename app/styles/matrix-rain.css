@@ -1,0 +1,231 @@
+/* ═══════════════════════════════════════════════
+   Matrix Rain — falling character effect behind cards
+   ═══════════════════════════════════════════════ */
+
+.matrix-card {
+  position: relative;
+  border-radius: 16px;
+  overflow: hidden;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  background: #fff;
+  border: 1px solid #e5e5e5;
+}
+.dark .matrix-card {
+  background: #0c0c0f;
+  border-color: #1e1e24;
+}
+.matrix-card:hover {
+  transform: translateY(-4px);
+  box-shadow: 0 24px 48px rgba(0, 0, 0, 0.08);
+}
+.dark .matrix-card:hover {
+  box-shadow: 0 24px 48px rgba(0, 0, 0, 0.5);
+  border-color: #2a2a32;
+}
+
+/* Working card glow */
+.matrix-card--working {
+  border-color: rgba(52, 211, 153, 0.25);
+}
+.dark .matrix-card--working {
+  border-color: rgba(52, 211, 153, 0.2);
+}
+.matrix-card--working:hover {
+  box-shadow: 0 24px 48px rgba(52, 211, 153, 0.08);
+}
+.dark .matrix-card--working:hover {
+  box-shadow: 0 24px 48px rgba(52, 211, 153, 0.12);
+}
+.matrix-card--attention {
+  border-color: rgba(245, 158, 11, 0.3);
+}
+.matrix-card--done {
+  border-color: rgba(59, 130, 246, 0.25);
+}
+
+/* Rain container — sits behind the card content */
+.matrix-rain-bg {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  z-index: 0;
+  opacity: 0;
+  transition: opacity 0.5s;
+}
+/* Show rain on active session cards */
+.session-card--active .matrix-rain-bg {
+  opacity: 1;
+}
+.session-card--attention .matrix-rain-bg {
+  opacity: 1;
+}
+
+/* Also support the standalone matrix-card classes */
+.matrix-card--working .matrix-rain-bg,
+.matrix-card--attention .matrix-rain-bg {
+  opacity: 1;
+}
+.matrix-card--meeting .matrix-rain-bg,
+.session-card--active.session-card--meeting .matrix-rain-bg {
+  opacity: 0.6;
+}
+
+/* Individual rain column */
+.matrix-rain-col {
+  position: absolute;
+  top: 0;
+  width: 14px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  animation: matrix-fall var(--fall-duration, 4s) linear infinite;
+  animation-delay: var(--fall-delay, 0s);
+}
+
+.matrix-rain-char {
+  font-family: 'Courier New', monospace;
+  font-size: 11px;
+  line-height: 14px;
+  color: rgba(52, 211, 153, 0.25);
+  user-select: none;
+}
+/* Head character — brightest */
+.matrix-rain-char:first-child {
+  color: rgba(52, 211, 153, 0.7);
+  text-shadow: 0 0 8px rgba(52, 211, 153, 0.5);
+}
+.matrix-rain-char:nth-child(2) {
+  color: rgba(52, 211, 153, 0.5);
+}
+.matrix-rain-char:nth-child(3) {
+  color: rgba(52, 211, 153, 0.35);
+}
+
+/* Attention rain — amber */
+.matrix-card--attention .matrix-rain-char,
+.session-card--attention .matrix-rain-char {
+  color: rgba(245, 158, 11, 0.2);
+}
+.matrix-card--attention .matrix-rain-char:first-child,
+.session-card--attention .matrix-rain-char:first-child {
+  color: rgba(245, 158, 11, 0.6);
+  text-shadow: 0 0 8px rgba(245, 158, 11, 0.4);
+}
+.matrix-card--attention .matrix-rain-char:nth-child(2),
+.session-card--attention .matrix-rain-char:nth-child(2) {
+  color: rgba(245, 158, 11, 0.4);
+}
+
+/* Light mode — much more subtle */
+:root:not(.dark) .matrix-rain-char {
+  color: rgba(52, 211, 153, 0.08);
+}
+:root:not(.dark) .matrix-rain-char:first-child {
+  color: rgba(52, 211, 153, 0.2);
+  text-shadow: none;
+}
+
+@keyframes matrix-fall {
+  0% { transform: translateY(-100%); }
+  100% { transform: translateY(300px); }
+}
+
+/* Card content — above the rain */
+.matrix-card-content {
+  position: relative;
+  z-index: 1;
+  padding: 20px 24px 16px;
+}
+
+.matrix-card-name {
+  font-size: 18px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: #0a0a0a;
+  margin-bottom: 4px;
+}
+.dark .matrix-card-name {
+  color: #fafafa;
+}
+
+.matrix-card-path {
+  font-size: 12px;
+  font-family: monospace;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: #a1a1aa;
+  margin-bottom: 12px;
+}
+.dark .matrix-card-path {
+  color: #71717a;
+}
+
+.matrix-card-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+.matrix-card-status-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+}
+.matrix-card-status-dot--working {
+  animation: matrix-dot-pulse 1.5s ease-in-out infinite;
+}
+@keyframes matrix-dot-pulse {
+  0%, 100% { box-shadow: 0 0 4px currentColor; }
+  50% { box-shadow: 0 0 12px currentColor, 0 0 24px currentColor; }
+}
+
+/* Reason strip */
+.matrix-card-reason {
+  font-size: 12px;
+  margin-top: 8px;
+  padding: 6px 10px;
+  border-radius: 6px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.matrix-card-reason--attention {
+  background: rgba(245, 158, 11, 0.08);
+  color: #b45309;
+}
+.dark .matrix-card-reason--attention {
+  color: #fbbf24;
+}
+.matrix-card-reason--done {
+  background: rgba(59, 130, 246, 0.08);
+  color: #1d4ed8;
+}
+.dark .matrix-card-reason--done {
+  color: #60a5fa;
+}
+
+/* Footer */
+.matrix-card-footer {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 24px 14px;
+}
+.matrix-card-id {
+  font-size: 11px;
+  font-family: monospace;
+  color: #d4d4d8;
+}
+.dark .matrix-card-id {
+  color: #3f3f46;
+}

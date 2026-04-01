@@ -421,46 +421,18 @@
   opacity: 0.35;
 }
 
-/* Working card — rotating gradient border + green glow */
-.session-card--working {
-  border: none;
-  --angle: 0deg;
-  animation: border-spin 3s linear infinite;
+/* Active card (working/meeting/attention) — subtle green border */
+.session-card--active {
+  border-color: rgba(52, 211, 153, 0.2);
 }
-.session-card--working::before {
-  content: '';
-  position: absolute;
-  inset: -1px;
-  border-radius: 17px;
-  padding: 1.5px;
-  background: conic-gradient(from var(--angle), #34d399, #06b6d4, #8b5cf6, #34d399);
-  -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
-  -webkit-mask-composite: xor;
-  mask-composite: exclude;
-  pointer-events: none;
-  z-index: 1;
+.dark .session-card--active {
+  border-color: rgba(52, 211, 153, 0.15);
 }
-.session-card--working::after {
-  background: rgba(52, 211, 153, 0.2);
-  opacity: 0.6;
+.session-card--active:hover {
+  box-shadow: 0 24px 48px rgba(52, 211, 153, 0.08);
 }
-.session-card--working:hover::after {
-  opacity: 1;
-}
-.session-card--working .session-card-body::before {
-  background: linear-gradient(90deg, #34d399, #06b6d4, transparent);
-  opacity: 0.6;
-  animation: shimmer-strip 2s ease-in-out infinite;
-}
-@keyframes shimmer-strip {
-  0%, 100% { opacity: 0.4; }
-  50% { opacity: 0.8; }
-}
-.session-card--working:hover {
-  box-shadow: 0 24px 48px rgba(52, 211, 153, 0.1);
-}
-.dark .session-card--working:hover {
-  box-shadow: 0 24px 48px rgba(52, 211, 153, 0.15);
+.dark .session-card--active:hover {
+  box-shadow: 0 24px 48px rgba(52, 211, 153, 0.12);
 }
 
 /* Attention card — pulsing amber glow */
@@ -528,14 +500,6 @@
   border-color: rgba(59, 130, 246, 0.15);
 }
 
-@property --angle {
-  syntax: '<angle>';
-  initial-value: 0deg;
-  inherits: false;
-}
-@keyframes border-spin {
-  to { --angle: 360deg; }
-}
 
 /* Card inner gradient mesh — subtle color in corners */
 .session-card-body {
@@ -1316,12 +1280,12 @@
 /* ─── Dashboard Background ─── */
 .dashboard-bg {
   background-color: #fafaf9;
-  background-image: radial-gradient(circle, rgba(0, 0, 0, 0.06) 1px, transparent 1px);
+  background-image: radial-gradient(circle, rgba(0, 0, 0, 0.12) 1px, transparent 1px);
   background-size: 24px 24px;
 }
 .dark .dashboard-bg {
   background-color: #000;
-  background-image: radial-gradient(circle, rgba(255, 255, 255, 0.04) 1px, transparent 1px);
+  background-image: radial-gradient(circle, rgba(255, 255, 255, 0.08) 1px, transparent 1px);
   background-size: 24px 24px;
 }
 

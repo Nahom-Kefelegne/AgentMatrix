@@ -1,12 +1,13 @@
 'use client';
 
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import type { SessionData } from '@/lib/types';
 import { useSocketContext } from './SocketProvider';
 import ContextBar from './ContextBar';
 import AmbientOrbs from './AmbientOrbs';
-import ActivityTicker from './ActivityTicker';
+
+import MatrixRain from './MatrixRain';
 
 const STATUS: Record<string, { label: string; dotClass: string }> = {
   working: { label: 'Working', dotClass: 'status-dot--working' },
@@ -38,10 +39,10 @@ export default function DashboardView({ sessions, contextMap, onSelectSession }:
   const dragItem = useRef<string | null>(null);
   const dragOverItem = useRef<string | null>(null);
   const [dragId, setDragId] = useState<string | null>(null);
+  const [dragOverId, setDragOverId] = useState<string | null>(null);
   const [, tick] = useState(0);
   useEffect(() => { const i = setInterval(() => tick(t => t + 1), 5000); return () => clearInterval(i); }, []);
 
-  // Keep order in sync with sessions
   const sessionIds = all.map(s => s.id).join(',');
   useEffect(() => {
     const ids = sessionIds.split(',').filter(Boolean);
@@ -63,13 +64,10 @@ export default function DashboardView({ sessions, contextMap, onSelectSession }:
     all: all.length, working: all.filter(s => s.status === 'working').length,
     idle: all.filter(s => s.status === 'idle').length, meeting: all.filter(s => s.status === 'meeting').length,
   };
-
   const filters = [
     { key: 'all', label: 'All' }, { key: 'working', label: 'Working' },
     { key: 'idle', label: 'Idle' }, { key: 'meeting', label: 'Meeting' },
   ].filter(f => f.key === 'all' || counts[f.key] > 0);
-
-  const [dragOverId, setDragOverId] = useState<string | null>(null);
 
   const handleDragStart = (e: React.DragEvent, id: string) => {
     dragItem.current = id;
@@ -79,10 +77,7 @@ export default function DashboardView({ sessions, contextMap, onSelectSession }:
   const handleDragOver = (e: React.DragEvent, id: string) => {
     e.preventDefault();
     e.dataTransfer.dropEffect = 'move';
-    if (!dragItem.current || dragItem.current === id) {
-      setDragOverId(null);
-      return;
-    }
+    if (!dragItem.current || dragItem.current === id) { setDragOverId(null); return; }
     setDragOverId(id);
     if (dragOverItem.current === id) return;
     dragOverItem.current = id;
@@ -109,7 +104,6 @@ export default function DashboardView({ sessions, contextMap, onSelectSession }:
       <AmbientOrbs />
       <div className="noise-overlay" />
       <div style={{ maxWidth: 1200, margin: '0 auto', padding: '72px 36px 80px', position: 'relative', zIndex: 2 }}>
-        <ActivityTicker sessions={sessions} />
         <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="filter-bar">
           {filters.map(f => (
             <button key={f.key} onClick={() => setFilter(f.key)}
@@ -132,8 +126,6 @@ export default function DashboardView({ sessions, contextMap, onSelectSession }:
                 onClick={() => { if (!dragId) onSelectSession(s.id); }}
                 socketRef={socketRef}
                 isDragging={dragId === s.id}
-                isDragOver={dragOverId === s.id}
-                anyDragging={!!dragId}
                 onDragStart={(e) => handleDragStart(e, s.id)}
                 onDragOver={(e) => handleDragOver(e, s.id)}
                 onDragEnd={handleDragEnd} />
@@ -145,18 +137,17 @@ export default function DashboardView({ sessions, contextMap, onSelectSession }:
   );
 }
 
-function SessionCard({ s, i, contextUsage, onClick, socketRef, isDragging, isDragOver, anyDragging, onDragStart, onDragOver, onDragEnd }: {
+function SessionCard({ s, i, contextUsage, onClick, socketRef, isDragging, onDragStart, onDragOver, onDragEnd }: {
   s: SessionData; i: number; contextUsage: number | null;
   onClick: () => void; socketRef: React.RefObject<any>;
   isDragging?: boolean;
-  isDragOver?: boolean;
-  anyDragging?: boolean;
   onDragStart?: (e: React.DragEvent) => void;
   onDragOver?: (e: React.DragEvent) => void;
   onDragEnd?: () => void;
 }) {
   const meta = STATUS[s.status] || STATUS.idle;
   const working = s.status === 'working';
+  const isActive = working || s.status === 'meeting' || s.status === 'attention';
   const [summaryRequested, setSummaryRequested] = useState(false);
   const hasSummary = s.summaryBullets && s.summaryBullets.length > 0;
   const loading = summaryRequested && !hasSummary;
@@ -164,65 +155,50 @@ function SessionCard({ s, i, contextUsage, onClick, socketRef, isDragging, isDra
   const handleSummary = useCallback((e: React.MouseEvent) => {
     e.stopPropagation();
     setSummaryRequested(true);
-    socketRef.current?.emit('session:summary', { sessionId: s.id });
+    socketRef.current?.emit('session:summary' as any, { sessionId: s.id });
   }, [socketRef, s.id]);
+
+  const statusColor = working ? '#34d399' : s.status === 'meeting' ? '#a78bfa'
+    : s.status === 'attention' ? '#f59e0b' : s.status === 'done' ? '#3b82f6' : undefined;
 
   return (
     <motion.div
       layout
       initial={{ opacity: 0, y: 16 }}
-      animate={{
-        opacity: isDragging ? 0.3 : 1,
-        y: 0,
-        scale: isDragging ? 0.98 : 1,
-      }}
+      animate={{ opacity: isDragging ? 0.3 : 1, y: 0, scale: isDragging ? 0.98 : 1 }}
       exit={{ opacity: 0, y: -8 }}
       transition={{ layout: { type: 'spring', stiffness: 500, damping: 35 }, default: { duration: 0.15 } }}
-      {...{
-        draggable: true,
-        onDragStart: onDragStart as any,
-        onDragOver: onDragOver as any,
-        onDragEnd: onDragEnd as any,
-      }}
+      {...{ draggable: true, onDragStart: onDragStart as any, onDragOver: onDragOver as any, onDragEnd: onDragEnd as any }}
       onClick={onClick}
-      style={{
-        cursor: isDragging ? 'grabbing' : 'grab',
-      }}
-      className={`session-card ${working ? 'session-card--working' : ''} ${s.status === 'attention' ? 'session-card--attention' : ''} ${s.status === 'done' ? 'session-card--done' : ''}`}
+      style={{ cursor: isDragging ? 'grabbing' : 'grab' }}
+      className={`session-card ${s.status === 'attention' ? 'session-card--attention' : ''} ${s.status === 'done' ? 'session-card--done' : ''} ${isActive ? 'session-card--active' : ''}`}
     >
+      {/* Matrix rain behind content */}
+      <MatrixRain sessionId={s.id} />
+
       <div className="session-card-body">
-        {/* Header */}
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
           <h3 className="session-name" style={{ flex: 1, marginRight: 16 }}>{s.name}</h3>
           <div className="status-badge">
-            <span className="status-label" style={{
-              color: working ? '#34d399' : s.status === 'meeting' ? '#a78bfa'
-                : s.status === 'attention' ? '#f59e0b' : s.status === 'done' ? '#3b82f6' : undefined
-            }}>
-              {meta.label}
-            </span>
+            <span className="status-label" style={{ color: statusColor }}>{meta.label}</span>
             <div className={`status-dot ${meta.dotClass}`} />
           </div>
         </div>
 
-        {/* Path */}
         <div className="session-path">{s.cwd || '~'}</div>
 
-        {/* Status reason (attention/done) */}
         {s.statusReason && (s.status === 'attention' || s.status === 'done') && (
           <div className={`status-reason ${s.status === 'attention' ? 'status-reason--attention' : 'status-reason--done'}`}>
             {s.statusReason}
           </div>
         )}
 
-        {/* Context bar */}
         {contextUsage !== null && (
           <div style={{ marginTop: 14 }}>
             <ContextBar usage={contextUsage} compact />
           </div>
         )}
 
-        {/* Working indicator */}
         {working && s.lastToolSummary && (
           <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }}
             className="working-strip">
@@ -230,20 +206,17 @@ function SessionCard({ s, i, contextUsage, onClick, socketRef, isDragging, isDra
           </motion.div>
         )}
 
-        {/* Summary */}
         {hasSummary && (
           <div style={{ marginTop: 14 }}>
             {s.summaryBullets!.map((b, j) => (
               <div key={j} className="summary-bullet">
-                <span className="summary-bullet-dot">●</span>
-                {b}
+                <span className="summary-bullet-dot">●</span>{b}
               </div>
             ))}
           </div>
         )}
       </div>
 
-      {/* Footer */}
       <div className="session-card-footer">
         <span className="session-id">{s.id.slice(0, 8)}</span>
         <button onClick={handleSummary} disabled={loading || !!hasSummary}

@@ -14,12 +14,12 @@
   position: absolute;
   border-radius: 50%;
   filter: blur(80px);
-  opacity: 0.12;
+  opacity: 0.35;
   will-change: transform;
 }
 
 .dark .ambient-orb {
-  opacity: 0.08;
+  opacity: 0.25;
 }
 
 /* Orb 1 — indigo, top-left drift */

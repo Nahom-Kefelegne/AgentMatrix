@@ -768,8 +768,8 @@ function ChangesViewer({ sessionId, sessionName, onClose }: {
 function DiffView({ original, current, isNew, filePath, mode }: {
   original: string; current: string; isNew: boolean; filePath: string; mode: 'inline' | 'split';
 }) {
-  const origLines = original.split('\n');
-  const currLines = current.split('\n');
+  const origLines = (original || '').split('\n');
+  const currLines = (current || '').split('\n');
 
   const maxLines = Math.max(origLines.length, currLines.length);
   const lines: Array<{ type: 'same' | 'add' | 'remove' | 'change'; lineNum: number; orig: string; curr: string }> = [];
