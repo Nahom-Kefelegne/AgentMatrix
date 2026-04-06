@@ -1,3 +1,14 @@
+// ===== Review Comments =====
+
+export interface ReviewComment {
+  id: string;
+  filePath: string;
+  lineNumber: number;
+  text: string;
+  createdAt: number;
+  resolved: boolean;
+}
+
 // ===== Core Data Types =====
 
 export interface Point {
@@ -45,6 +56,7 @@ export interface SessionData {
   filesModified?: string[];
   statusReason?: string;
   createdAt: number;
+  reviewComments?: ReviewComment[];
 }
 
 // ===== UI Data (exposed to React) =====

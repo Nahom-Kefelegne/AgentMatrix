@@ -1,3 +1,4 @@
+// File changes tracking — git diff integration for session file modifications
 import { NextResponse } from 'next/server';
 import { getSession, updateSession } from '@/lib/state/sessionStore';
 import { execSync } from 'child_process';
