@@ -283,7 +283,11 @@ export default function ChangesViewer({ sessionId, sessionName, cwd, onClose, so
       .then(data => { setFiles(data.files || []); setLoading(false); })
       .catch(() => setLoading(false));
   }, [sessionId]);
-  useEffect(() => { loadFiles(); }, [loadFiles]);
+  useEffect(() => {
+    loadFiles();
+    const interval = setInterval(loadFiles, 5000);
+    return () => clearInterval(interval);
+  }, [loadFiles]);
 
   // === Load comments ===
   const loadComments = useCallback(() => {
@@ -896,7 +900,7 @@ export default function ChangesViewer({ sessionId, sessionName, cwd, onClose, so
                             <span style={{ fontSize: 10, padding: '1px 6px', borderRadius: 8, background: '#fbbf2420', color: '#fbbf24', fontWeight: 700 }}>{commentCount}</span>
                           )}
                         </div>
-                        <div style={{ fontSize: 11, color: '#555', fontFamily: "'Courier New', monospace", marginTop: 2 }}>{dir}</div>
+                        <div style={{ fontSize: 11, color: '#999', fontFamily: "'Courier New', monospace", marginTop: 2 }}>{dir}</div>
                         <div style={{ display: 'flex', gap: 8, marginTop: 4, fontSize: 11, alignItems: 'center' }}>
                           <span style={{ color: statusColors[f.status] || '#888', fontWeight: 700 }}>{f.status}</span>
                           {f.additions > 0 && <span style={{ color: '#51cf66' }}>+{f.additions}</span>}
@@ -937,7 +941,7 @@ export default function ChangesViewer({ sessionId, sessionName, cwd, onClose, so
                             )}
                           </div>
                           {dir && (
-                            <div style={{ fontSize: 10, color: '#555', fontFamily: "'Courier New', monospace", marginTop: 1, paddingLeft: 18, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{dir}</div>
+                            <div style={{ fontSize: 10, color: '#999', fontFamily: "'Courier New', monospace", marginTop: 1, paddingLeft: 18, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{dir}</div>
                           )}
                         </div>
                       );
@@ -1064,7 +1068,7 @@ export default function ChangesViewer({ sessionId, sessionName, cwd, onClose, so
             </>
           )}
           {viewMode === 'browse' && repoRoot && (
-            <span style={{ fontSize: 11, color: '#555', fontFamily: "'Courier New', monospace", overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 300 }}>
+            <span style={{ fontSize: 11, color: '#999', fontFamily: "'Courier New', monospace", overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 300 }}>
               {repoRoot}
             </span>
           )}
