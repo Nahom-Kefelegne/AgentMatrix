@@ -102,24 +102,33 @@ export default function TerminalPanel({ sessionId, sessionName, cwd, visible, re
         try { terminal.loadAddon(new WebglAddon()); } catch {}
       }
 
-      // Delay initial fit until container has real dimensions
-      // (dialog animation may not have settled yet)
-      const tryFit = () => {
-        if (container.clientWidth > 0 && container.clientHeight > 0) {
-          try { fitAddon.fit(); } catch {}
-          return true;
-        }
-        return false;
+      // Fit + resize PTY to match container.
+      // Must send terminal:resize so the PTY knows the real dimensions.
+      const fitAndResize = () => {
+        if (container.clientWidth <= 0 || container.clientHeight <= 0) return false;
+        try {
+          fitAddon.fit();
+          socket.emit('terminal:resize', {
+            sessionId,
+            cols: terminal.cols,
+            rows: terminal.rows,
+          });
+        } catch {}
+        return true;
       };
-      if (!tryFit()) {
-        // Container has no size yet — wait for layout
+
+      // Try immediately, then observe until container has size
+      if (!fitAndResize()) {
         const layoutObserver = new ResizeObserver(() => {
-          if (tryFit()) layoutObserver.disconnect();
+          if (fitAndResize()) layoutObserver.disconnect();
         });
         layoutObserver.observe(container);
-        // Safety: disconnect after 3s regardless
         setTimeout(() => layoutObserver.disconnect(), 3000);
       }
+      // Extra fits for dialog animation settling
+      setTimeout(fitAndResize, 100);
+      setTimeout(fitAndResize, 300);
+      setTimeout(fitAndResize, 600);
 
       termRef.current = terminal;
       fitRef.current = fitAddon;
@@ -204,32 +213,13 @@ export default function TerminalPanel({ sessionId, sessionName, cwd, visible, re
       setStatus('connecting');
       socket.emit('terminal:resume' as any, { sessionId });
 
-      // Send initial resize so PTY matches terminal panel size
-      // This must happen after resume so the PTY exists
-      setTimeout(() => {
-        try {
-          fitAddon.fit();
-          socket.emit('terminal:resize', {
-            sessionId,
-            cols: terminal.cols,
-            rows: terminal.rows,
-          });
-        } catch {}
-      }, 200);
+      // Resize again after resume — PTY now exists and can receive the dimensions
+      setTimeout(fitAndResize, 200);
+      setTimeout(fitAndResize, 500);
 
       // Handle resize — debounce to avoid flicker
       let resizeTimer: ReturnType<typeof setTimeout> | null = null;
-      const doFit = () => {
-        if (!fitAddon || !terminal) return;
-        try {
-          fitAddon.fit();
-          socket.emit('terminal:resize', {
-            sessionId,
-            cols: terminal.cols,
-            rows: terminal.rows,
-          });
-        } catch {}
-      };
+      const doFit = () => fitAndResize();
       const resizeObserver = new ResizeObserver(() => {
         if (resizeTimer) clearTimeout(resizeTimer);
         resizeTimer = setTimeout(doFit, 50);
