@@ -1,5 +1,7 @@
 # Agent Matrix — Multi-CLI Support Design Document
 
+> **Note:** Claude Agent SDK is not available to users. All Claude integration must use the CLI binary directly (PTY or `--output-format stream-json` flags). Copilot integration can use the built-in ACP protocol (`copilot --acp --stdio`).
+
 ## Overview
 
 Agent Matrix currently only supports Claude Code CLI. This design adds support for **GitHub Copilot CLI** while keeping Claude Code as the primary provider. The architecture abstracts all CLI-specific behavior behind a `CliProvider` interface, making it straightforward to add future CLI agents.
@@ -524,49 +526,241 @@ interface AppSettings {
 
 ## Implementation Phases
 
-### Phase 1: Abstract & Refactor (no new features, pure refactor)
+### Phase 1: CliProvider Skeleton + Health Checks
 
-1. Create `CliProvider` interface
-2. Extract `ClaudeProvider` from existing hardcoded logic
-3. Thread provider through PtyManager, OutputParser, SessionScanner
-4. Verify all existing functionality works identically
+1. Create `CliProvider` interface (`lib/cli/CliProvider.ts`)
+2. Create `ClaudeProvider` — extract existing hardcoded Claude logic (pure refactor)
+3. Create `CopilotProvider` — stub implementation
+4. Create factory + auto-detection (`lib/cli/index.ts`)
+5. Create `/api/cli/health` route — returns installed CLIs with version/status
+6. Thread provider through PtyManager, OutputParser, SessionScanner
+7. Verify all existing Claude functionality works identically
 
-**Risk:** Low — pure refactor, no behavior change.
+**Deliverables:** Provider interface, Claude still works, health check API available.
+**Risk:** Low — pure refactor + new API route.
 
-### Phase 2: Add CopilotProvider (basic support)
+### Phase 2: UX — CLI Selection & Visual Identity
 
-1. Implement `CopilotProvider` — binary detection, spawn args, session discovery
-2. Update setup scripts to detect and configure both CLIs
-3. Add CLI selector to Spawn Modal
-4. Add `cliType` to SessionData
-5. Test: spawn, resume, and interact with Copilot sessions
+1. Add `cliType: 'claude' | 'copilot'` to `SessionData` in `lib/types.ts`
+2. Update `SpawnModal` — CLI selector with health-gated buttons, CLI-specific model lists
+3. Update `AppSettingsModal` — CLI section with status, default CLI, binary paths
+4. Update `DashboardView` — CLI icon on session cards
+5. Update `SessionDialog` — CLI badge in header
+6. Update `OfficeCanvas` HoverCard — CLI icon
+7. Update `terminal:new` socket event to include `cliType`
+8. Update `terminalBridge` to use provider based on `cliType`
+9. Disable spawn/resume when no CLIs are detected
 
-**Risk:** Medium — new CLI integration, may hit undocumented behaviors.
+**Deliverables:** Full UX for multi-CLI, visual differentiation, health gates.
+**Risk:** Low-medium — UI changes, no new CLI behavior yet.
 
-### Phase 3: SDK Integration (replace prompt injection for Claude)
+### Phase 3: CopilotProvider Implementation
 
-1. Install `@anthropic-ai/claude-agent-sdk`
-2. Create `SdkBridge` service that wraps `query()` for programmatic tasks
-3. Replace PromptInjector usage in SummaryService, HandoffService, OrchestratorService
-4. Keep PTY for interactive terminal sessions
+1. Implement `CopilotProvider.findBinary()` — detect copilot on PATH
+2. Implement `CopilotProvider.buildSpawnArgs()` — `--yolo`, `--model`, `--reasoning-effort`, `--cwd`
+3. Implement `CopilotProvider.buildResumeArgs()` — `--resume <id>`
+4. Implement `CopilotProvider.discoverSessions()` — scan `~/.copilot/session-state/`
+5. Implement `CopilotProvider.detectPromptReady()` — identify Copilot's prompt pattern
+6. Implement `CopilotProvider.detectActiveProcesses()` — grep for copilot processes
+7. Update setup scripts — detect Copilot, configure hooks (repo-level `.github/hooks/`)
+8. Test: spawn, interact, resume Copilot sessions end-to-end
 
-**Risk:** Medium — SDK is actively developed, API may change. But eliminates the most fragile part of our codebase.
+**Deliverables:** Working Copilot sessions in Agent Matrix.
+**Risk:** Medium — new CLI, may need pattern tuning.
 
-### Phase 4: ACP Integration (structured communication for Copilot)
+### Phase 4: Hook Normalization + Copilot Events
 
-1. Create `AcpBridge` service that communicates via `copilot --acp --stdio`
-2. Use for Copilot sessions' programmatic tasks (summaries, task assignment)
-3. Potentially use for hook-equivalent events (tool use tracking without repo-level hooks)
+1. Normalize hook event names (PascalCase ↔ camelCase) in a mapping layer
+2. Auto-create `.github/hooks/agentmatrix.json` in CWD when spawning Copilot session
+3. Handle Copilot's `userPromptSubmitted` + `errorOccurred` events (Claude doesn't have these)
+4. Handle missing `SubagentStart/Stop` for Copilot (degrade gracefully — no agent sprites)
+5. Explore ACP protocol as alternative to file-based hooks for Copilot
 
-**Risk:** Medium-high — ACP is newer, less documented.
+**Deliverables:** Live tool/status updates for Copilot sessions.
+**Risk:** Medium — hook compatibility needs testing.
 
-### Phase 5: Polish & Unification
+### Phase 5: Polish & Cross-CLI Features
 
-1. Unified hook normalization layer
-2. CLI-specific model lists in Spawn Modal
-3. Session badge showing CLI type
+1. Cross-CLI context transfer (Claude → Copilot, Copilot → Claude)
+2. Unified session resume (ResumeModal shows sessions from both CLIs with icons)
+3. CLI-specific features: Copilot `/fleet` integration, Claude fork session
 4. Documentation and setup guide updates
-5. Cross-CLI context transfer (Claude session → Copilot session)
+5. Handle edge cases (CLI uninstalled mid-session, version mismatches)
+
+---
+
+## UX Resilience & System Health
+
+### CLI Health Checks
+
+On app startup and before any session spawn, verify CLIs are available:
+
+```typescript
+// lib/cli/healthCheck.ts
+interface CliHealth {
+  type: 'claude' | 'copilot';
+  installed: boolean;
+  version: string | null;      // e.g. "2.1.79", "1.0.27"
+  authenticated: boolean;      // Can the CLI actually make API calls?
+  binaryPath: string | null;
+  error?: string;              // Human-readable reason if not available
+}
+
+async function checkCliHealth(type: CliType): Promise<CliHealth>;
+function checkAllClis(): Promise<CliHealth[]>;
+```
+
+**When checks run:**
+- App startup → results cached, shown in settings
+- Before spawning a session → if CLI not healthy, block spawn with clear error
+- On demand from settings page (refresh button)
+
+**How authentication is checked:**
+- Claude: `claude --version` succeeds (exits 0). Auth issues show at session start, not binary check.
+- Copilot: `copilot --version` succeeds. Auth via `GH_TOKEN` or OAuth — `copilot auth status` if available.
+
+### API Route: `/api/cli/health`
+
+New endpoint that returns health status for all detected CLIs. Called by SpawnModal and AppSettings.
+
+```
+GET /api/cli/health
+→ { clis: [
+    { type: 'claude', installed: true, version: '2.1.79', authenticated: true, binaryPath: '/usr/local/bin/claude' },
+    { type: 'copilot', installed: false, version: null, authenticated: false, error: 'copilot not found on PATH' }
+  ]}
+```
+
+### SpawnModal — CLI Selection with Health Gates
+
+```
+┌─ New Session ─────────────────────────────┐
+│                                           │
+│  CLI                                      │
+│  ┌─────────────┐ ┌──────────────────┐     │
+│  │ ● Claude    │ │ ○ Copilot (N/A)  │     │
+│  │   v2.1.79   │ │   Not installed  │     │
+│  └─────────────┘ └──────────────────┘     │
+│                                           │
+│  Working Directory                        │
+│  [/Users/nahom/Desktop/DEV ▾]             │
+│                                           │
+│  Session Name                             │
+│  [___________________________]            │
+│                                           │
+│  Model                                    │
+│  [Claude Opus 4.6 ▾]   ← changes per CLI │
+│                                           │
+│  ...rest of fields...                     │
+└───────────────────────────────────────────┘
+```
+
+**Rules:**
+- CLI buttons are `OptionGroup` style (same pattern as permission mode)
+- Uninstalled CLI is visually disabled (greyed out, not clickable)
+- Shows version under the name when installed
+- Shows "Not installed" or specific error when not available
+- Model dropdown changes based on selected CLI:
+  - Claude: Opus, Sonnet, Haiku
+  - Copilot: Claude Sonnet 4.5, GPT-5, Claude Opus 4.6, Gemini 3 Pro, etc.
+- If only one CLI is installed, it's auto-selected and the toggle is informational only
+- Default CLI comes from AppSettings
+
+### Dashboard Cards — CLI Icon
+
+Each session card gets a small CLI icon in the header row:
+
+```
+┌────────────────────────────────────┐
+│ [◆] my-session          Working ● │   ← ◆ = Claude icon, ⬡ = Copilot icon
+│ /path/to/project                   │
+│ ...                                │
+└────────────────────────────────────┘
+```
+
+**Icon design:**
+- Claude: `◆` (diamond) in Anthropic orange (#D97706) or a small "C" badge
+- Copilot: `⬡` (hexagon) in GitHub blue (#2F81F7) or the Copilot icon
+- Icon is subtle (12px, muted color) — doesn't dominate the card
+- Tooltip on hover shows full CLI name + version
+
+**Where the icon appears:**
+- Dashboard session cards (left of session name)
+- Session dialog header (left of session name)
+- Office view hover card (next to session name)
+- Fullscreen terminal tab bar (left of session name)
+
+### Session Dialog — CLI Badge
+
+In the session dialog header, show a small pill badge:
+
+```
+┌─ ◆ my-session ──── Claude v2.1.79 ──── IDLE ─────┐
+│  Console  Tasks  Info  Settings                    │
+```
+
+Or more subtly, just the icon next to the name with tooltip.
+
+### Error States & Edge Cases
+
+| Scenario | UX Response |
+|----------|-------------|
+| No CLIs installed | Show setup instructions on dashboard. Spawn button disabled with "Install Claude or Copilot CLI to get started" |
+| CLI installed but not authenticated | Allow spawn, but show warning. Auth prompt appears in the terminal naturally. |
+| CLI binary found but wrong version | Show version in health check. Don't block — let user try. |
+| CLI disappears mid-session (uninstalled/PATH change) | Session terminal shows exit. No special handling needed — PTY will error naturally. |
+| Hooks not configured for selected CLI | Show warning toast when spawning: "Hooks not configured for {CLI}. Session will work but Agent Matrix won't receive live updates." |
+| Both CLIs installed, user hasn't picked default | First CLI found becomes default. SpawnModal shows both options. |
+| Session spawned with CLI that's no longer installed | Resume button shows "CLI not available" instead of spawning. Offer to re-spawn with available CLI. |
+| Copilot hooks not set up for this repo | Show inline notice in session dialog: "Set up hooks for live updates" with one-click setup button. |
+
+### AppSettingsModal — CLI Section
+
+Add a new section at the top of settings:
+
+```
+┌─ Settings ────────────────────────────────┐
+│                                           │
+│  CLI Agents                               │
+│  ┌─────────────────────────────────────┐  │
+│  │ ● Claude Code    v2.1.79    ✓ Ready │  │
+│  │   /usr/local/bin/claude             │  │
+│  │   [Set as Default]                  │  │
+│  ├─────────────────────────────────────┤  │
+│  │ ○ GitHub Copilot  v1.0.27  ✓ Ready │  │
+│  │   /usr/local/bin/copilot            │  │
+│  │   [Set as Default]                  │  │
+│  ├─────────────────────────────────────┤  │
+│  │         [↻ Refresh Status]          │  │
+│  └─────────────────────────────────────┘  │
+│                                           │
+│  Auto-resume sessions                     │
+│  ...existing settings...                  │
+└───────────────────────────────────────────┘
+```
+
+### Startup Flow
+
+```
+App starts
+  → Check CLI health (parallel: claude --version, copilot --version)
+  → Cache results in globalThis
+  → If no CLIs found:
+      → Dashboard shows "No CLI agents detected" card with install links
+      → Spawn/Resume buttons disabled
+  → If CLIs found:
+      → Normal startup
+      → Auto-resume uses the CLI type stored on each session
+```
+
+### Resume Flow — CLI Type Matching
+
+When resuming a session, we need to know which CLI it belongs to:
+
+- **From active sessions cache:** `cliType` is stored in `agentmatrix-active-sessions.json`
+- **From session discovery:** Claude sessions are in `~/.claude/projects/`, Copilot sessions in `~/.copilot/session-state/`
+- **From ResumeModal:** Show CLI icon next to each session in the list so user knows what they're resuming
+- **Edge case:** If session's CLI isn't installed, show disabled with "Requires {CLI name}"
 
 ---
 
@@ -588,9 +782,10 @@ These components are CLI-agnostic and need zero changes:
 
 ## Open Questions
 
-1. **Copilot user-level hooks** — Does Copilot support hooks outside of `.github/hooks/`? If not, we need ACP or per-repo setup.
+1. **Copilot user-level hooks** — Does Copilot support hooks outside of `.github/hooks/`? If not, we auto-create per-repo or use ACP.
 2. **Copilot session ID format** — Is it a UUID like Claude's? Affects session scanner and resume logic.
-3. **Copilot subagent detection** — No `SubagentStart/Stop` hooks. Can we detect agents via ACP events or PTY output parsing?
-4. **Cross-CLI context transfer** — Can we transfer context from a Claude session to a Copilot session? The handoff file is CLI-agnostic (markdown), but the "read this file" instruction would differ.
+3. **Copilot subagent detection** — No `SubagentStart/Stop` hooks. Graceful degradation: no agent sprites for Copilot sessions.
+4. **Cross-CLI context transfer** — Handoff file is markdown (CLI-agnostic), but the "read this file" prompt differs per CLI. Provider should have a `buildReadFilePrompt(path)` method.
 5. **Copilot prompt indicator** — Exact character/pattern for detecting prompt ready state. Needs testing with a real Copilot CLI session.
-6. **Claude Agent SDK stability** — The SDK has 159 versions with near-daily releases. Pin to a specific version?
+6. **Copilot `/fleet` integration** — Can we expose Copilot's parallel agent feature through the Agent Matrix UI?
+7. **Single vs multi-CLI per workspace** — Can a user have both Claude and Copilot sessions active simultaneously? (Yes — each session carries its `cliType` and uses the right provider.)
