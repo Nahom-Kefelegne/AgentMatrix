@@ -4,6 +4,30 @@ import { CopilotProvider } from './CopilotProvider';
 
 export type { CliType, CliProvider, CliHealth, SpawnOptions, ResumeOptions } from './CliProvider';
 
+export interface AgencyHealth {
+  installed: boolean;
+  version: string | null;
+  binaryPath: string | null;
+}
+
+/** Check if Microsoft Agency is available. */
+export function checkAgencyHealth(): AgencyHealth {
+  const { execSync } = require('child_process');
+  try {
+    const ver = execSync('agency --version', { encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'] }).trim();
+    const match = ver.match(/agency\s+([\d.]+)/i);
+    // Find binary path
+    let binaryPath: string | null = null;
+    try {
+      const cmd = process.platform === 'win32' ? 'where agency' : 'which agency';
+      binaryPath = execSync(cmd, { encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'] }).trim().split('\n')[0];
+    } catch {}
+    return { installed: true, version: match ? match[1] : ver, binaryPath };
+  } catch {
+    return { installed: false, version: null, binaryPath: null };
+  }
+}
+
 const providerInstances = new Map<CliType, CliProvider>();
 
 function getOrCreateProvider(type: CliType): CliProvider {

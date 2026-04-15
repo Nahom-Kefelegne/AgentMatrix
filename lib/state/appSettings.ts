@@ -11,6 +11,7 @@ export interface AppSettings {
   defaultEffort: string;
   appendSystemPrompt: string;
   defaultCli?: 'claude' | 'copilot';
+  useAgency?: boolean;
 }
 
 const DEFAULTS: AppSettings = {

@@ -81,6 +81,9 @@ export default function SpawnModal({ isOpen, onClose, onSessionSpawned }: SpawnM
   const [cliType, setCliType] = useState<CliType>('claude');
   const [cliHealth, setCliHealth] = useState<CliHealthInfo[]>([]);
   const [healthLoaded, setHealthLoaded] = useState(false);
+  const [agencyAvailable, setAgencyAvailable] = useState(false);
+  const [agencyVersion, setAgencyVersion] = useState<string | null>(null);
+  const [useAgency, setUseAgency] = useState(false);
 
   useEffect(() => {
     if (!cwd) fetch('/api/system').then(r => r.json()).then(d => setCwd(d.homedir || '')).catch(() => {});
@@ -95,6 +98,10 @@ export default function SpawnModal({ isOpen, onClose, onSessionSpawned }: SpawnM
           const clis: CliHealthInfo[] = data.clis || [];
           setCliHealth(clis);
           setHealthLoaded(true);
+          if (data.agency?.installed) {
+            setAgencyAvailable(true);
+            setAgencyVersion(data.agency.version);
+          }
           // Auto-select first installed CLI (or use default from settings)
           const installed = clis.filter(c => c.installed);
           if (installed.length > 0 && !installed.find(c => c.type === cliType)) {
@@ -113,6 +120,7 @@ export default function SpawnModal({ isOpen, onClose, onSessionSpawned }: SpawnM
         if (data.defaultEffort && !effort) setEffort(data.defaultEffort);
         if (data.appendSystemPrompt && !systemPrompt) setSystemPrompt(data.appendSystemPrompt);
         if (data.defaultCli) setCliType(data.defaultCli);
+        if (data.useAgency) setUseAgency(true);
         setDefaultsLoaded(true);
       }).catch(() => setDefaultsLoaded(true));
     }
@@ -195,6 +203,35 @@ export default function SpawnModal({ isOpen, onClose, onSessionSpawned }: SpawnM
           })}
         </OptionGroup>
       </FormField>
+
+      {/* Agency toggle — only show if Agency is detected */}
+      {agencyAvailable && (
+        <div style={{
+          display: 'flex', alignItems: 'center', gap: 10,
+          padding: '8px 12px', borderRadius: 8, marginBottom: 16,
+          background: useAgency ? 'var(--accent)' : 'var(--surface-1, #f5f5f5)',
+          border: `1px solid ${useAgency ? 'var(--ring)' : 'var(--border)'}`,
+          cursor: 'pointer', transition: 'all 0.15s',
+        }} onClick={() => setUseAgency(!useAgency)}>
+          <div style={{
+            width: 32, height: 18, borderRadius: 9, padding: 2,
+            background: useAgency ? 'var(--primary)' : 'var(--muted)',
+            transition: 'background 0.2s',
+          }}>
+            <div style={{
+              width: 14, height: 14, borderRadius: '50%', background: '#fff',
+              transform: useAgency ? 'translateX(14px)' : 'translateX(0)',
+              transition: 'transform 0.2s',
+            }} />
+          </div>
+          <div>
+            <div style={{ fontSize: 13, fontWeight: 600 }}>Launch via Agency</div>
+            <div style={{ fontSize: 11, color: 'var(--muted-foreground)' }}>
+              Microsoft Agent Platform {agencyVersion ? `v${agencyVersion}` : ''}
+            </div>
+          </div>
+        </div>
+      )}
 
       <FormField label="Working Directory">
         <FolderPicker value={cwd} onChange={setCwd} />

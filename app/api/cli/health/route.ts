@@ -1,12 +1,13 @@
 import { NextResponse } from 'next/server';
-import { checkAllHealth } from '@/lib/cli';
+import { checkAllHealth, checkAgencyHealth } from '@/lib/cli';
 
 export async function GET() {
   try {
     const clis = checkAllHealth();
-    return NextResponse.json({ clis });
+    const agency = checkAgencyHealth();
+    return NextResponse.json({ clis, agency });
   } catch (error) {
     console.error('[cli/health]', error);
-    return NextResponse.json({ clis: [], error: 'Failed to check CLI health' }, { status: 500 });
+    return NextResponse.json({ clis: [], agency: { installed: false, version: null, binaryPath: null }, error: 'Failed to check CLI health' }, { status: 500 });
   }
 }

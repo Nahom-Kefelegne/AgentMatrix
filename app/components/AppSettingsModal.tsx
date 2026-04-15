@@ -20,6 +20,7 @@ interface AppSettings {
   defaultEffort: string;
   appendSystemPrompt: string;
   defaultCli?: CliType;
+  useAgency?: boolean;
 }
 
 interface AppSettingsModalProps {
@@ -102,11 +103,17 @@ export default function AppSettingsModal({ isOpen, onClose, onViewOrchestrator }
     }
   }, [isOpen]);
 
+  const [agencyHealth, setAgencyHealth] = useState<{ installed: boolean; version: string | null } | null>(null);
+
   const fetchCliHealth = useCallback(() => {
     setHealthLoading(true);
     fetch('/api/cli/health')
       .then(r => r.json())
-      .then(data => { setCliHealth(data.clis || []); setHealthLoading(false); })
+      .then(data => {
+        setCliHealth(data.clis || []);
+        if (data.agency) setAgencyHealth(data.agency);
+        setHealthLoading(false);
+      })
       .catch(() => setHealthLoading(false));
   }, []);
 
@@ -200,7 +207,7 @@ export default function AppSettingsModal({ isOpen, onClose, onViewOrchestrator }
           })}
         </div>
 
-        <div style={{ marginTop: 8 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 10 }}>
           <button
             className="btn-outline"
             style={{ padding: '6px 14px', fontSize: 13 }}
@@ -210,6 +217,27 @@ export default function AppSettingsModal({ isOpen, onClose, onViewOrchestrator }
             {healthLoading ? 'Checking...' : 'Refresh Status'}
           </button>
         </div>
+
+        {/* Agency toggle */}
+        {agencyHealth?.installed && (
+          <div style={{
+            display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+            padding: '10px 14px', borderRadius: 8, marginTop: 10,
+            background: settings.useAgency ? 'rgba(99,102,241,0.08)' : 'rgba(255,255,255,0.03)',
+            border: settings.useAgency ? '1px solid rgba(99,102,241,0.3)' : '1px solid rgba(255,255,255,0.06)',
+          }}>
+            <div>
+              <div style={{ fontSize: 14, fontWeight: 600 }}>Microsoft Agency</div>
+              <div style={{ fontSize: 12, color: '#888', fontFamily: 'monospace' }}>
+                v{agencyHealth.version || '?'} — Launch CLIs via Agency platform
+              </div>
+            </div>
+            <button
+              className={`toggle-switch ${settings.useAgency ? 'toggle-switch--on' : 'toggle-switch--off'}`}
+              onClick={() => save({ useAgency: !settings.useAgency })}
+            />
+          </div>
+        )}
       </div>
 
       <hr className="divider" />

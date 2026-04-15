@@ -214,24 +214,50 @@ export class PtyManager {
   private spawnPty(cwd: string, cliArgs: string[], cliType?: CliType): IPty {
     const pty = require('node-pty');
     const provider = this.getProviderForType(cliType);
-    const binaryPath = provider.findBinary();
     const { existsSync } = require('fs');
     const cwdExists = existsSync(cwd);
     const safeCwd = cwdExists ? cwd : homedir();
-    console.log(`[spawnPty] cli=${provider.type} cwd="${cwd}" exists=${cwdExists} safeCwd="${safeCwd}" args=${cliArgs.join(' ')}`);
-    const fullCmd = `${binaryPath} ${cliArgs.join(' ')}`;
     const env = { ...process.env };
     delete env.CLAUDECODE;
+
+    // Check if Agency mode is enabled
+    const { getSettings } = require('../../lib/state/appSettings');
+    const useAgency = getSettings().useAgency === true;
+
+    let spawnBinary: string;
+    let spawnArgs: string[];
+
+    if (useAgency) {
+      // Agency wraps the CLI: `agency claude <args>` or `agency copilot <args>`
+      try {
+        const cmd = process.platform === 'win32' ? 'where agency' : 'which agency';
+        const { execSync } = require('child_process');
+        spawnBinary = execSync(cmd, { encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'] }).trim().split('\n')[0];
+      } catch {
+        // Agency not found, fall back to direct binary
+        spawnBinary = provider.findBinary();
+        spawnArgs = cliArgs;
+        console.warn(`[spawnPty] Agency enabled but not found, falling back to direct binary`);
+      }
+      spawnBinary = spawnBinary!;
+      spawnArgs = [provider.type, ...cliArgs];
+    } else {
+      spawnBinary = provider.findBinary();
+      spawnArgs = cliArgs;
+    }
+
+    const label = useAgency ? `agency ${provider.type}` : provider.type;
+    console.log(`[spawnPty] ${label} cwd="${safeCwd}" args=${spawnArgs.join(' ')}`);
 
     // Use 80 cols default — CLI TUI renders welcome screen at spawn time.
     // The terminal panel will resize the PTY to match when it opens.
     if (process.platform === 'win32') {
-      // Spawn binary directly — cmd.exe can't handle UNC paths
-      return pty.spawn(binaryPath, cliArgs, {
+      return pty.spawn(spawnBinary, spawnArgs, {
         cwd: safeCwd, cols: 80, rows: 24, env,
       });
     }
     const shell = process.env.SHELL || '/bin/bash';
+    const fullCmd = `${spawnBinary} ${spawnArgs.join(' ')}`;
     return pty.spawn(shell, ['-c', `cd "${safeCwd}" && ${fullCmd}`], {
       cwd: safeCwd, cols: 80, rows: 24, env,
     });
