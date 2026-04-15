@@ -232,26 +232,27 @@ export default function SpawnModal({ isOpen, onClose, onSessionSpawned }: SpawnM
       {/* Agency toggle */}
       {agencyAvailable && (
         <div style={{
-          display: 'flex', alignItems: 'center', gap: 10,
-          padding: '8px 12px', borderRadius: 8, marginBottom: 16,
-          background: useAgency ? 'var(--accent)' : 'var(--surface-1, #f5f5f5)',
-          border: `1px solid ${useAgency ? 'var(--ring)' : 'var(--border)'}`,
-          cursor: 'pointer', transition: 'all 0.15s',
+          display: 'flex', alignItems: 'center', gap: 12,
+          padding: '10px 14px', borderRadius: 10, marginBottom: 16,
+          background: useAgency ? 'rgba(99, 102, 241, 0.12)' : 'rgba(128, 128, 128, 0.08)',
+          border: `1px solid ${useAgency ? 'rgba(99, 102, 241, 0.4)' : 'rgba(128, 128, 128, 0.15)'}`,
+          cursor: 'pointer', transition: 'all 0.2s',
         }} onClick={() => setUseAgency(!useAgency)}>
           <div style={{
-            width: 32, height: 18, borderRadius: 9, padding: 2,
-            background: useAgency ? 'var(--primary)' : 'var(--muted)',
+            width: 36, height: 20, borderRadius: 10, padding: 2, flexShrink: 0,
+            background: useAgency ? '#6366f1' : '#555',
             transition: 'background 0.2s',
           }}>
             <div style={{
-              width: 14, height: 14, borderRadius: '50%', background: '#fff',
-              transform: useAgency ? 'translateX(14px)' : 'translateX(0)',
+              width: 16, height: 16, borderRadius: '50%', background: '#fff',
+              boxShadow: '0 1px 3px rgba(0,0,0,0.3)',
+              transform: useAgency ? 'translateX(16px)' : 'translateX(0)',
               transition: 'transform 0.2s',
             }} />
           </div>
           <div>
             <div style={{ fontSize: 13, fontWeight: 600 }}>Launch via Agency</div>
-            <div style={{ fontSize: 11, color: 'var(--muted-foreground)' }}>
+            <div style={{ fontSize: 11, opacity: 0.6 }}>
               Microsoft Agent Platform {agencyVersion ? `v${agencyVersion}` : ''}
             </div>
           </div>
