@@ -318,7 +318,7 @@ export default function TerminalPanel({ sessionId, sessionName, cwd, visible, re
            `Terminal for ${sessionName}`}
         </span>
         {cwd && (
-          <span style={{ color: '#666', fontSize: 12, fontFamily: "'Courier New', monospace" }}>
+          <span style={{ color: '#9ca3af', fontSize: 12, fontFamily: "'Courier New', monospace" }}>
             {cwd}
           </span>
         )}

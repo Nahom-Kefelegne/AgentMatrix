@@ -1105,7 +1105,7 @@
   margin-top: 6px;
   margin-left: 24px;
 }
-.dark .session-dialog-path { color: #71717a; }
+.dark .session-dialog-path { color: #a1a1aa; }
 
 .session-dialog-tab-bar {
   display: flex;
