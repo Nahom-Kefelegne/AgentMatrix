@@ -187,14 +187,22 @@ export default function TerminalPanel({ sessionId, sessionName, cwd, visible, re
         });
       }
 
-      // Receive PTY output — strip screen-clear sequences so history persists
+      // Strip screen-clear sequences only when user is scrolled up viewing history.
+      // When at the bottom (following live output), let clears through so the TUI
+      // renders correctly without visual artifacts / duplicate content.
       const stripClear = (s: string) =>
         s.replace(/\x1b\[2J/g, '')   // clear entire screen
          .replace(/\x1b\[3J/g, '')   // clear scrollback
          .replace(/\x1b\[H/g, '');   // cursor home (often paired with clear)
+
+      const isAtBottom = () => {
+        const buf = terminal.buffer.active;
+        return buf.viewportY >= buf.baseY;
+      };
+
       const handleData = (msg: { sessionId: string; data: string }) => {
         if (msg.sessionId === sessionId) {
-          terminal.write(stripClear(msg.data));
+          terminal.write(isAtBottom() ? msg.data : stripClear(msg.data));
           if (statusRef.current !== 'connected') setStatus('connected');
         }
       };
