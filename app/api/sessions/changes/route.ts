@@ -42,9 +42,9 @@ export async function GET(request: Request) {
       try {
         const dir = dirname(filePath);
         // Find repo root
-        const repoRoot = execSync('git rev-parse --show-toplevel', { cwd: dir, encoding: 'utf-8' }).trim();
+        const repoRoot = execSync('git rev-parse --show-toplevel', { cwd: dir, encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'] }).trim();
         const relativePath = filePath.replace(repoRoot + '/', '').replace(repoRoot + '\\', '');
-        original = execSync(`git show HEAD:${relativePath}`, { cwd: repoRoot, encoding: 'utf-8' });
+        original = execSync(`git show HEAD:${relativePath}`, { cwd: repoRoot, encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'] });
       } catch {
         // File might be new (not in git) — original is empty
         original = '';
@@ -68,9 +68,9 @@ export async function GET(request: Request) {
       if (exists) {
         try {
           const dir = dirname(f);
-          const repoRoot = execSync('git rev-parse --show-toplevel', { cwd: dir, encoding: 'utf-8' }).trim();
+          const repoRoot = execSync('git rev-parse --show-toplevel', { cwd: dir, encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'] }).trim();
           const relativePath = f.replace(repoRoot + '/', '').replace(repoRoot + '\\', '');
-          const diff = execSync(`git diff HEAD -- "${relativePath}"`, { cwd: repoRoot, encoding: 'utf-8' });
+          const diff = execSync(`git diff HEAD -- "${relativePath}"`, { cwd: repoRoot, encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'] });
           if (!diff) {
             // No diff means file matches HEAD — might have been reverted
             status = 'unchanged';
@@ -133,9 +133,9 @@ export async function POST(request: Request) {
     if (action === 'revert-file' && file) {
       try {
         const dir = dirname(file);
-        const repoRoot = execSync('git rev-parse --show-toplevel', { cwd: dir, encoding: 'utf-8' }).trim();
+        const repoRoot = execSync('git rev-parse --show-toplevel', { cwd: dir, encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'] }).trim();
         const relativePath = file.replace(repoRoot + '/', '').replace(repoRoot + '\\', '');
-        execSync(`git checkout HEAD -- "${relativePath}"`, { cwd: repoRoot });
+        execSync(`git checkout HEAD -- "${relativePath}"`, { cwd: repoRoot, stdio: ['pipe', 'pipe', 'pipe'] });
         // Remove from tracking
         const updated = (session.filesModified || []).filter((f: string) => f !== file);
         updateSession(sessionId, { filesModified: updated });
@@ -151,9 +151,9 @@ export async function POST(request: Request) {
       for (const f of files) {
         try {
           const dir = dirname(f);
-          const repoRoot = execSync('git rev-parse --show-toplevel', { cwd: dir, encoding: 'utf-8' }).trim();
+          const repoRoot = execSync('git rev-parse --show-toplevel', { cwd: dir, encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'] }).trim();
           const relativePath = f.replace(repoRoot + '/', '').replace(repoRoot + '\\', '');
-          execSync(`git checkout HEAD -- "${relativePath}"`, { cwd: repoRoot });
+          execSync(`git checkout HEAD -- "${relativePath}"`, { cwd: repoRoot, stdio: ['pipe', 'pipe', 'pipe'] });
           results.push(`Reverted ${relativePath}`);
         } catch {
           results.push(`Failed to revert ${f}`);

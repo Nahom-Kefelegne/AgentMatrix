@@ -285,8 +285,6 @@ export default function ChangesViewer({ sessionId, sessionName, cwd, onClose, so
   }, [sessionId]);
   useEffect(() => {
     loadFiles();
-    const interval = setInterval(loadFiles, 5000);
-    return () => clearInterval(interval);
   }, [loadFiles]);
 
   // === Load comments ===
