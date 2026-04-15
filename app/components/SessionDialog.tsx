@@ -685,13 +685,13 @@ function TasksTab({ sessionId, socketRef, onOpenTask, onSwitchToConsole }: { ses
   }, [sessionId, socketRef, onSwitchToConsole]);
 
   if (loading) {
-    return <div style={{ color: '#888', fontSize: 15, padding: 20, textAlign: 'center' }}>Loading...</div>;
+    return <div style={{ fontSize: 15, padding: 20, textAlign: 'center', opacity: 0.6 }}>Loading...</div>;
   }
 
   if (tasks.length === 0) {
     return (
       <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '60px 0', gap: 12 }}>
-        <div style={{ fontSize: 16, color: '#666' }}>No tasks assigned to this session</div>
+        <div style={{ fontSize: 16, opacity: 0.5 }}>No tasks assigned to this session</div>
         <div style={{ fontSize: 14, color: '#444' }}>Assign tasks from the Task Board</div>
       </div>
     );
@@ -720,7 +720,7 @@ function TasksTab({ sessionId, socketRef, onOpenTask, onSwitchToConsole }: { ses
                 {icon && <span style={{ fontSize: 13 }}>{icon}</span>}
                 <span style={{ fontSize: 15, color: '#eee', fontWeight: 700 }}>{task.subject as string}</span>
               </div>
-              {task.description ? <div style={{ fontSize: 13, color: '#777', marginTop: 4, fontWeight: 500 }}>{(task.description as string).slice(0, 80)}</div> : null}
+              {task.description ? <div style={{ fontSize: 13, opacity: 0.6, marginTop: 4, fontWeight: 500 }}>{(task.description as string).slice(0, 80)}</div> : null}
               <div style={{ display: 'flex', gap: 5, marginTop: 6, alignItems: 'center' }}>
                 <span style={{ fontSize: 10, padding: '2px 8px', borderRadius: 10, background: (TASK_STATE_COLORS[state] || '#888') + '15', color: TASK_STATE_COLORS[state] || '#888', fontWeight: 700 }}>{state}</span>
                 {task.adoId ? <span style={{ fontSize: 10, padding: '2px 8px', borderRadius: 10, background: '#4a9eff10', color: '#4a9eff', fontWeight: 700 }}>#{task.adoId as number}</span> : null}
@@ -898,7 +898,7 @@ function InfoTab({ session, cliCmd, contextUsage, socketRef, onSelectSession }: 
             ))}
           </div>
         ) : (
-          <div style={{ fontSize: 14, color: '#555', fontStyle: 'italic' }}>
+          <div style={{ fontSize: 14, opacity: 0.5, fontStyle: 'italic' }}>
             {summaryLoading ? 'Asking session for summary...' : 'Click Refresh to generate summary'}
           </div>
         )}
@@ -1122,7 +1122,7 @@ function SettingsTab({ session, socketRef }: {
             borderBottom: '1px solid #1a1a28',
             display: 'flex', gap: 8,
           }}>
-            <span style={{ color: '#888', fontWeight: 600 }}>ID</span>
+            <span style={{ opacity: 0.5, fontWeight: 600 }}>ID</span>
             <span style={{ fontFamily: "'Courier New', monospace" }}>{session.id}</span>
           </div>
           {session.cwd && (
@@ -1130,7 +1130,7 @@ function SettingsTab({ session, socketRef }: {
               padding: '10px 14px', fontSize: 15, color: '#bbb',
               display: 'flex', gap: 8,
             }}>
-              <span style={{ color: '#888', fontWeight: 600 }}>CWD</span>
+              <span style={{ opacity: 0.5, fontWeight: 600 }}>CWD</span>
               <span style={{ fontFamily: "'Courier New', monospace", wordBreak: 'break-all' }}>
                 {session.cwd}
               </span>

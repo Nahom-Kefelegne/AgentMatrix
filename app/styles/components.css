@@ -1039,10 +1039,11 @@
 
 .section-desc {
   font-size: 14px;
-  color: #a1a1aa;
+  color: #71717a;
   margin-bottom: 10px;
   line-height: 1.5;
 }
+.dark .section-desc { color: #a1a1aa; }
 
 /* ─── Session Dialog ─── */
 .session-dialog-backdrop {
@@ -1104,7 +1105,7 @@
   margin-top: 6px;
   margin-left: 24px;
 }
-.dark .session-dialog-path { color: #a1a1aa; }
+.dark .session-dialog-path { color: #71717a; }
 
 .session-dialog-tab-bar {
   display: flex;
@@ -1126,11 +1127,11 @@
   font-family: inherit;
   border-bottom: 2px solid transparent;
   transition: all 0.15s;
-  color: #a1a1aa;
+  color: #71717a;
 }
-.session-dialog-tab:hover { color: #a1a1aa; }
-.dark .session-dialog-tab { color: #a1a1aa; }
-.dark .session-dialog-tab:hover { color: #d4d4d8; }
+.session-dialog-tab:hover { color: #3f3f46; }
+.dark .session-dialog-tab { color: #71717a; }
+.dark .session-dialog-tab:hover { color: #e4e4e7; }
 
 .session-dialog-tab--active {
   color: #0a0a0a;
@@ -1280,10 +1281,10 @@
 }
 
 /* ─── Misc ─── */
-.muted-text { color: #a1a1aa; }
+.muted-text { color: #71717a; }
 .dark .muted-text { color: #a1a1aa; }
 .subtle-text { color: #a1a1aa; }
-.dark .subtle-text { color: #a1a1aa; }
+.dark .subtle-text { color: #71717a; }
 .error-text { color: #f87171; font-size: 12px; margin-top: 6px; }
 
 .spinner {
