@@ -62,6 +62,7 @@ export function setupTerminalBridge(io: SocketIOServer, ptyManager: PtyManager):
       allowedTools?: string;
       systemPrompt?: string;
       cliType?: 'claude' | 'copilot';
+      copilotMode?: string;
     }) => {
       try {
         const sessionUuid = randomUUID();
@@ -85,6 +86,7 @@ export function setupTerminalBridge(io: SocketIOServer, ptyManager: PtyManager):
           allowedTools: opts.allowedTools,
           systemPrompt: opts.systemPrompt,
           cliType,
+          copilotMode: opts.copilotMode,
         });
 
         ptyManager.onOutput(sessionUuid, (data) => {

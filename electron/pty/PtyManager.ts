@@ -267,7 +267,7 @@ export class PtyManager {
     cwd: string; sessionUuid?: string; name?: string;
     permissionMode?: string; model?: string; effort?: string;
     allowedTools?: string; systemPrompt?: string;
-    cliType?: CliType;
+    cliType?: CliType; copilotMode?: string;
   }): PtySession {
     if (this.sessions.has(id)) throw new Error(`Session ${id} already exists`);
 
@@ -291,6 +291,7 @@ export class PtyManager {
       effort: opts.effort,
       allowedTools: opts.allowedTools,
       systemPrompt,
+      copilotMode: opts.copilotMode,
     });
 
     return this.createPtySession(id, this.spawnPty(opts.cwd, args, cliType), cliType);

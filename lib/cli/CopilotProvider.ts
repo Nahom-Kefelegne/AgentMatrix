@@ -102,8 +102,17 @@ export class CopilotProvider implements CliProvider {
     if (opts.permissionMode === 'bypassPermissions') {
       args.push('--yolo');
     }
+    if (opts.copilotMode && opts.copilotMode !== 'interactive') {
+      args.push('--mode', opts.copilotMode);
+    }
     if (opts.model) args.push('--model', opts.model);
     if (opts.effort) args.push('--reasoning-effort', opts.effort);
+    if (opts.allowedTools) {
+      // Copilot uses --allow-tool=PATTERN per tool
+      for (const tool of opts.allowedTools.split(',').map(t => t.trim()).filter(Boolean)) {
+        args.push(`--allow-tool=${tool}`);
+      }
+    }
     if (opts.cwd) args.push('--cwd', opts.cwd);
     return args;
   }

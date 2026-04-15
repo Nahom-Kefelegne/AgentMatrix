@@ -16,6 +16,8 @@ export interface SpawnOptions {
   effort?: string;
   allowedTools?: string;
   systemPrompt?: string;
+  // Copilot-specific
+  copilotMode?: string;  // 'interactive' | 'plan' | 'autopilot'
 }
 
 export interface ResumeOptions {
