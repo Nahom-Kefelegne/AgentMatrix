@@ -241,11 +241,21 @@ export default function TerminalPanel({ sessionId, sessionName, cwd, visible, re
       };
       window.addEventListener('resize', onWindowResize);
 
+      // Refocus terminal when window regains focus (alt-tab back)
+      const onWindowFocus = () => {
+        if (terminal && !readOnly) terminal.focus();
+      };
+      window.addEventListener('focus', onWindowFocus);
+      document.addEventListener('visibilitychange', () => {
+        if (!document.hidden && terminal && !readOnly) terminal.focus();
+      });
+
       // Store cleanup refs
       (terminal as any).__cleanup = () => {
         socket.off('terminal:data' as any, handleData);
         socket.off('terminal:exit' as any, handleExit);
         window.removeEventListener('resize', onWindowResize);
+        window.removeEventListener('focus', onWindowFocus);
         resizeObserver.disconnect();
         terminal.dispose();
       };
