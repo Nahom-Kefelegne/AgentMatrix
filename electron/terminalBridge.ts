@@ -6,6 +6,7 @@ import { addSession, getAllSessions, getSession, removeSession, updateSession } 
 import { setCachedName } from '../lib/state/nameCache';
 import { getActiveSessions, saveActiveSessions } from '../lib/state/activeSessionsCache';
 import { SOCKET_EVENTS } from '../lib/types';
+import type { SessionData } from '../lib/types';
 import {
   DESK_POSITIONS, OVERFLOW_POSITIONS, ENTRANCE_POINT, CHARACTER_COLORS,
 } from '../lib/constants';
@@ -23,7 +24,7 @@ function getNextDeskIndex(): number {
   return sessions.length;
 }
 
-function createSessionEntry(id: string, name: string, cwd: string) {
+function createSessionEntry(id: string, name: string, cwd: string): SessionData {
   const deskIndex = getNextDeskIndex();
   const isDesk = deskIndex < DESK_POSITIONS.length;
   const deskPosition = isDesk
@@ -51,7 +52,7 @@ function createSessionEntry(id: string, name: string, cwd: string) {
 export function setupTerminalBridge(io: SocketIOServer, ptyManager: PtyManager): void {
   io.on('connection', (socket) => {
 
-    // Launch a brand new Claude session
+    // Launch a brand new CLI session (Claude or Copilot)
     socket.on('terminal:new', (opts: {
       cwd: string;
       name?: string;
@@ -60,13 +61,16 @@ export function setupTerminalBridge(io: SocketIOServer, ptyManager: PtyManager):
       effort?: string;
       allowedTools?: string;
       systemPrompt?: string;
+      cliType?: 'claude' | 'copilot';
     }) => {
       try {
         const sessionUuid = randomUUID();
+        const cliType = opts.cliType || 'claude';
         const name = opts.name || `session-${Date.now().toString(36)}`;
-        console.log(`[terminal:new] name=${name} uuid=${sessionUuid.slice(0, 8)} cwd=${opts.cwd}`);
+        console.log(`[terminal:new] cli=${cliType} name=${name} uuid=${sessionUuid.slice(0, 8)} cwd=${opts.cwd}`);
 
         const sessionData = createSessionEntry(sessionUuid, name, opts.cwd);
+        sessionData.cliType = cliType;
         addSession(sessionData);
         setCachedName(sessionUuid, name);
         io.emit(SOCKET_EVENTS.SESSION_START, sessionData);
@@ -80,6 +84,7 @@ export function setupTerminalBridge(io: SocketIOServer, ptyManager: PtyManager):
           effort: opts.effort,
           allowedTools: opts.allowedTools,
           systemPrompt: opts.systemPrompt,
+          cliType,
         });
 
         ptyManager.onOutput(sessionUuid, (data) => {
@@ -99,7 +104,7 @@ export function setupTerminalBridge(io: SocketIOServer, ptyManager: PtyManager):
 
         // Track for auto-resume
         const active = getActiveSessions().filter(s => s.id !== sessionUuid);
-        active.push({ id: sessionUuid, name, cwd: opts.cwd });
+        active.push({ id: sessionUuid, name, cwd: opts.cwd, cliType });
         saveActiveSessions(active);
 
         socket.emit('terminal:spawned', { sessionId: sessionUuid, name });

@@ -8,6 +8,7 @@ export interface CachedSession {
   id: string;
   name: string;
   cwd: string;
+  cliType?: 'claude' | 'copilot';
 }
 
 export function getActiveSessions(): CachedSession[] {

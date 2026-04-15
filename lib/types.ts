@@ -9,6 +9,10 @@ export interface ReviewComment {
   resolved: boolean;
 }
 
+// ===== CLI Types =====
+
+export type CliType = 'claude' | 'copilot';
+
 // ===== Core Data Types =====
 
 export interface Point {
@@ -55,6 +59,7 @@ export interface SessionData {
   summaryBullets?: string[];
   filesModified?: string[];
   statusReason?: string;
+  cliType?: CliType;  // Which CLI this session uses (defaults to 'claude' for backward compat)
   createdAt: number;
   reviewComments?: ReviewComment[];
 }

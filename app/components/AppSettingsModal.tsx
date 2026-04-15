@@ -3,6 +3,15 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useSocketContext } from './SocketProvider';
 import { Modal, FormField, OptionGroup, OptionButton, TextArea, SelectInput } from './ui/Modal';
+import type { CliType } from '@/lib/types';
+
+interface CliHealthInfo {
+  type: CliType;
+  installed: boolean;
+  version: string | null;
+  binaryPath: string | null;
+  error?: string;
+}
 
 interface AppSettings {
   autoResume: boolean;
@@ -10,6 +19,7 @@ interface AppSettings {
   defaultPermissionMode: string;
   defaultEffort: string;
   appendSystemPrompt: string;
+  defaultCli?: CliType;
 }
 
 interface AppSettingsModalProps {
@@ -42,6 +52,20 @@ const EFFORT_LEVELS = [
   { value: 'high', label: 'High' },
 ];
 
+/** CLI icon metadata */
+const CLI_ICON_META: Record<string, { svg: string; color: string; name: string }> = {
+  claude: {
+    svg: `<svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M8 1L14.5 8L8 15L1.5 8L8 1Z" fill="currentColor" stroke="currentColor" stroke-width="0.5"/></svg>`,
+    color: '#D97706',
+    name: 'Claude Code',
+  },
+  copilot: {
+    svg: `<svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M8 1C8 1 6.5 4 4 5.5C1.5 7 1 8 1 8C1 8 3 8.5 4 10C5 11.5 5.5 15 5.5 15C5.5 15 7 11 8 9.5C9 11 10.5 15 10.5 15C10.5 15 11 11.5 12 10C13 8.5 15 8 15 8C15 8 14.5 7 12 5.5C9.5 4 8 1 8 1Z" fill="currentColor"/></svg>`,
+    color: '#2F81F7',
+    name: 'GitHub Copilot',
+  },
+};
+
 export default function AppSettingsModal({ isOpen, onClose, onViewOrchestrator }: AppSettingsModalProps) {
   const { socketRef, connected } = useSocketContext();
   const [settings, setSettings] = useState<AppSettings>({
@@ -51,6 +75,8 @@ export default function AppSettingsModal({ isOpen, onClose, onViewOrchestrator }
   const [loaded, setLoaded] = useState(false);
   const [saving, setSaving] = useState(false);
   const [orchestratorId, setOrchestratorId] = useState<string | null>(null);
+  const [cliHealth, setCliHealth] = useState<CliHealthInfo[]>([]);
+  const [healthLoading, setHealthLoading] = useState(false);
 
   useEffect(() => {
     const socket = socketRef.current;
@@ -69,6 +95,21 @@ export default function AppSettingsModal({ isOpen, onClose, onViewOrchestrator }
     }
   }, [isOpen, loaded]);
 
+  // Fetch CLI health when modal opens
+  useEffect(() => {
+    if (isOpen) {
+      fetchCliHealth();
+    }
+  }, [isOpen]);
+
+  const fetchCliHealth = useCallback(() => {
+    setHealthLoading(true);
+    fetch('/api/cli/health')
+      .then(r => r.json())
+      .then(data => { setCliHealth(data.clis || []); setHealthLoading(false); })
+      .catch(() => setHealthLoading(false));
+  }, []);
+
   const save = useCallback(async (partial: Partial<AppSettings>) => {
     const updated = { ...settings, ...partial };
     setSettings(updated);
@@ -86,6 +127,92 @@ export default function AppSettingsModal({ isOpen, onClose, onViewOrchestrator }
           </span>
         </div>
       }>
+
+      {/* CLI Agents Section */}
+      <div style={{ padding: '14px 0' }}>
+        <div className="section-title">CLI Agents</div>
+        <div className="section-desc">Detected CLI agents and their status.</div>
+
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginTop: 8 }}>
+          {(['claude', 'copilot'] as CliType[]).map(type => {
+            const health = cliHealth.find(c => c.type === type);
+            const installed = health?.installed ?? false;
+            const isDefault = settings.defaultCli === type || (!settings.defaultCli && type === 'claude');
+            const meta = CLI_ICON_META[type];
+
+            return (
+              <div key={type} style={{
+                display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                padding: '10px 14px', borderRadius: 8,
+                background: 'rgba(255,255,255,0.03)',
+                border: isDefault ? `1px solid ${meta.color}40` : '1px solid rgba(255,255,255,0.06)',
+              }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                  <span
+                    style={{ color: installed ? meta.color : '#555', display: 'flex', alignItems: 'center' }}
+                    dangerouslySetInnerHTML={{ __html: meta.svg }}
+                  />
+                  <div>
+                    <div style={{ fontSize: 14, fontWeight: 600, color: installed ? '#e5e5e5' : '#777' }}>
+                      {meta.name}
+                    </div>
+                    <div style={{ fontSize: 12, color: '#888', fontFamily: 'monospace' }}>
+                      {installed
+                        ? `v${health?.version || '?'} - ${health?.binaryPath || 'on PATH'}`
+                        : (health?.error || 'Not installed')}
+                    </div>
+                  </div>
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  {installed && (
+                    <span style={{
+                      fontSize: 11, color: '#34d399', fontWeight: 600,
+                      padding: '2px 8px', borderRadius: 4,
+                      background: 'rgba(52,211,153,0.1)',
+                    }}>Ready</span>
+                  )}
+                  {!installed && (
+                    <span style={{
+                      fontSize: 11, color: '#666', fontWeight: 600,
+                      padding: '2px 8px', borderRadius: 4,
+                      background: 'rgba(255,255,255,0.03)',
+                    }}>N/A</span>
+                  )}
+                  {installed && !isDefault && (
+                    <button
+                      className="btn-outline"
+                      style={{ padding: '4px 10px', fontSize: 12 }}
+                      onClick={() => save({ defaultCli: type })}
+                    >
+                      Set Default
+                    </button>
+                  )}
+                  {isDefault && (
+                    <span style={{
+                      fontSize: 11, color: meta.color, fontWeight: 600,
+                      padding: '2px 8px', borderRadius: 4,
+                      background: `${meta.color}15`,
+                    }}>Default</span>
+                  )}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+
+        <div style={{ marginTop: 8 }}>
+          <button
+            className="btn-outline"
+            style={{ padding: '6px 14px', fontSize: 13 }}
+            disabled={healthLoading}
+            onClick={fetchCliHealth}
+          >
+            {healthLoading ? 'Checking...' : 'Refresh Status'}
+          </button>
+        </div>
+      </div>
+
+      <hr className="divider" />
 
       {/* Auto Resume */}
       <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 16, padding: '14px 0' }}>

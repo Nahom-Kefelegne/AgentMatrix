@@ -1,0 +1,86 @@
+import type { CliType, CliProvider, CliHealth } from './CliProvider';
+import { ClaudeProvider } from './ClaudeProvider';
+import { CopilotProvider } from './CopilotProvider';
+
+export type { CliType, CliProvider, CliHealth, SpawnOptions, ResumeOptions } from './CliProvider';
+
+const providerInstances = new Map<CliType, CliProvider>();
+
+function getOrCreateProvider(type: CliType): CliProvider {
+  let provider = providerInstances.get(type);
+  if (!provider) {
+    switch (type) {
+      case 'claude':
+        provider = new ClaudeProvider();
+        break;
+      case 'copilot':
+        provider = new CopilotProvider();
+        break;
+      default:
+        throw new Error(`Unknown CLI type: ${type}`);
+    }
+    providerInstances.set(type, provider);
+  }
+  return provider;
+}
+
+/** Get a provider instance for the given CLI type. */
+export function getProvider(type: CliType): CliProvider {
+  return getOrCreateProvider(type);
+}
+
+/** Detect which CLIs are installed on this system. */
+export function detectInstalledCLIs(): CliType[] {
+  const installed: CliType[] = [];
+  const types: CliType[] = ['claude', 'copilot'];
+
+  for (const type of types) {
+    try {
+      const provider = getOrCreateProvider(type);
+      provider.findBinary();
+      installed.push(type);
+    } catch {
+      // Not installed
+    }
+  }
+
+  return installed;
+}
+
+/** Check health of all known CLI types. */
+export function checkAllHealth(): CliHealth[] {
+  const types: CliType[] = ['claude', 'copilot'];
+  return types.map(type => {
+    const provider = getOrCreateProvider(type);
+    return provider.checkHealth();
+  });
+}
+
+/** Get the default provider — uses settings if available, otherwise first installed CLI. */
+export function getDefaultProvider(): CliProvider {
+  // Try to read defaultCli from settings
+  try {
+    const { getSettings } = require('../state/appSettings');
+    const settings = getSettings();
+    if (settings.defaultCli) {
+      const provider = getOrCreateProvider(settings.defaultCli);
+      try {
+        provider.findBinary();
+        return provider;
+      } catch {
+        // Configured default not available, fall through
+      }
+    }
+  } catch {
+    // Settings module not available (e.g. in browser context)
+  }
+
+  // Fallback: first installed CLI
+  const installed = detectInstalledCLIs();
+  if (installed.length > 0) {
+    return getOrCreateProvider(installed[0]);
+  }
+
+  // Ultimate fallback: return Claude provider (will throw on findBinary if not installed)
+  return getOrCreateProvider('claude');
+}

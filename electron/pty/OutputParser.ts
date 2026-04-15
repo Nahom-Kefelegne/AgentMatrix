@@ -1,3 +1,5 @@
+import type { CliProvider } from '../../lib/cli/CliProvider';
+
 export type PtyState = 'busy' | 'ready';
 
 export interface StateInfo {
@@ -5,6 +7,12 @@ export interface StateInfo {
 }
 
 export class OutputParser {
+  private provider?: CliProvider;
+
+  constructor(provider?: CliProvider) {
+    this.provider = provider;
+  }
+
   static stripAnsi(text: string): string {
     return text
       .replace(/\x1b\[[0-9;]*[a-zA-Z]/g, '')
@@ -16,12 +24,21 @@ export class OutputParser {
       .replace(/\r/g, '');
   }
 
+  /** Static version — uses default Claude prompt detection (backward compat). */
   static isPromptReady(text: string): boolean {
     const clean = OutputParser.stripAnsi(text).trim();
     return /[>\u276F]\s*$/.test(clean);
   }
 
-  /** Parse context usage from Claude's status bar output. Returns % used or null. */
+  /** Instance version — delegates to provider if available. */
+  isPromptReadyForProvider(text: string): boolean {
+    if (this.provider) {
+      return this.provider.detectPromptReady(text);
+    }
+    return OutputParser.isPromptReady(text);
+  }
+
+  /** Static version — uses default Claude context parsing (backward compat). */
   static parseContextUsage(text: string): number | null {
     const c = OutputParser.stripAnsi(text);
     // "Context: 97% remaining (3% used)" — words may be squished or spaced
@@ -30,6 +47,14 @@ export class OutputParser {
     const usedMatch = c.match(/(\d+)%\s*used/i);
     if (usedMatch) return parseInt(usedMatch[1], 10);
     return null;
+  }
+
+  /** Instance version — delegates to provider if available. */
+  parseContextUsageForProvider(text: string): number | null {
+    if (this.provider) {
+      return this.provider.parseContextUsage(text);
+    }
+    return OutputParser.parseContextUsage(text);
   }
 
   static isEcho(text: string, lastPrompt: string): boolean {

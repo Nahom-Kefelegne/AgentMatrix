@@ -1,12 +1,13 @@
-import { execSync } from 'child_process';
 import { join } from 'path';
 import { homedir } from 'os';
 import type { IPty } from 'node-pty';
 import { OutputParser, type PtyState, type StateInfo } from './OutputParser';
+import type { CliProvider, CliType } from '../../lib/cli/CliProvider';
 
 export interface PtySession {
   id: string;
   pty: IPty;
+  cliType: CliType;
   status: 'starting' | 'ready' | 'busy' | 'closed';
   currentState: PtyState;
   contextUsage: number | null; // % used (0-100)
@@ -20,6 +21,41 @@ export interface PtySession {
 
 export class PtyManager {
   private sessions = new Map<string, PtySession>();
+  private providers = new Map<CliType, CliProvider>();
+  private defaultProvider: CliProvider;
+
+  constructor(providers?: Map<CliType, CliProvider>) {
+    if (providers) {
+      this.providers = providers;
+      // Default to first provider (should be claude)
+      this.defaultProvider = providers.values().next().value!;
+    } else {
+      // Lazy-load providers to avoid issues if lib/cli isn't available yet
+      try {
+        const { getProvider, getDefaultProvider } = require('../../lib/cli');
+        const claude = getProvider('claude') as CliProvider;
+        this.providers.set('claude', claude);
+        try {
+          const copilot = getProvider('copilot') as CliProvider;
+          this.providers.set('copilot', copilot);
+        } catch { /* Copilot not available */ }
+        this.defaultProvider = getDefaultProvider() as CliProvider;
+      } catch {
+        // Fallback: create Claude provider directly
+        const { ClaudeProvider } = require('../../lib/cli/ClaudeProvider');
+        const claude = new ClaudeProvider();
+        this.providers.set('claude', claude);
+        this.defaultProvider = claude;
+      }
+    }
+  }
+
+  private getProviderForType(cliType?: CliType): CliProvider {
+    if (cliType && this.providers.has(cliType)) {
+      return this.providers.get(cliType)!;
+    }
+    return this.defaultProvider;
+  }
 
   /**
    * Decode a Claude project dir name back to a real filesystem path.
@@ -66,42 +102,6 @@ export class PtyManager {
       }
     }
     return existsSync(path) ? path : null;
-  }
-
-  private findClaudeBinary(): string {
-    // Try PATH first
-    try {
-      const cmd = process.platform === 'win32' ? 'where claude' : 'which claude';
-      const result = execSync(cmd, { encoding: 'utf-8' }).trim().split(/\r?\n/)[0].trim();
-      if (result) return result;
-    } catch {}
-
-    // Fallback: check common install locations
-    const { existsSync } = require('fs');
-    const home = homedir();
-    const candidates = process.platform === 'win32'
-      ? [
-          join(home, '.local', 'bin', 'claude.exe'),
-          join(home, '.local', 'bin', 'claude'),
-          join(home, 'AppData', 'Local', 'Programs', 'claude', 'claude.exe'),
-          join(home, 'AppData', 'Roaming', 'npm', 'claude.cmd'),
-          join(home, 'AppData', 'Roaming', 'npm', 'claude'),
-          'C:\\Program Files\\Claude\\claude.exe',
-        ]
-      : [
-          '/usr/local/bin/claude',
-          join(home, '.local', 'bin', 'claude'),
-          join(home, '.npm-global', 'bin', 'claude'),
-        ];
-
-    for (const path of candidates) {
-      if (existsSync(path)) {
-        console.log(`[findClaudeBinary] Found at fallback: ${path}`);
-        return path;
-      }
-    }
-
-    throw new Error('Claude CLI not found. Install it or add it to PATH.');
   }
 
   findSessionCwd(sessionId: string): string | undefined {
@@ -151,9 +151,10 @@ export class PtyManager {
     }
   }
 
-  private createPtySession(id: string, ptyProcess: IPty): PtySession {
+  private createPtySession(id: string, ptyProcess: IPty, cliType: CliType): PtySession {
+    const provider = this.getProviderForType(cliType);
     const session: PtySession = {
-      id, pty: ptyProcess, status: 'starting',
+      id, pty: ptyProcess, cliType, status: 'starting',
       currentState: 'busy', contextUsage: null,
       outputBuffer: [],
       onData: null, onReady: null, onStateChange: null, onContextUpdate: null,
@@ -166,8 +167,9 @@ export class PtyManager {
       if (session.onData) session.onData(data);
 
       // Parse context usage — check single chunk AND recent buffer
+      // Delegate to the provider for CLI-specific parsing
       const recent = session.outputBuffer.slice(-3).join('');
-      const ctx = OutputParser.parseContextUsage(data) ?? OutputParser.parseContextUsage(recent);
+      const ctx = provider.parseContextUsage(data) ?? provider.parseContextUsage(recent);
       if (ctx !== null && ctx !== session.contextUsage) {
         session.contextUsage = ctx;
         if (session.onContextUpdate) session.onContextUpdate(ctx);
@@ -176,7 +178,8 @@ export class PtyManager {
       const prev = session.currentState;
       const recentForReady = session.outputBuffer.slice(-3).join('');
 
-      if (OutputParser.isPromptReady(recentForReady)) {
+      // Delegate prompt detection to the provider
+      if (provider.detectPromptReady(recentForReady)) {
         if (prev !== 'ready') {
           session.currentState = 'ready';
           session.status = 'ready';
@@ -208,27 +211,28 @@ export class PtyManager {
     return session;
   }
 
-  private spawnPty(cwd: string, claudeArgs: string[]): IPty {
+  private spawnPty(cwd: string, cliArgs: string[], cliType?: CliType): IPty {
     const pty = require('node-pty');
-    const claudePath = this.findClaudeBinary();
+    const provider = this.getProviderForType(cliType);
+    const binaryPath = provider.findBinary();
     const { existsSync } = require('fs');
     const cwdExists = existsSync(cwd);
     const safeCwd = cwdExists ? cwd : homedir();
-    console.log(`[spawnPty] cwd="${cwd}" exists=${cwdExists} safeCwd="${safeCwd}" args=${claudeArgs.join(' ')}`);
-    const claudeCmd = `${claudePath} ${claudeArgs.join(' ')}`;
+    console.log(`[spawnPty] cli=${provider.type} cwd="${cwd}" exists=${cwdExists} safeCwd="${safeCwd}" args=${cliArgs.join(' ')}`);
+    const fullCmd = `${binaryPath} ${cliArgs.join(' ')}`;
     const env = { ...process.env };
     delete env.CLAUDECODE;
 
-    // Use 80 cols default — Claude TUI renders welcome screen at spawn time.
+    // Use 80 cols default — CLI TUI renders welcome screen at spawn time.
     // The terminal panel will resize the PTY to match when it opens.
     if (process.platform === 'win32') {
-      // Spawn claude directly — cmd.exe can't handle UNC paths
-      return pty.spawn(claudePath, claudeArgs, {
+      // Spawn binary directly — cmd.exe can't handle UNC paths
+      return pty.spawn(binaryPath, cliArgs, {
         cwd: safeCwd, cols: 80, rows: 24, env,
       });
     }
     const shell = process.env.SHELL || '/bin/bash';
-    return pty.spawn(shell, ['-c', `cd "${safeCwd}" && ${claudeCmd}`], {
+    return pty.spawn(shell, ['-c', `cd "${safeCwd}" && ${fullCmd}`], {
       cwd: safeCwd, cols: 80, rows: 24, env,
     });
   }
@@ -237,41 +241,62 @@ export class PtyManager {
     cwd: string; sessionUuid?: string; name?: string;
     permissionMode?: string; model?: string; effort?: string;
     allowedTools?: string; systemPrompt?: string;
+    cliType?: CliType;
   }): PtySession {
     if (this.sessions.has(id)) throw new Error(`Session ${id} already exists`);
-    const args: string[] = [];
-    if (opts.sessionUuid) args.push('--session-id', opts.sessionUuid);
-    if (opts.permissionMode === 'bypassPermissions') args.push('--dangerously-skip-permissions');
-    else if (opts.permissionMode) args.push('--permission-mode', opts.permissionMode);
-    if (opts.model) args.push('--model', opts.model);
-    if (opts.effort) args.push('--effort', opts.effort);
-    if (opts.allowedTools) args.push('--allowedTools', opts.allowedTools);
-    // Always inject MCP status instructions + user's custom prompt
-    const { MCP_SYSTEM_PROMPT: mcpInstructions } = require('../../lib/constants/mcpPrompt');
-    const fullPrompt = opts.systemPrompt
-      ? `${mcpInstructions} ${opts.systemPrompt}`
-      : mcpInstructions;
-    // Flatten to single line to avoid shell escaping issues
-    const oneLine = fullPrompt.replace(/\n/g, ' ').replace(/\s+/g, ' ').trim();
-    const escaped = oneLine.replace(/'/g, "'\\''");
-    args.push('--append-system-prompt', `'${escaped}'`);
-    return this.createPtySession(id, this.spawnPty(opts.cwd, args));
+
+    const cliType = opts.cliType || 'claude';
+    const provider = this.getProviderForType(cliType);
+
+    // For Claude, always inject MCP status instructions + user's custom prompt
+    let systemPrompt = opts.systemPrompt;
+    if (cliType === 'claude') {
+      const { MCP_SYSTEM_PROMPT: mcpInstructions } = require('../../lib/constants/mcpPrompt');
+      systemPrompt = systemPrompt
+        ? `${mcpInstructions} ${systemPrompt}`
+        : mcpInstructions;
+    }
+
+    const args = provider.buildSpawnArgs({
+      cwd: opts.cwd,
+      sessionId: opts.sessionUuid,
+      permissionMode: opts.permissionMode,
+      model: opts.model,
+      effort: opts.effort,
+      allowedTools: opts.allowedTools,
+      systemPrompt,
+    });
+
+    return this.createPtySession(id, this.spawnPty(opts.cwd, args, cliType), cliType);
   }
 
-  spawnResume(id: string, opts: { cwd?: string; resumeId: string; fork?: boolean; systemPrompt?: string }): PtySession {
+  spawnResume(id: string, opts: {
+    cwd?: string; resumeId: string; fork?: boolean; systemPrompt?: string;
+    cliType?: CliType;
+  }): PtySession {
     if (this.sessions.has(id)) throw new Error(`Session ${id} already exists`);
+
+    const cliType = opts.cliType || 'claude';
+    const provider = this.getProviderForType(cliType);
+
     const foundCwd = this.findSessionCwd(opts.resumeId);
     const cwd = foundCwd ?? opts.cwd ?? homedir();
-    console.log(`[spawnResume] id=${id.slice(0, 12)} resumeId=${opts.resumeId.slice(0, 12)} foundCwd=${foundCwd} optsCwd=${opts.cwd} finalCwd=${cwd}`);
-    const args = ['--resume', opts.resumeId, '--dangerously-skip-permissions'];
-    if (opts.fork) args.push('--fork-session');
-    if (opts.systemPrompt) {
-      // Flatten to single line to avoid shell issues
+    console.log(`[spawnResume] id=${id.slice(0, 12)} resumeId=${opts.resumeId.slice(0, 12)} cli=${cliType} foundCwd=${foundCwd} optsCwd=${opts.cwd} finalCwd=${cwd}`);
+
+    const args = provider.buildResumeArgs({
+      cwd,
+      resumeId: opts.resumeId,
+      fork: opts.fork,
+    });
+
+    // For Claude, append system prompt on resume if provided
+    if (cliType === 'claude' && opts.systemPrompt) {
       const oneLine = opts.systemPrompt.replace(/\n/g, ' ').replace(/\s+/g, ' ').trim();
       const escaped = oneLine.replace(/'/g, "'\\''");
       args.push('--append-system-prompt', `'${escaped}'`);
     }
-    return this.createPtySession(id, this.spawnPty(cwd, args));
+
+    return this.createPtySession(id, this.spawnPty(cwd, args, cliType), cliType);
   }
 
   sendPrompt(sessionId: string, prompt: string): void {

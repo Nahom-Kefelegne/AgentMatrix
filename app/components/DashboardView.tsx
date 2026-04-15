@@ -8,6 +8,34 @@ import ContextBar from './ContextBar';
 import AmbientOrbs from './AmbientOrbs';
 
 import MatrixRain from './MatrixRain';
+import type { CliType } from '@/lib/types';
+
+/** CLI icon metadata for visual differentiation */
+const CLI_ICON_META: Record<string, { svg: string; color: string; name: string }> = {
+  claude: {
+    svg: `<svg width="14" height="14" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M8 1L14.5 8L8 15L1.5 8L8 1Z" fill="currentColor" stroke="currentColor" stroke-width="0.5"/></svg>`,
+    color: '#D97706',
+    name: 'Claude Code',
+  },
+  copilot: {
+    svg: `<svg width="14" height="14" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M8 1C8 1 6.5 4 4 5.5C1.5 7 1 8 1 8C1 8 3 8.5 4 10C5 11.5 5.5 15 5.5 15C5.5 15 7 11 8 9.5C9 11 10.5 15 10.5 15C10.5 15 11 11.5 12 10C13 8.5 15 8 15 8C15 8 14.5 7 12 5.5C9.5 4 8 1 8 1Z" fill="currentColor"/></svg>`,
+    color: '#2F81F7',
+    name: 'GitHub Copilot',
+  },
+};
+
+function CliIcon({ cliType }: { cliType?: CliType }) {
+  const type = cliType || 'claude';
+  const meta = CLI_ICON_META[type];
+  if (!meta) return null;
+  return (
+    <span
+      title={meta.name}
+      style={{ color: meta.color, display: 'inline-flex', alignItems: 'center', flexShrink: 0, opacity: 0.8 }}
+      dangerouslySetInnerHTML={{ __html: meta.svg }}
+    />
+  );
+}
 
 const STATUS: Record<string, { label: string; dotClass: string }> = {
   working: { label: 'Working', dotClass: 'status-dot--working' },
@@ -178,7 +206,10 @@ function SessionCard({ s, i, contextUsage, onClick, socketRef, isDragging, onDra
 
       <div className="session-card-body">
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
-          <h3 className="session-name" style={{ flex: 1, marginRight: 16 }}>{s.name}</h3>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, flex: 1, marginRight: 16 }}>
+            <CliIcon cliType={s.cliType} />
+            <h3 className="session-name" style={{ margin: 0 }}>{s.name}</h3>
+          </div>
           <div className="status-badge">
             <span className="status-label" style={{ color: statusColor }}>{meta.label}</span>
             <div className={`status-dot ${meta.dotClass}`} />

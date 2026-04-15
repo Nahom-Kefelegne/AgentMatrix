@@ -151,12 +151,14 @@ async function startServer(): Promise<void> {
                 const sessionData = {
                   id: s.id, name, color: CC[ci], status: 'idle' as const,
                   deskIndex: di, deskPosition: dp, spawnPosition: EP,
-                  recentActions: [], agents: [], cwd: s.cwd, createdAt: Date.now(),
+                  recentActions: [], agents: [], cwd: s.cwd,
+                  cliType: s.cliType || ('claude' as const),
+                  createdAt: Date.now(),
                 };
                 addSession(sessionData);
                 io!.emit(SOCKET_EVENTS.SESSION_START, sessionData);
 
-                ptyManager.spawnResume(s.id, { cwd: s.cwd, resumeId: s.id });
+                ptyManager.spawnResume(s.id, { cwd: s.cwd, resumeId: s.id, cliType: s.cliType || 'claude' });
                 const pty = ptyManager.getSession(s.id);
                 if (pty) {
                   pty.onStateChange = (info) => io!.emit('session:state', { sessionId: s.id, ...info });

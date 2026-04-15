@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
-import type { SessionData, Action } from '@/lib/types';
+import type { SessionData, Action, CliType } from '@/lib/types';
 import TerminalPanel from './TerminalPanel';
 import HandoffModal from './HandoffModal';
 import FullscreenTerminal from './FullscreenTerminal';
@@ -9,6 +9,39 @@ import ContextBar from './ContextBar';
 import { useSocketContext } from './SocketProvider';
 import { useSessionContext } from '@/lib/hooks/useSessionContext';
 import ChangesViewer from './ChangesViewer';
+
+/** CLI icon metadata */
+const CLI_BADGE_META: Record<string, { svg: string; color: string; name: string }> = {
+  claude: {
+    svg: `<svg width="12" height="12" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M8 1L14.5 8L8 15L1.5 8L8 1Z" fill="currentColor" stroke="currentColor" stroke-width="0.5"/></svg>`,
+    color: '#D97706',
+    name: 'Claude Code',
+  },
+  copilot: {
+    svg: `<svg width="12" height="12" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M8 1C8 1 6.5 4 4 5.5C1.5 7 1 8 1 8C1 8 3 8.5 4 10C5 11.5 5.5 15 5.5 15C5.5 15 7 11 8 9.5C9 11 10.5 15 10.5 15C10.5 15 11 11.5 12 10C13 8.5 15 8 15 8C15 8 14.5 7 12 5.5C9.5 4 8 1 8 1Z" fill="currentColor"/></svg>`,
+    color: '#2F81F7',
+    name: 'GitHub Copilot',
+  },
+};
+
+function CliBadge({ cliType }: { cliType?: CliType }) {
+  const type = cliType || 'claude';
+  const meta = CLI_BADGE_META[type];
+  if (!meta) return null;
+  return (
+    <span
+      title={meta.name}
+      style={{
+        color: meta.color,
+        display: 'inline-flex',
+        alignItems: 'center',
+        flexShrink: 0,
+        opacity: 0.7,
+      }}
+      dangerouslySetInnerHTML={{ __html: meta.svg }}
+    />
+  );
+}
 
 const STATUS_COLORS: Record<string, string> = {
   idle: '#a1a1aa',
@@ -417,6 +450,7 @@ export default function SessionDialog({
                 backgroundColor: statusColor,
                 boxShadow: isWorking ? `0 0 8px ${statusColor}60` : 'none',
               }} />
+              <CliBadge cliType={session.cliType} />
               <span className="session-dialog-name">{session.name}</span>
               <span style={{
                 fontSize: 12, fontWeight: 600, color: statusColor,

@@ -10,6 +10,7 @@ export interface AppSettings {
   defaultPermissionMode: string;
   defaultEffort: string;
   appendSystemPrompt: string;
+  defaultCli?: 'claude' | 'copilot';
 }
 
 const DEFAULTS: AppSettings = {
