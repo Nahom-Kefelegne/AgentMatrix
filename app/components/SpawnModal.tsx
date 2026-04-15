@@ -174,18 +174,19 @@ export default function SpawnModal({ isOpen, onClose, onSessionSpawned }: SpawnM
         <OptionGroup>
           {(['claude', 'copilot'] as CliType[]).map(type => {
             const health = getCliHealthInfo(type);
-            const installed = health?.installed ?? false;
+            const directInstall = health?.installed ?? false;
+            const available = directInstall || (useAgency && agencyAvailable);
             const icon = CLI_ICONS[type];
             return (
               <OptionButton
                 key={type}
                 selected={cliType === type}
-                onClick={() => installed && setCliType(type)}
-                title={!installed ? (health?.error || `${icon.name} not installed`) : icon.name}
+                onClick={() => available && setCliType(type)}
+                title={!available ? (health?.error || `${icon.name} not installed`) : icon.name}
               >
-                <div style={{ display: 'flex', alignItems: 'center', gap: 6, opacity: installed ? 1 : 0.4 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6, opacity: available ? 1 : 0.4 }}>
                   <span
-                    style={{ color: installed ? icon.color : '#666', display: 'flex', alignItems: 'center' }}
+                    style={{ color: available ? icon.color : '#666', display: 'flex', alignItems: 'center' }}
                     dangerouslySetInnerHTML={{ __html: icon.svg }}
                   />
                   <span>{icon.name}</span>
@@ -193,9 +194,9 @@ export default function SpawnModal({ isOpen, onClose, onSessionSpawned }: SpawnM
                 {healthLoaded && (
                   <div style={{
                     fontSize: 11, marginTop: 2,
-                    color: installed ? '#888' : '#666',
+                    color: available ? '#888' : '#666',
                   }}>
-                    {installed ? (health?.version || 'Installed') : 'Not installed'}
+                    {directInstall ? (health?.version || 'Installed') : (useAgency && agencyAvailable) ? 'via Agency' : 'Not installed'}
                   </div>
                 )}
               </OptionButton>
