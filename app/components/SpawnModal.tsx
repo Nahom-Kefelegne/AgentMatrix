@@ -237,7 +237,16 @@ export default function SpawnModal({ isOpen, onClose, onSessionSpawned }: SpawnM
           background: useAgency ? 'rgba(99, 102, 241, 0.12)' : 'rgba(128, 128, 128, 0.08)',
           border: `1px solid ${useAgency ? 'rgba(99, 102, 241, 0.4)' : 'rgba(128, 128, 128, 0.15)'}`,
           cursor: 'pointer', transition: 'all 0.2s',
-        }} onClick={() => setUseAgency(!useAgency)}>
+        }} onClick={() => {
+          const next = !useAgency;
+          setUseAgency(next);
+          // Persist to backend settings so PtyManager sees it
+          fetch('/api/settings', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ useAgency: next }),
+          }).catch(() => {});
+        }}>
           <div style={{
             width: 36, height: 20, borderRadius: 10, padding: 2, flexShrink: 0,
             background: useAgency ? '#6366f1' : '#555',

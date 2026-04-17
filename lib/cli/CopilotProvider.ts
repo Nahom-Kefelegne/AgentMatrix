@@ -1,5 +1,5 @@
 import { execSync } from 'child_process';
-import { existsSync } from 'fs';
+import { existsSync, readdirSync } from 'fs';
 import { join } from 'path';
 import { homedir } from 'os';
 import type { CliProvider, CliHealth, SpawnOptions, ResumeOptions, CliType } from './CliProvider';
@@ -64,6 +64,20 @@ export class CopilotProvider implements CliProvider {
       }
     }
 
+    // Check Agency-managed install directory (~/.copilot-cli/<version>/copilot)
+    const agencyDir = join(home, '.copilot-cli');
+    if (existsSync(agencyDir)) {
+      try {
+        const versions = readdirSync(agencyDir)
+          .filter(d => existsSync(join(agencyDir, d, 'copilot')))
+          .sort()  // lexicographic — latest version last
+          .reverse();
+        if (versions.length > 0) {
+          return join(agencyDir, versions[0], 'copilot');
+        }
+      } catch { /* ignore */ }
+    }
+
     throw new Error('Copilot CLI not found. Install it or add it to PATH.');
   }
 
@@ -113,7 +127,7 @@ export class CopilotProvider implements CliProvider {
         args.push(`--allow-tool=${tool}`);
       }
     }
-    if (opts.cwd) args.push('--cwd', opts.cwd);
+    // cwd is set at the PTY/shell level by PtyManager, not as a CLI flag
     return args;
   }
 

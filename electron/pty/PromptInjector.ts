@@ -21,14 +21,14 @@ function getOutputPath(sessionId: string): string {
   return join(OUTPUT_DIR, `agentmatrix-output-${sessionId}.txt`);
 }
 
-/** Check if the PTY output buffer indicates prompt is ready */
+/** Check if the PTY output buffer indicates prompt is ready.
+ *  Matches both Claude (❯ / >) and Copilot ($ / › / >) prompts. */
 function isPromptReady(ptySession: PtySession): boolean {
-  // Check entire buffer — strip ANSI from each chunk and look for prompt
   const fullClean = ptySession.outputBuffer
     .slice(-10)
     .map(chunk => OutputParser.stripAnsi(chunk))
     .join('');
-  return /[❯\u276F]\s*$/.test(fullClean);
+  return /[$❯\u276F\u203A>]\s*$/.test(fullClean);
 }
 
 /**

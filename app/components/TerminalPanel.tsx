@@ -98,21 +98,24 @@ export default function TerminalPanel({ sessionId, sessionName, cwd, visible, re
       // Use WebGL renderer for faster rendering — skip on Windows where it
       // causes grainy text via remote desktop (no ClearType on GPU textures)
       const isWindows = navigator.platform?.toLowerCase().includes('win');
-      if (WebglAddon && !isWindows) {
+      if (WebglAddon && !isWindows && !cleanup) {
         try { terminal.loadAddon(new WebglAddon()); } catch {}
       }
 
       // Fit + resize PTY to match container.
       // Must send terminal:resize so the PTY knows the real dimensions.
+      // The "jiggle" (cols-1 then cols) forces a SIGWINCH even if the PTY
+      // already had these dimensions, guaranteeing the CLI TUI redraws.
       const fitAndResize = () => {
+        if (cleanup) return false;
         if (container.clientWidth <= 0 || container.clientHeight <= 0) return false;
         try {
           fitAddon.fit();
-          socket.emit('terminal:resize', {
-            sessionId,
-            cols: terminal.cols,
-            rows: terminal.rows,
-          });
+          const cols = terminal.cols;
+          const rows = terminal.rows;
+          // Jiggle: shrink by 1 col then restore — two SIGWINCHs guarantee redraw
+          socket.emit('terminal:resize', { sessionId, cols: Math.max(cols - 1, 1), rows });
+          socket.emit('terminal:resize', { sessionId, cols, rows });
         } catch {}
         return true;
       };
@@ -126,9 +129,9 @@ export default function TerminalPanel({ sessionId, sessionName, cwd, visible, re
         setTimeout(() => layoutObserver.disconnect(), 3000);
       }
       // Extra fits for dialog animation settling
-      setTimeout(fitAndResize, 100);
-      setTimeout(fitAndResize, 300);
-      setTimeout(fitAndResize, 600);
+      const t1 = setTimeout(fitAndResize, 100);
+      const t2 = setTimeout(fitAndResize, 300);
+      const t3 = setTimeout(fitAndResize, 600);
 
       termRef.current = terminal;
       fitRef.current = fitAddon;
@@ -217,13 +220,18 @@ export default function TerminalPanel({ sessionId, sessionName, cwd, visible, re
       socket.on('terminal:data' as any, handleData);
       socket.on('terminal:exit' as any, handleExit);
 
+      // Resize the PTY BEFORE replaying buffer — otherwise buffered output
+      // renders at the old 80x24 dimensions and looks wrong until next redraw.
+      fitAndResize();
+
       // Attach to the already-spawned PTY (managed session)
       setStatus('connecting');
       socket.emit('terminal:resume' as any, { sessionId });
 
-      // Resize again after resume — PTY now exists and can receive the dimensions
-      setTimeout(fitAndResize, 200);
-      setTimeout(fitAndResize, 500);
+      // Resize again after buffer replay + dialog animation settling
+      const t4 = setTimeout(fitAndResize, 200);
+      const t5 = setTimeout(fitAndResize, 500);
+      const t6 = setTimeout(fitAndResize, 1000);
 
       // Handle resize — debounce to avoid flicker
       let resizeTimer: ReturnType<typeof setTimeout> | null = null;
@@ -252,6 +260,9 @@ export default function TerminalPanel({ sessionId, sessionName, cwd, visible, re
 
       // Store cleanup refs
       (terminal as any).__cleanup = () => {
+        cleanup = true;
+        clearTimeout(t1); clearTimeout(t2); clearTimeout(t3);
+        clearTimeout(t4); clearTimeout(t5); clearTimeout(t6);
         socket.off('terminal:data' as any, handleData);
         socket.off('terminal:exit' as any, handleExit);
         window.removeEventListener('resize', onWindowResize);

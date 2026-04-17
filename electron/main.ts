@@ -9,6 +9,7 @@ import { getCachedName } from '../lib/state/nameCache';
 import { getSettings } from '../lib/state/appSettings';
 import { getActiveSessions } from '../lib/state/activeSessionsCache';
 import { PtyManager } from './pty/PtyManager';
+import { OutputParser } from './pty/OutputParser';
 import { setupTerminalBridge, requestSummary } from './terminalBridge';
 import { spawnOrchestrator, killOrchestrator, isOrchestrator } from './services/OrchestratorService';
 
@@ -165,7 +166,41 @@ async function startServer(): Promise<void> {
                   pty.onContextUpdate = (usage) => {
                     io!.emit('session:context', { sessionId: s.id, usage });
                   };
-                  // Summary generation removed from startup — users can generate manually
+
+                  // Watch for interactive prompts during resume (trust, large context, etc.)
+                  // Auto-accept to prevent sessions hanging on unattended prompts
+                  const prevOnData = pty.onData;
+                  let resumeBuffer = '';
+                  let handled = false;
+                  const resumeMonitor = (data: string) => {
+                    if (prevOnData) prevOnData(data);
+                    if (handled) return;
+                    resumeBuffer += data;
+                    const clean = OutputParser.stripAnsi(resumeBuffer);
+                    // Trust prompt
+                    if (clean.includes('trust this folder') || clean.includes('trust this project') ||
+                        clean.includes('Is this a project') || clean.includes('Yes, I trust')) {
+                      handled = true;
+                      console.log(`[auto-resume] ${name}: detected trust prompt, auto-accepting`);
+                      setTimeout(() => pty.pty.write('\r'), 300);
+                    }
+                    // Large context / compaction prompt — pick "continue as-is" (usually first option / Enter)
+                    if (clean.includes('conversation is getting long') || clean.includes('context is large') ||
+                        clean.includes('continue as-is') || clean.includes('start fresh') ||
+                        clean.includes('compact') || clean.includes('summarize the conversation')) {
+                      handled = true;
+                      console.log(`[auto-resume] ${name}: detected context prompt, choosing continue as-is`);
+                      setTimeout(() => pty.pty.write('\r'), 300);
+                      io!.emit('session:context-warning', { sessionId: s.id, message: 'Session context is large — resumed as-is' });
+                    }
+                  };
+                  pty.onData = resumeMonitor;
+                  // Stop monitoring after 30s
+                  setTimeout(() => {
+                    if (pty.onData === resumeMonitor) {
+                      pty.onData = prevOnData;
+                    }
+                  }, 30000);
                 }
                 console.log(`[auto-resume] ${name} (${s.id.slice(0, 8)})`);
               } catch (err) {

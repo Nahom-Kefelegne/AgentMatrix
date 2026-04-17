@@ -13,7 +13,56 @@ import {
 import { requestSummary } from './services/SummaryService';
 import { queryOrchestrator, getOrchestratorId, isOrchestrator, resetOrchestrator } from './services/OrchestratorService';
 import { generateHandoffSummary, injectHandoffIntoSession } from './services/HandoffService';
+import { OutputParser } from './pty/OutputParser';
+import type { PtySession } from './pty/PtyManager';
 export { requestSummary };
+
+/**
+ * Watch newly spawned session output for trust/permission prompts and auto-accept them.
+ * Works for both Claude ("trust this folder") and Copilot ("Do you trust the files in this folder").
+ */
+function watchForTrustPrompt(ptyManager: PtyManager, sessionId: string, sessionName: string): void {
+  const ptySession = ptyManager.getSession(sessionId);
+  if (!ptySession) return;
+
+  let buffer = '';
+  let accepted = false;
+  const prevOnData = ptySession.onData;
+
+  const monitor = (data: string) => {
+    if (prevOnData) prevOnData(data);
+    if (accepted) return;
+
+    buffer += data;
+    const clean = OutputParser.stripAnsi(buffer);
+
+    // Detect trust prompts from either Claude or Copilot
+    if (clean.includes('trust this folder') || clean.includes('trust this project') ||
+        clean.includes('Do you trust the files') || clean.includes('Confirm folder trust') ||
+        clean.includes('Is this a project') || clean.includes('Yes, I trust')) {
+      accepted = true;
+      console.log(`[trust-prompt] ${sessionName}: detected trust prompt, auto-accepting...`);
+      // Send Enter to accept the pre-selected "Yes" / "Yes, I trust" option
+      setTimeout(() => ptySession.pty.write('\r'), 300);
+      // Restore original handler after acceptance
+      setTimeout(() => {
+        if (ptySession.onData === monitor) ptySession.onData = prevOnData;
+      }, 2000);
+      return;
+    }
+
+    if (buffer.length > 10000) buffer = buffer.slice(-5000);
+  };
+
+  ptySession.onData = monitor;
+
+  // Stop monitoring after 30s
+  setTimeout(() => {
+    if (!accepted && ptySession.onData === monitor) {
+      ptySession.onData = prevOnData;
+    }
+  }, 30000);
+}
 
 function getNextDeskIndex(): number {
   const sessions = getAllSessions();
@@ -64,10 +113,10 @@ export function setupTerminalBridge(io: SocketIOServer, ptyManager: PtyManager):
       cliType?: 'claude' | 'copilot';
       copilotMode?: string;
     }) => {
+      const sessionUuid = randomUUID();
+      const cliType = opts.cliType || 'claude';
+      const name = opts.name || `session-${Date.now().toString(36)}`;
       try {
-        const sessionUuid = randomUUID();
-        const cliType = opts.cliType || 'claude';
-        const name = opts.name || `session-${Date.now().toString(36)}`;
         console.log(`[terminal:new] cli=${cliType} name=${name} uuid=${sessionUuid.slice(0, 8)} cwd=${opts.cwd}`);
 
         const sessionData = createSessionEntry(sessionUuid, name, opts.cwd);
@@ -104,6 +153,9 @@ export function setupTerminalBridge(io: SocketIOServer, ptyManager: PtyManager):
           };
         }
 
+        // Auto-accept trust/permission prompts (both Claude and Copilot)
+        watchForTrustPrompt(ptyManager, sessionUuid, name);
+
         // Track for auto-resume
         const active = getActiveSessions().filter(s => s.id !== sessionUuid);
         active.push({ id: sessionUuid, name, cwd: opts.cwd, cliType });
@@ -112,6 +164,11 @@ export function setupTerminalBridge(io: SocketIOServer, ptyManager: PtyManager):
         socket.emit('terminal:spawned', { sessionId: sessionUuid, name });
       } catch (err) {
         console.error('[terminal:new]', err);
+        // Clean up the session that was added before the failed spawn
+        removeSession(sessionUuid);
+        saveActiveSessions(getActiveSessions().filter(s => s.id !== sessionUuid));
+        io.emit(SOCKET_EVENTS.SESSION_END, { sessionId: sessionUuid });
+        socket.emit('terminal:spawn-error', { sessionId: sessionUuid, error: String(err) });
       }
     });
 
@@ -135,6 +192,7 @@ export function setupTerminalBridge(io: SocketIOServer, ptyManager: PtyManager):
           cwd,
           resumeId: opts.sourceSessionId,
           fork: true,
+          cliType: sourceSession?.cliType,
         });
 
         // Wire up output (same pattern as terminal:new)
@@ -154,7 +212,7 @@ export function setupTerminalBridge(io: SocketIOServer, ptyManager: PtyManager):
 
         // Track for auto-resume
         const active = getActiveSessions().filter(s => s.id !== sessionUuid);
-        active.push({ id: sessionUuid, name, cwd });
+        active.push({ id: sessionUuid, name, cwd, cliType: sourceSession?.cliType });
         saveActiveSessions(active);
 
         socket.emit('terminal:forked', { sessionId: sessionUuid, sourceSessionId: opts.sourceSessionId, name });
@@ -218,10 +276,10 @@ export function setupTerminalBridge(io: SocketIOServer, ptyManager: PtyManager):
 
         // Track for auto-resume
         const active = getActiveSessions().filter(s => s.id !== sessionId);
-        active.push({ id: sessionId, name, cwd });
+        active.push({ id: sessionId, name, cwd, cliType: existing?.cliType });
         saveActiveSessions(active);
 
-        ptyManager.spawnResume(sessionId, { cwd, resumeId: sessionId });
+        ptyManager.spawnResume(sessionId, { cwd, resumeId: sessionId, cliType: existing?.cliType });
 
         ptyManager.onOutput(sessionId, (data) => {
           socket.emit('terminal:data', { sessionId, data });
@@ -353,6 +411,9 @@ export function setupTerminalBridge(io: SocketIOServer, ptyManager: PtyManager):
       ptyManager.onOutput(sessionUuid, (outData) => {
         socket.emit('terminal:data', { sessionId: sessionUuid, data: outData });
       });
+
+      // Auto-accept trust prompts for handoff sessions too
+      watchForTrustPrompt(ptyManager, sessionUuid, name);
 
       const newPty = ptyManager.getSession(sessionUuid);
       if (newPty) {

@@ -22,7 +22,7 @@ export interface PtySession {
 export class PtyManager {
   private sessions = new Map<string, PtySession>();
   private providers = new Map<CliType, CliProvider>();
-  private defaultProvider: CliProvider;
+  private defaultProvider!: CliProvider;
 
   constructor(providers?: Map<CliType, CliProvider>) {
     if (providers) {
@@ -30,22 +30,31 @@ export class PtyManager {
       // Default to first provider (should be claude)
       this.defaultProvider = providers.values().next().value!;
     } else {
-      // Lazy-load providers to avoid issues if lib/cli isn't available yet
+      // Lazy-load providers — always register both so cliType routing works
+      // even if the binary isn't on PATH (Agency may manage it)
       try {
         const { getProvider, getDefaultProvider } = require('../../lib/cli');
         const claude = getProvider('claude') as CliProvider;
         this.providers.set('claude', claude);
-        try {
-          const copilot = getProvider('copilot') as CliProvider;
-          this.providers.set('copilot', copilot);
-        } catch { /* Copilot not available */ }
+        const copilot = getProvider('copilot') as CliProvider;
+        this.providers.set('copilot', copilot);
         this.defaultProvider = getDefaultProvider() as CliProvider;
-      } catch {
-        // Fallback: create Claude provider directly
-        const { ClaudeProvider } = require('../../lib/cli/ClaudeProvider');
-        const claude = new ClaudeProvider();
-        this.providers.set('claude', claude);
-        this.defaultProvider = claude;
+      } catch (err) {
+        console.warn('[PtyManager] Provider loading failed, using fallback:', err);
+        // Fallback: create providers directly
+        try {
+          const { ClaudeProvider } = require('../../lib/cli/ClaudeProvider');
+          const claude = new ClaudeProvider();
+          this.providers.set('claude', claude);
+          this.defaultProvider = claude;
+        } catch {}
+        try {
+          const { CopilotProvider } = require('../../lib/cli/CopilotProvider');
+          this.providers.set('copilot', new CopilotProvider());
+        } catch {}
+        if (!this.defaultProvider) {
+          throw new Error('No CLI providers could be loaded');
+        }
       }
     }
   }
@@ -53,6 +62,9 @@ export class PtyManager {
   private getProviderForType(cliType?: CliType): CliProvider {
     if (cliType && this.providers.has(cliType)) {
       return this.providers.get(cliType)!;
+    }
+    if (cliType) {
+      console.error(`[PtyManager] WARNING: requested provider '${cliType}' not found! Falling back to '${this.defaultProvider.type}'. Available: [${[...this.providers.keys()].join(', ')}]`);
     }
     return this.defaultProvider;
   }
@@ -229,18 +241,23 @@ export class PtyManager {
 
     if (useAgency) {
       // Agency wraps the CLI: `agency claude <args>` or `agency copilot <args>`
+      let agencyFound = false;
       try {
         const cmd = process.platform === 'win32' ? 'where agency' : 'which agency';
         const { execSync } = require('child_process');
         spawnBinary = execSync(cmd, { encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'] }).trim().split('\n')[0];
+        spawnArgs = [provider.type, ...cliArgs];
+        agencyFound = true;
       } catch {
-        // Agency not found, fall back to direct binary
-        spawnBinary = provider.findBinary();
-        spawnArgs = cliArgs;
-        console.warn(`[spawnPty] Agency enabled but not found, falling back to direct binary`);
+        // Agency not found — try direct binary, but give a clear error if that also fails
+        console.warn(`[spawnPty] Agency enabled but 'agency' not found on PATH, trying direct ${provider.type} binary`);
+        try {
+          spawnBinary = provider.findBinary();
+          spawnArgs = cliArgs;
+        } catch {
+          throw new Error(`Agency binary not found on PATH and ${provider.type} CLI is not directly installed. Install Agency or the ${provider.displayName} CLI.`);
+        }
       }
-      spawnBinary = spawnBinary!;
-      spawnArgs = [provider.type, ...cliArgs];
     } else {
       spawnBinary = provider.findBinary();
       spawnArgs = cliArgs;
@@ -294,6 +311,7 @@ export class PtyManager {
       copilotMode: opts.copilotMode,
     });
 
+    console.log(`[spawnNew] id=${id.slice(0, 8)} requestedCli=${opts.cliType} actualProvider=${provider.type} args=${args.join(' ')}`);
     return this.createPtySession(id, this.spawnPty(opts.cwd, args, cliType), cliType);
   }
 
