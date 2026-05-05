@@ -12,6 +12,7 @@ import { PtyManager } from './pty/PtyManager';
 import { OutputParser } from './pty/OutputParser';
 import { setupTerminalBridge, requestSummary } from './terminalBridge';
 import { spawnOrchestrator, killOrchestrator, isOrchestrator } from './services/OrchestratorService';
+import { reapOrphansOnStartup, logReapResult } from './services/OrphanReaper';
 
 const isDev = process.env.NODE_ENV !== 'production';
 const port = parseInt(process.env.PORT || '3000', 10);
@@ -20,6 +21,11 @@ let mainWindow: BrowserWindow | null = null;
 let tray: Tray | null = null;
 export let io: SocketIOServer | null = null;
 const ptyManager = new PtyManager();
+
+// Graceful shutdown flag — set true when user initiates quit. The window
+// `close` handler checks this to let windows actually close during quit
+// instead of hiding (Mac tray behavior).
+let shuttingDown = false;
 
 // Direct IPC for terminal keystrokes — bypasses Socket.io for zero-latency input
 ipcMain.on('terminal:write', (_event, sessionId: string, data: string) => {
@@ -49,7 +55,10 @@ function createWindow() {
   mainWindow.once('ready-to-show', () => mainWindow?.show());
 
   mainWindow.on('close', (e) => {
-    if (process.platform === 'darwin') {
+    // On macOS, clicking red X / Cmd+W hides the window (keeps app in tray).
+    // BUT when the app is actually quitting (Cmd+Q / Menu Quit / tray Quit),
+    // let the window close normally so the quit can proceed.
+    if (process.platform === 'darwin' && !shuttingDown) {
       e.preventDefault();
       mainWindow?.hide();
     }
@@ -129,6 +138,20 @@ async function startServer(): Promise<void> {
 
       httpServer.listen(port, () => {
         console.log(`> Server ready on http://localhost:${port}`);
+
+        // Reap orphan CLI processes from previous app runs BEFORE auto-resuming.
+        // When Electron crashes / force-quits, its PTY children (claude/copilot)
+        // survive. If we auto-resume the same session, we'd have two processes
+        // writing to the same transcript .jsonl, which corrupts parent UUIDs
+        // and makes "thousands of lines disappear on resume". Killing orphans
+        // first prevents this race entirely.
+        try {
+          const reaped = reapOrphansOnStartup();
+          logReapResult('startup', reaped);
+        } catch (err) {
+          console.error('[orphan-reaper] failed:', err);
+          // Don't block startup if reaper fails — just log it
+        }
 
         // Auto-resume sessions from last run
         const settings = getSettings();
@@ -260,7 +283,44 @@ app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') app.quit();
 });
 
+// Graceful shutdown — intercept quit, cleanly close all sessions so their
+// SessionEnd hooks fire and transcripts are flushed, then force-exit.
+// Without this, PTY processes get SIGKILL'd on app exit and transcripts can
+// be left in an inconsistent state with no sessionEnd hook firing.
+app.on('before-quit', async (e) => {
+  // Always prevent the default quit during shutdown. This blocks re-entry
+  // from spammed Cmd+Q presses that would otherwise SIGKILL mid-shutdown.
+  if (shuttingDown) {
+    e.preventDefault();
+    return;
+  }
+  shuttingDown = true;
+  e.preventDefault();
+
+  // Tell the UI (if still open) that we're closing
+  try { io?.emit('app:shutting-down', { count: ptyManager.getAllSessions().length }); } catch {}
+
+  try {
+    // Send /exit to all sessions, wait up to 5s for clean close, force-kill stragglers
+    await ptyManager.gracefulShutdown(5000);
+  } catch (err) {
+    console.error('[shutdown] gracefulShutdown error:', err);
+  }
+
+  // Orchestrator is a regular PtyManager session, so it's already closed by
+  // gracefulShutdown. This is a no-op safety net for orchestrator state cleanup.
+  try { killOrchestrator(); } catch {}
+
+  // Force-exit to bypass the before-quit/close event loop entirely.
+  // app.quit() would re-fire before-quit and try to close windows, which
+  // is fragile. app.exit() skips all of that and terminates immediately.
+  app.exit(0);
+});
+
 app.on('will-quit', () => {
-  killOrchestrator();
-  ptyManager.dispose();
+  // Final safety net in case shutdown was bypassed (e.g., external SIGTERM)
+  if (!shuttingDown) {
+    killOrchestrator();
+    ptyManager.dispose();
+  }
 });

@@ -1,0 +1,219 @@
+/**
+ * OrphanReaper — Cleans up CLI subprocesses that survived a previous app crash.
+ *
+ * The problem: When Electron force-quits / crashes / OOM-kills, it doesn't
+ * propagate SIGTERM to its PTY children (Claude / Copilot CLI processes).
+ * Those children stay alive, attached to their transcript files. On next app
+ * launch, auto-resume spawns NEW processes for the same session IDs. Now
+ * TWO processes write to the same `.jsonl` transcript with conflicting
+ * parent UUIDs → broken chain → "thousands of lines of transcript disappear
+ * on resume". It's also a memory leak — the orphan keeps growing.
+ *
+ * This module finds those orphans on startup and kills them BEFORE
+ * auto-resume runs.
+ */
+
+import { execSync, spawnSync } from 'child_process';
+
+interface OrphanProcess {
+  pid: number;
+  ppid: number;
+  rssBytes: number;
+  cliType: 'claude' | 'copilot' | 'agency';
+  /** Session ID this process is attached to (the resume target / session-id flag). */
+  sessionId: string | null;
+  /** Raw command for logging. */
+  command: string;
+}
+
+/** Get all running CLI processes (claude, copilot, agency wrappers). */
+export function findRunningCliProcesses(): OrphanProcess[] {
+  if (process.platform === 'win32') {
+    // TODO: Windows process detection via tasklist + wmic if needed.
+    // For now, Windows users should restart their machine to clean up.
+    return [];
+  }
+
+  const result = spawnSync('ps', ['-eo', 'pid,ppid,rss,command'], {
+    encoding: 'utf-8',
+    maxBuffer: 10 * 1024 * 1024,
+  });
+  if (result.status !== 0) return [];
+
+  const lines = result.stdout.split('\n');
+  const orphans: OrphanProcess[] = [];
+
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (!trimmed) continue;
+
+    // Parse: "PID PPID RSS COMMAND..."
+    const match = trimmed.match(/^(\d+)\s+(\d+)\s+(\d+)\s+(.+)$/);
+    if (!match) continue;
+
+    const pid = parseInt(match[1], 10);
+    const ppid = parseInt(match[2], 10);
+    const rssKb = parseInt(match[3], 10);
+    const command = match[4];
+
+    // Match CLI binaries — be specific to avoid killing unrelated processes.
+    // Claude: ~/.claude-cli/<version>/claude or claude on PATH with --session-id or --resume
+    // Copilot: ~/.copilot-cli/<version>/copilot with --resume or --log-dir
+    // Agency: ~/.config/agency/.../agency claude or agency copilot
+    const isClaude = /\/claude(-cli\/[^\/]+)?\/claude\s|\/claude\s.*--session-id|\/claude\s.*--resume/.test(command);
+    const isCopilot = /\/copilot-cli\/[^\/]+\/copilot\s|\/copilot\s.*--resume|\/copilot\s.*--log-dir/.test(command);
+    const isAgencyWrapper = /\/agency\/.*\/agency\s+(claude|copilot)/.test(command);
+
+    if (!isClaude && !isCopilot && !isAgencyWrapper) continue;
+
+    let cliType: 'claude' | 'copilot' | 'agency';
+    if (isAgencyWrapper) cliType = 'agency';
+    else if (isClaude) cliType = 'claude';
+    else cliType = 'copilot';
+
+    // Extract session ID — try in order of specificity:
+    // 1. --session-id <uuid> (Claude new spawn — this is the AGENT'S session ID)
+    // 2. --resume <uuid> (resume target — for agency wrappers and direct resumes)
+    // 3. /session-state/<uuid>/ (Copilot session directory in --log-dir)
+    let sessionId: string | null = null;
+
+    // Prefer --session-id over --resume (a process with both is operating as session-id)
+    const sessionIdMatch = command.match(/--session-id\s+([a-f0-9-]{36})/);
+    if (sessionIdMatch) {
+      sessionId = sessionIdMatch[1];
+    } else {
+      const resumeMatch = command.match(/--resume[\s=]+([a-f0-9-]{36})/);
+      if (resumeMatch) sessionId = resumeMatch[1];
+    }
+
+    // Skip if we couldn't extract a session ID — likely not relevant.
+    if (!sessionId && !isAgencyWrapper) continue;
+
+    orphans.push({
+      pid,
+      ppid,
+      rssBytes: rssKb * 1024,
+      cliType,
+      sessionId,
+      command: command.length > 200 ? command.slice(0, 200) + '...' : command,
+    });
+  }
+
+  return orphans;
+}
+
+/** Kill a single PID gracefully (SIGTERM, then SIGKILL after 2s). */
+function killPid(pid: number): boolean {
+  try {
+    process.kill(pid, 'SIGTERM');
+  } catch (e) {
+    // Process already dead or insufficient permissions
+    return false;
+  }
+
+  // Give it 2 seconds to clean up, then force kill
+  setTimeout(() => {
+    try {
+      // process.kill with signal 0 just checks if alive
+      process.kill(pid, 0);
+      // Still alive — force it
+      process.kill(pid, 'SIGKILL');
+    } catch {
+      // Already dead — good
+    }
+  }, 2000);
+
+  return true;
+}
+
+/**
+ * Kill all CLI processes that are NOT owned by the current Electron process.
+ * Anything spawned by THIS Electron run has Electron's PID as ancestor and
+ * we leave those alone; everything else is from a previous (crashed) run.
+ *
+ * This is the safe nuclear option: on app startup, kill anything from a
+ * previous instance before we auto-resume.
+ */
+export function reapOrphansOnStartup(): { killed: number; freedBytes: number; details: string[] } {
+  const myPid = process.pid;
+  const orphans = findRunningCliProcesses();
+
+  // Build a set of PIDs that are descendants of THIS Electron process.
+  // Anything spawned in this Electron run has us in its ancestor chain.
+  const myDescendants = new Set<number>();
+  myDescendants.add(myPid);
+
+  // Build a parent-map for cheap ancestor walks
+  const parentOf = new Map<number, number>();
+  for (const o of orphans) parentOf.set(o.pid, o.ppid);
+
+  // Iteratively expand myDescendants until stable
+  let changed = true;
+  while (changed) {
+    changed = false;
+    for (const o of orphans) {
+      if (myDescendants.has(o.pid)) continue;
+      if (myDescendants.has(o.ppid)) {
+        myDescendants.add(o.pid);
+        changed = true;
+      }
+    }
+  }
+
+  const toKill = orphans.filter(o => !myDescendants.has(o.pid));
+  const details: string[] = [];
+  let freed = 0;
+
+  for (const o of toKill) {
+    const ageMb = (o.rssBytes / 1024 / 1024).toFixed(0);
+    details.push(`  killed ${o.cliType} pid=${o.pid} session=${(o.sessionId || 'none').slice(0, 8)} rss=${ageMb}MB`);
+    if (killPid(o.pid)) freed += o.rssBytes;
+  }
+
+  return { killed: toKill.length, freedBytes: freed, details };
+}
+
+/**
+ * Kill orphans for SPECIFIC session IDs that we're about to auto-resume.
+ * This is more targeted than `reapOrphansOnStartup`: it ONLY kills processes
+ * matching session IDs we're about to spawn, leaving unrelated processes alone.
+ *
+ * Use this when you don't want to be too aggressive about killing things you
+ * didn't spawn (e.g., user has another claude session running outside Agent
+ * Matrix that they don't want killed).
+ */
+export function reapOrphansForSessions(sessionIds: string[]): { killed: number; freedBytes: number; details: string[] } {
+  const myPid = process.pid;
+  const orphans = findRunningCliProcesses();
+  const targetIds = new Set(sessionIds);
+
+  const details: string[] = [];
+  let freed = 0;
+  let killed = 0;
+
+  for (const o of orphans) {
+    if (!o.sessionId || !targetIds.has(o.sessionId)) continue;
+    // Don't kill our own children (shouldn't happen at startup, but defensive)
+    if (o.ppid === myPid) continue;
+
+    const rssMb = (o.rssBytes / 1024 / 1024).toFixed(0);
+    details.push(`  killed ${o.cliType} pid=${o.pid} session=${o.sessionId.slice(0, 8)} rss=${rssMb}MB`);
+    if (killPid(o.pid)) {
+      freed += o.rssBytes;
+      killed++;
+    }
+  }
+
+  return { killed, freedBytes: freed, details };
+}
+
+/** Pretty-print the reaper result for logging. */
+export function logReapResult(label: string, result: { killed: number; freedBytes: number; details: string[] }) {
+  if (result.killed === 0) {
+    console.log(`[orphan-reaper] ${label}: no orphans found`);
+    return;
+  }
+  const freedMb = (result.freedBytes / 1024 / 1024).toFixed(0);
+  console.log(`[orphan-reaper] ${label}: killed ${result.killed} orphan process(es), freed ~${freedMb}MB`);
+  for (const line of result.details) console.log(line);
+}
