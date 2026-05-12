@@ -77,6 +77,32 @@ console.log('Hooks updated successfully');
 echo -e "  ${CHECK} Hooks updated in ${SETTINGS_FILE}"
 echo ""
 
+# Refresh Copilot CLI hooks (user-level, HTTP-type with built-in timeout)
+COPILOT_DIR="$HOME/.copilot"
+COPILOT_HOOKS_DIR="$COPILOT_DIR/hooks"
+COPILOT_HOOKS_FILE="$COPILOT_HOOKS_DIR/agentmatrix.json"
+
+if command -v copilot &> /dev/null || [ -d "$COPILOT_DIR" ]; then
+    echo -e "${BLUE}Updating GitHub Copilot CLI hooks...${NC}"
+    mkdir -p "$COPILOT_HOOKS_DIR"
+    cat > "$COPILOT_HOOKS_FILE" <<'COPILOT_HOOKS_EOF'
+{
+  "version": 1,
+  "hooks": {
+    "SessionStart": [{ "type": "http", "url": "http://localhost:3000/api/hooks/session-start", "timeoutSec": 2 }],
+    "SessionEnd":   [{ "type": "http", "url": "http://localhost:3000/api/hooks/session-end",   "timeoutSec": 2 }],
+    "PreToolUse":   [{ "type": "http", "url": "http://localhost:3000/api/hooks/tool-use",      "timeoutSec": 2 }],
+    "PostToolUse":  [{ "type": "http", "url": "http://localhost:3000/api/hooks/tool-complete", "timeoutSec": 2 }],
+    "SubagentStart":[{ "type": "http", "url": "http://localhost:3000/api/hooks/agent-start",   "timeoutSec": 2 }],
+    "SubagentStop": [{ "type": "http", "url": "http://localhost:3000/api/hooks/agent-stop",    "timeoutSec": 2 }],
+    "AgentStop":    [{ "type": "http", "url": "http://localhost:3000/api/hooks/stop",          "timeoutSec": 2 }]
+  }
+}
+COPILOT_HOOKS_EOF
+    echo -e "  ${CHECK} Copilot hooks updated in ${COPILOT_HOOKS_FILE}"
+    echo ""
+fi
+
 echo -e "${GREEN}╔══════════════════════════════════╗${NC}"
 echo -e "${GREEN}║       Update complete!           ║${NC}"
 echo -e "${GREEN}╚══════════════════════════════════╝${NC}"
