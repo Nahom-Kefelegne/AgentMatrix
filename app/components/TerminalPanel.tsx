@@ -11,6 +11,34 @@ interface TerminalPanelProps {
   readOnly?: boolean;
 }
 
+// Debounce for container resize events. 150ms is the xterm.js community sweet
+// spot: prevents reflow storms during drag/animation while still feeling snappy.
+const RESIZE_DEBOUNCE_MS = 150;
+
+const TERMINAL_THEME = {
+  background: '#0c0c18',
+  foreground: '#e8e8f0',
+  cursor: '#4a9eff',
+  cursorAccent: '#0c0c18',
+  selectionBackground: '#4a9eff50',
+  black: '#222238',
+  red: '#ff6b6b',
+  green: '#51cf66',
+  yellow: '#ffd43b',
+  blue: '#4a9eff',
+  magenta: '#cc5de8',
+  cyan: '#20c997',
+  white: '#e8e8f0',
+  brightBlack: '#888',
+  brightRed: '#ff8787',
+  brightGreen: '#69db7c',
+  brightYellow: '#ffe066',
+  brightBlue: '#74c0fc',
+  brightMagenta: '#da77f2',
+  brightCyan: '#38d9a9',
+  brightWhite: '#ffffff',
+};
+
 export default function TerminalPanel({ sessionId, sessionName, cwd, visible, readOnly }: TerminalPanelProps) {
   const { socketRef } = useSocketContext();
   const containerRef = useRef<HTMLDivElement>(null);
@@ -31,14 +59,15 @@ export default function TerminalPanel({ sessionId, sessionName, cwd, visible, re
     socket.on('session:initializing' as any, handler);
     return () => { socket.off('session:initializing' as any, handler); };
   }, [socketRef, sessionId]);
+
   useEffect(() => {
     const container = containerRef.current;
     const socket = socketRef.current;
     if (!container || !socket) return;
 
-    let terminal: any = null;
-    let fitAddon: any = null;
-    let cleanup = false;
+    // Disposal flag: guarded at the top of every async callback so nothing
+    // touches xterm internals after terminal.dispose().
+    let disposed = false;
 
     (async () => {
       // Dynamic import xterm (browser-only)
@@ -47,7 +76,7 @@ export default function TerminalPanel({ sessionId, sessionName, cwd, visible, re
       let WebglAddon: any = null;
       try { WebglAddon = (await import('@xterm/addon-webgl')).WebglAddon; } catch {}
 
-      // Load CSS
+      // Load CSS once
       if (!document.querySelector('link[data-xterm-css]')) {
         const link = document.createElement('link');
         link.rel = 'stylesheet';
@@ -56,32 +85,10 @@ export default function TerminalPanel({ sessionId, sessionName, cwd, visible, re
         document.head.appendChild(link);
       }
 
-      if (cleanup) return;
+      if (disposed) return;
 
-      terminal = new Terminal({
-        theme: {
-          background: '#0c0c18',
-          foreground: '#e8e8f0',
-          cursor: '#4a9eff',
-          cursorAccent: '#0c0c18',
-          selectionBackground: '#4a9eff50',
-          black: '#222238',
-          red: '#ff6b6b',
-          green: '#51cf66',
-          yellow: '#ffd43b',
-          blue: '#4a9eff',
-          magenta: '#cc5de8',
-          cyan: '#20c997',
-          white: '#e8e8f0',
-          brightBlack: '#888',
-          brightRed: '#ff8787',
-          brightGreen: '#69db7c',
-          brightYellow: '#ffe066',
-          brightBlue: '#74c0fc',
-          brightMagenta: '#da77f2',
-          brightCyan: '#38d9a9',
-          brightWhite: '#ffffff',
-        },
+      const terminal = new Terminal({
+        theme: TERMINAL_THEME,
         fontSize: 16,
         fontFamily: "'Menlo', 'Monaco', 'Courier New', monospace",
         lineHeight: 1.4,
@@ -91,72 +98,94 @@ export default function TerminalPanel({ sessionId, sessionName, cwd, visible, re
         scrollOnUserInput: true,
       });
 
-      fitAddon = new FitAddon();
+      const fitAddon = new FitAddon();
       terminal.loadAddon(fitAddon);
       terminal.open(container);
 
-      // Use WebGL renderer for faster rendering — skip on Windows where it
-      // causes grainy text via remote desktop (no ClearType on GPU textures)
+      // WebGL renderer for GPU-accelerated rendering. Skipped on Windows
+      // (remote desktop makes GPU text grainy — canvas renderer looks better).
       const isWindows = navigator.platform?.toLowerCase().includes('win');
-      if (WebglAddon && !isWindows && !cleanup) {
+      if (WebglAddon && !isWindows && !disposed) {
         try { terminal.loadAddon(new WebglAddon()); } catch {}
       }
-
-      // Fit + resize PTY to match container.
-      // Must send terminal:resize so the PTY knows the real dimensions.
-      // The "jiggle" (cols-1 then cols) forces a SIGWINCH even if the PTY
-      // already had these dimensions, guaranteeing the CLI TUI redraws.
-      const fitAndResize = () => {
-        if (cleanup) return false;
-        if (container.clientWidth <= 0 || container.clientHeight <= 0) return false;
-        try {
-          fitAddon.fit();
-          const cols = terminal.cols;
-          const rows = terminal.rows;
-          // Jiggle: shrink by 1 col then restore — two SIGWINCHs guarantee redraw
-          socket.emit('terminal:resize', { sessionId, cols: Math.max(cols - 1, 1), rows });
-          socket.emit('terminal:resize', { sessionId, cols, rows });
-        } catch {}
-        return true;
-      };
-
-      // Try immediately, then observe until container has size
-      if (!fitAndResize()) {
-        const layoutObserver = new ResizeObserver(() => {
-          if (fitAndResize()) layoutObserver.disconnect();
-        });
-        layoutObserver.observe(container);
-        setTimeout(() => layoutObserver.disconnect(), 3000);
-      }
-      // Extra fits for dialog animation settling
-      const t1 = setTimeout(fitAndResize, 100);
-      const t2 = setTimeout(fitAndResize, 300);
-      const t3 = setTimeout(fitAndResize, 600);
 
       termRef.current = terminal;
       fitRef.current = fitAddon;
 
-      // Focus the terminal so keyboard works immediately
+      // ── Resize machinery: ONE fit function, ONE observer, ONE debounce ──
+
+      // Tracks whether we've successfully fit at least once with valid
+      // dimensions. The first real fit is IMMEDIATE (no debounce) so
+      // tab-switches / dialog-opens don't flash at 80x24 for 150ms.
+      // Subsequent fits are debounced to prevent reflow storms.
+      let hasValidFit = false;
+
+      // safeFit: runs fitAddon.fit() with guards. Never emits socket events —
+      // that's terminal.onResize's job (fires only when cols/rows actually change).
+      const safeFit = () => {
+        if (disposed) return;
+        if (container.clientWidth <= 0 || container.clientHeight <= 0) return;
+        try { fitAddon.fit(); hasValidFit = true; } catch {}
+      };
+
+      // debouncedFit: coalesces rapid resize events (drag, animation) into
+      // one fit per 150ms window. Prevents reflow storms.
+      let debounceTimer: ReturnType<typeof setTimeout> | null = null;
+      const debouncedFit = () => {
+        if (debounceTimer) clearTimeout(debounceTimer);
+        debounceTimer = setTimeout(safeFit, RESIZE_DEBOUNCE_MS);
+      };
+
+      // terminal.onResize fires only when fit() actually changes cols/rows.
+      // This is the ONLY place we emit terminal:resize to the server.
+      // Replaces the old "jiggle" hack — if dims didn't change, no event fires,
+      // so the PTY doesn't get redundant SIGWINCHs.
+      const onResizeDisposable = terminal.onResize(({ cols, rows }: { cols: number; rows: number }) => {
+        if (disposed) return;
+        socket.emit('terminal:resize', { sessionId, cols, rows });
+      });
+
+      // Single ResizeObserver on the container handles ALL size changes:
+      // initial layout, dialog animation, tab switches, window resize,
+      // browser zoom, split pane layout — everything that changes container size.
+      //
+      // First fit (container 0x0 → real size) is immediate for snappy
+      // tab-switch / dialog-open rendering. Later fits are debounced.
+      const resizeObserver = new ResizeObserver(() => {
+        if (disposed) return;
+        if (!hasValidFit && container.clientWidth > 0 && container.clientHeight > 0) {
+          safeFit();
+        } else {
+          debouncedFit();
+        }
+      });
+      resizeObserver.observe(container);
+
+      // Browser zoom sometimes slips past ResizeObserver — belt & suspenders.
+      const onWindowResize = () => debouncedFit();
+      window.addEventListener('resize', onWindowResize);
+
+      // ── Input handling ──
+
+      // Focus terminal immediately so keyboard works on open
       terminal.focus();
 
-      // Forward keystrokes to PTY (unless read-only)
-      // Use Electron IPC when available (direct, no Socket.io hop) — falls back to socket
+      // Use Electron IPC for zero-latency keystrokes, fall back to socket
       const electronAPI = (window as any).electronAPI;
       const writeToTerminal = electronAPI?.terminalWrite
         ? (data: string) => electronAPI.terminalWrite(sessionId, data)
         : (data: string) => socket.emit('terminal:input', { sessionId, data });
 
       if (!readOnly) {
-        // Handle special key combos that xterm doesn't send correctly
         terminal.attachCustomKeyEventHandler((e: KeyboardEvent) => {
           if (e.key === 'Enter' && e.shiftKey) {
             if (e.type === 'keydown') {
-              // Shift+Enter — send CSI u encoding so Claude TUI gets it as newline
+              // Shift+Enter — CSI u encoding so Claude TUI gets it as newline
               writeToTerminal('\x1b[13;2u');
             }
             return false;
           }
-          // Ctrl+Shift+C — copy selection (Windows/Linux terminal convention)
+          // Ctrl+Shift+C — copy selection (Windows/Linux convention)
           if (e.type === 'keydown' && e.code === 'KeyC' && e.shiftKey && e.ctrlKey) {
             const sel = terminal.getSelection();
             if (sel) navigator.clipboard.writeText(sel);
@@ -172,14 +201,13 @@ export default function TerminalPanel({ sessionId, sessionName, cwd, visible, re
             }
             return false;
           }
-          // Cmd+C on Mac — copy selection if text is selected, otherwise send SIGINT
+          // Cmd+C on Mac — copy if selection, else SIGINT
           if (e.type === 'keydown' && e.code === 'KeyC' && e.metaKey && !e.shiftKey) {
             const sel = terminal.getSelection();
             if (sel) {
               navigator.clipboard.writeText(sel);
               return false;
             }
-            // No selection — let it through as Ctrl+C (SIGINT)
             return true;
           }
           return true;
@@ -190,13 +218,14 @@ export default function TerminalPanel({ sessionId, sessionName, cwd, visible, re
         });
       }
 
-      // Strip screen-clear sequences only when user is scrolled up viewing history.
-      // When at the bottom (following live output), let clears through so the TUI
-      // renders correctly without visual artifacts / duplicate content.
+      // ── Output handling ──
+
+      // Strip screen-clear sequences only when user is scrolled up viewing history,
+      // so history isn't wiped when the CLI TUI redraws.
       const stripClear = (s: string) =>
-        s.replace(/\x1b\[2J/g, '')   // clear entire screen
-         .replace(/\x1b\[3J/g, '')   // clear scrollback
-         .replace(/\x1b\[H/g, '');   // cursor home (often paired with clear)
+        s.replace(/\x1b\[2J/g, '')
+         .replace(/\x1b\[3J/g, '')
+         .replace(/\x1b\[H/g, '');
 
       const isAtBottom = () => {
         const buf = terminal.buffer.active;
@@ -220,89 +249,106 @@ export default function TerminalPanel({ sessionId, sessionName, cwd, visible, re
       socket.on('terminal:data' as any, handleData);
       socket.on('terminal:exit' as any, handleExit);
 
-      // Resize the PTY BEFORE replaying buffer — otherwise buffered output
-      // renders at the old 80x24 dimensions and looks wrong until next redraw.
-      fitAndResize();
+      // ── Focus handling (named functions for proper cleanup) ──
 
-      // Attach to the already-spawned PTY (managed session)
+      const onWindowFocus = () => {
+        if (!disposed && !readOnly) terminal.focus();
+      };
+      const onVisibilityChange = () => {
+        if (!document.hidden && !disposed && !readOnly) terminal.focus();
+      };
+      window.addEventListener('focus', onWindowFocus);
+      document.addEventListener('visibilitychange', onVisibilityChange);
+
+      // ── Initial resize + resume ──
+      // CRITICAL ORDERING: resize the PTY BEFORE requesting buffer replay.
+      // If we replayed first, the server would send us buffered output that
+      // was generated at the OLD PTY dimensions (e.g., 80x24), but xterm is
+      // about to fit to the NEW dimensions (e.g., 120x40). Those old-dims
+      // cursor positions render at completely wrong spots in the new-dims
+      // xterm, producing mangled output with scattered characters.
+      //
+      // By resizing first, Claude's SIGWINCH handler fires and it redraws
+      // the alt-screen at the new dimensions. The live output that arrives
+      // next is already in new-dims format.
+
+      // Fit synchronously so we know the target dimensions BEFORE resume.
+      // If container hasn't laid out yet, fit returns early and we emit the
+      // default dims (no harm — real fit happens via ResizeObserver later).
+      safeFit();
+
+      // Emit resize with current dims (either fitted or default). If fit()
+      // already changed dims, terminal.onResize already fired and emitted.
+      // Re-emitting here is a no-op on the server if dims match. This is the
+      // only place we send an unconditional initial resize.
+      socket.emit('terminal:resize', { sessionId, cols: terminal.cols, rows: terminal.rows });
+
+      // Now safe to replay — server will resize PTY first (queued above),
+      // then replay buffer. Claude's redraw at new dims overwrites scrollback.
       setStatus('connecting');
       socket.emit('terminal:resume' as any, { sessionId });
 
-      // Resize again after buffer replay + dialog animation settling
-      const t4 = setTimeout(fitAndResize, 200);
-      const t5 = setTimeout(fitAndResize, 500);
-      const t6 = setTimeout(fitAndResize, 1000);
-
-      // Handle resize — debounce to avoid flicker
-      let resizeTimer: ReturnType<typeof setTimeout> | null = null;
-      const doFit = () => fitAndResize();
-      const resizeObserver = new ResizeObserver(() => {
-        if (resizeTimer) clearTimeout(resizeTimer);
-        resizeTimer = setTimeout(doFit, 50);
-      });
-      resizeObserver.observe(container);
-
-      // Catch browser zoom changes (ResizeObserver misses these sometimes)
-      const onWindowResize = () => {
-        if (resizeTimer) clearTimeout(resizeTimer);
-        resizeTimer = setTimeout(doFit, 100);
-      };
-      window.addEventListener('resize', onWindowResize);
-
-      // Refocus terminal when window regains focus (alt-tab back)
-      const onWindowFocus = () => {
-        if (terminal && !readOnly) terminal.focus();
-      };
-      window.addEventListener('focus', onWindowFocus);
-      document.addEventListener('visibilitychange', () => {
-        if (!document.hidden && terminal && !readOnly) terminal.focus();
+      // rAF safety net: if the container didn't have dimensions at the
+      // synchronous fit above (e.g., dialog still animating in), try again
+      // after the next paint. ResizeObserver will also catch this.
+      requestAnimationFrame(() => {
+        if (disposed) return;
+        if (!hasValidFit) safeFit();
       });
 
-      // Store cleanup refs
+      // ── Cleanup (proper disposal order per xterm.js docs) ──
       (terminal as any).__cleanup = () => {
-        cleanup = true;
-        clearTimeout(t1); clearTimeout(t2); clearTimeout(t3);
-        clearTimeout(t4); clearTimeout(t5); clearTimeout(t6);
-        socket.off('terminal:data' as any, handleData);
-        socket.off('terminal:exit' as any, handleExit);
-        window.removeEventListener('resize', onWindowResize);
+        disposed = true;                                                     // 1. Flag — all callbacks bail
+        if (debounceTimer) clearTimeout(debounceTimer);                      // 2. Cancel pending fit
+        resizeObserver.disconnect();                                         // 3. Stop observing
+        window.removeEventListener('resize', onWindowResize);                // 4. Remove listeners
         window.removeEventListener('focus', onWindowFocus);
-        resizeObserver.disconnect();
-        terminal.dispose();
+        document.removeEventListener('visibilitychange', onVisibilityChange);
+        socket.off('terminal:data' as any, handleData);                      // 5. Remove socket listeners
+        socket.off('terminal:exit' as any, handleExit);
+        onResizeDisposable.dispose();                                        // 6. Dispose xterm event sub
+        fitAddon.dispose();                                                  // 7. Dispose addon BEFORE terminal
+        terminal.dispose();                                                  // 8. Terminal last
       };
     })();
 
     return () => {
-      cleanup = true;
+      disposed = true;
       if (termRef.current?.__cleanup) {
         termRef.current.__cleanup();
         termRef.current = null;
       }
+      fitRef.current = null;
     };
   }, [sessionId, socketRef]);
 
-  // Re-fit when tab becomes visible
+  // Visibility: when the terminal becomes visible, refit and re-emit resize
+  // to the PTY. This is critical for the fullscreen→modal case:
+  //   - Modal's TerminalPanel is mounted but covered by fullscreen overlay
+  //   - Fullscreen mounts its own TerminalPanel at larger dims, resizes PTY
+  //   - Modal's xterm keeps receiving PTY output (at larger dims) into a
+  //     smaller xterm → content mangles
+  //   - Exiting fullscreen: ResizeObserver doesn't fire (container dims
+  //     unchanged), so modal never tells PTY to resize back.
+  // Explicitly refitting on visibility transition forces PTY back in sync,
+  // so live content rendered after this point matches xterm's dims.
   useEffect(() => {
-    if (!visible || !fitRef.current || !termRef.current) return;
+    if (!visible || !termRef.current || !fitRef.current || readOnly) return;
+    const term = termRef.current;
+    const fit = fitRef.current;
     const socket = socketRef.current;
-    const fit = () => {
-      try {
-        fitRef.current?.fit();
-        const term = termRef.current;
-        if (term && socket) {
-          socket.emit('terminal:resize', { sessionId, cols: term.cols, rows: term.rows });
-        }
-        term?.focus();
-      } catch {}
-    };
-    // Fit multiple times — layout, paint, and after dialog animation settles
-    const t1 = setTimeout(fit, 50);
-    const t2 = setTimeout(fit, 200);
-    const t3 = setTimeout(fit, 500);
-    // Extra late fit to catch fullscreen→dialog transitions
-    const t4 = setTimeout(fit, 1000);
-    return () => { clearTimeout(t1); clearTimeout(t2); clearTimeout(t3); clearTimeout(t4); };
-  }, [visible, sessionId, socketRef]);
+
+    term.focus();
+
+    try {
+      fit.fit();
+      // Always emit, even if xterm dims didn't change — the PTY may be at
+      // different dims (e.g., fullscreen just exited and shrunk us).
+      if (socket) {
+        socket.emit('terminal:resize', { sessionId, cols: term.cols, rows: term.rows });
+      }
+    } catch {}
+  }, [visible, sessionId, socketRef, readOnly]);
 
   return (
     <div style={{
@@ -369,19 +415,19 @@ export default function TerminalPanel({ sessionId, sessionName, cwd, visible, re
             <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
           </div>
         )}
-      <div
-        ref={containerRef}
-        onClick={() => !initializing && termRef.current?.focus()}
-        style={{
-          height: '100%',
-          borderRadius: 8,
-          overflow: 'hidden',
-          background: '#0c0c18',
-          border: '1px solid #1e1e30',
-          willChange: 'transform',
-          pointerEvents: initializing ? 'none' : 'auto',
-        }}
-      />
+        <div
+          ref={containerRef}
+          onClick={() => !initializing && termRef.current?.focus()}
+          style={{
+            height: '100%',
+            borderRadius: 8,
+            overflow: 'hidden',
+            background: '#0c0c18',
+            border: '1px solid #1e1e30',
+            willChange: 'transform',
+            pointerEvents: initializing ? 'none' : 'auto',
+          }}
+        />
       </div>
     </div>
   );

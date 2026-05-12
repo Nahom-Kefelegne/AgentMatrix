@@ -382,5 +382,55 @@ export class PtyManager {
 
   hasPty(sessionId: string): boolean { return this.sessions.has(sessionId); }
   getSession(sessionId: string): PtySession | undefined { return this.sessions.get(sessionId); }
+  getAllSessions(): PtySession[] { return Array.from(this.sessions.values()); }
   dispose(): void { for (const [id] of this.sessions) this.kill(id); }
+
+  /**
+   * Cleanly close all active sessions by sending /exit, allowing the CLI
+   * to fire its SessionEnd hook and flush its transcript. Force-kills any
+   * session that doesn't exit within `timeoutMs`.
+   *
+   * Resolves once all sessions have closed (or been force-killed).
+   */
+  async gracefulShutdown(timeoutMs = 5000): Promise<void> {
+    const sessions = Array.from(this.sessions.values());
+    if (sessions.length === 0) return;
+
+    console.log(`[shutdown] Closing ${sessions.length} session(s) cleanly...`);
+
+    // Wait for each session to exit. node-pty's IPty.onExit fires when the
+    // child process terminates (naturally or via SIGKILL).
+    const exits = sessions.map(session => new Promise<void>((resolve) => {
+      let resolved = false;
+      const done = () => { if (!resolved) { resolved = true; resolve(); } };
+
+      try {
+        session.pty.onExit(() => done());
+      } catch { done(); return; }
+
+      // Send /exit — works for Claude CLI, Copilot CLI, and raw shells.
+      // Send it twice separated: text + Enter, same pattern as PromptInjector.
+      try {
+        session.pty.write('/exit\r');
+      } catch { done(); }
+    }));
+
+    // Race all exits against a timeout. Anything still alive gets force-killed.
+    const allExited = Promise.all(exits).then(() => {});
+    const timeout = new Promise<void>(resolve => setTimeout(resolve, timeoutMs));
+
+    await Promise.race([allExited, timeout]);
+
+    // Force-kill any stragglers
+    let forced = 0;
+    for (const session of sessions) {
+      if (session.status !== 'closed') {
+        try { session.pty.kill(); forced++; } catch {}
+        session.status = 'closed';
+        this.sessions.delete(session.id);
+      }
+    }
+    if (forced > 0) console.log(`[shutdown] Force-killed ${forced} stragglers`);
+    console.log('[shutdown] All sessions closed');
+  }
 }
