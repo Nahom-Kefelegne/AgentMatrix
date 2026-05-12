@@ -84,47 +84,28 @@ echo -e "${BLUE}Configuring Claude Code hooks...${NC}"
 
 mkdir -p "$CLAUDE_DIR"
 
-if [ -f "$SETTINGS_FILE" ]; then
-    # Merge hooks into existing settings
-    node -e "
+# Hooks use --connect-timeout 1 + silent fail so Claude/Copilot commands run
+# from terminal don't hang when Agent Matrix isn't running.
+node -e "
 const fs = require('fs');
 const path = '$SETTINGS_FILE';
 let settings = {};
 try { settings = JSON.parse(fs.readFileSync(path, 'utf-8')); } catch {}
 
 const hooks = {
-  SessionStart: [{matcher: '', hooks: [{type: 'command', command: 'cat | curl -s -X POST http://localhost:3000/api/hooks/session-start -H \"Content-Type: application/json\" -d @-'}]}],
-  SessionEnd: [{matcher: '', hooks: [{type: 'command', command: 'cat | curl -s -X POST http://localhost:3000/api/hooks/session-end -H \"Content-Type: application/json\" -d @-'}]}],
-  PreToolUse: [{matcher: '', hooks: [{type: 'command', command: 'cat | curl -s -X POST http://localhost:3000/api/hooks/tool-use -H \"Content-Type: application/json\" -d @-'}]}],
-  PostToolUse: [{matcher: '', hooks: [{type: 'command', command: 'cat | curl -s -X POST http://localhost:3000/api/hooks/tool-complete -H \"Content-Type: application/json\" -d @-'}]}],
-  SubagentStart: [{matcher: '', hooks: [{type: 'command', command: 'cat | curl -s -X POST http://localhost:3000/api/hooks/agent-start -H \"Content-Type: application/json\" -d @-'}]}],
-  SubagentStop: [{matcher: '', hooks: [{type: 'command', command: 'cat | curl -s -X POST http://localhost:3000/api/hooks/agent-stop -H \"Content-Type: application/json\" -d @-'}]}],
-  Stop: [{matcher: '', hooks: [{type: 'command', command: 'cat | curl -s -X POST http://localhost:3000/api/hooks/stop -H \"Content-Type: application/json\" -d @-'}]}]
+  SessionStart: [{matcher: '', hooks: [{type: 'command', command: 'cat | curl -s --connect-timeout 1 -X POST http://localhost:3000/api/hooks/session-start -H \"Content-Type: application/json\" -d @- 2>/dev/null || true'}]}],
+  SessionEnd: [{matcher: '', hooks: [{type: 'command', command: 'cat | curl -s --connect-timeout 1 -X POST http://localhost:3000/api/hooks/session-end -H \"Content-Type: application/json\" -d @- 2>/dev/null || true'}]}],
+  PreToolUse: [{matcher: '', hooks: [{type: 'command', command: 'cat | curl -s --connect-timeout 1 -X POST http://localhost:3000/api/hooks/tool-use -H \"Content-Type: application/json\" -d @- 2>/dev/null || true'}]}],
+  PostToolUse: [{matcher: '', hooks: [{type: 'command', command: 'cat | curl -s --connect-timeout 1 -X POST http://localhost:3000/api/hooks/tool-complete -H \"Content-Type: application/json\" -d @- 2>/dev/null || true'}]}],
+  SubagentStart: [{matcher: '', hooks: [{type: 'command', command: 'cat | curl -s --connect-timeout 1 -X POST http://localhost:3000/api/hooks/agent-start -H \"Content-Type: application/json\" -d @- 2>/dev/null || true'}]}],
+  SubagentStop: [{matcher: '', hooks: [{type: 'command', command: 'cat | curl -s --connect-timeout 1 -X POST http://localhost:3000/api/hooks/agent-stop -H \"Content-Type: application/json\" -d @- 2>/dev/null || true'}]}],
+  Stop: [{matcher: '', hooks: [{type: 'command', command: 'cat | curl -s --connect-timeout 1 -X POST http://localhost:3000/api/hooks/stop -H \"Content-Type: application/json\" -d @- 2>/dev/null || true'}]}]
 };
 
 settings.hooks = { ...settings.hooks, ...hooks };
 fs.writeFileSync(path, JSON.stringify(settings, null, 2));
-console.log('Hooks configured successfully');
+console.log('Hooks configured successfully (silent-fail when app not running)');
 "
-else
-    # Create new settings file
-    node -e "
-const fs = require('fs');
-const settings = {
-  hooks: {
-    SessionStart: [{matcher: '', hooks: [{type: 'command', command: 'cat | curl -s -X POST http://localhost:3000/api/hooks/session-start -H \"Content-Type: application/json\" -d @-'}]}],
-    SessionEnd: [{matcher: '', hooks: [{type: 'command', command: 'cat | curl -s -X POST http://localhost:3000/api/hooks/session-end -H \"Content-Type: application/json\" -d @-'}]}],
-    PreToolUse: [{matcher: '', hooks: [{type: 'command', command: 'cat | curl -s -X POST http://localhost:3000/api/hooks/tool-use -H \"Content-Type: application/json\" -d @-'}]}],
-    PostToolUse: [{matcher: '', hooks: [{type: 'command', command: 'cat | curl -s -X POST http://localhost:3000/api/hooks/tool-complete -H \"Content-Type: application/json\" -d @-'}]}],
-    SubagentStart: [{matcher: '', hooks: [{type: 'command', command: 'cat | curl -s -X POST http://localhost:3000/api/hooks/agent-start -H \"Content-Type: application/json\" -d @-'}]}],
-    SubagentStop: [{matcher: '', hooks: [{type: 'command', command: 'cat | curl -s -X POST http://localhost:3000/api/hooks/agent-stop -H \"Content-Type: application/json\" -d @-'}]}],
-    Stop: [{matcher: '', hooks: [{type: 'command', command: 'cat | curl -s -X POST http://localhost:3000/api/hooks/stop -H \"Content-Type: application/json\" -d @-'}]}]
-  }
-};
-fs.writeFileSync('$SETTINGS_FILE', JSON.stringify(settings, null, 2));
-console.log('Settings file created with hooks');
-"
-fi
 
 echo -e "  ${CHECK} Hooks configured in ${SETTINGS_FILE}"
 echo ""

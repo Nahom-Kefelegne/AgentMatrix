@@ -80,23 +80,25 @@ if (-not (Test-Path $claudeDir)) {
 }
 
 # Use Node.js to merge hooks (avoids PowerShell ConvertFrom-Json immutability issues)
+# Hooks use --connect-timeout 1 + silent fail so Claude/Copilot commands run
+# from terminal don't hang when Agent Matrix isn't running.
 $nodeScript = @"
 const fs = require('fs');
 const path = '$($settingsFile -replace '\\','\\\\')';
 let settings = {};
 try { settings = JSON.parse(fs.readFileSync(path, 'utf-8')); } catch {}
 const hooks = {
-  SessionStart: [{matcher: '', hooks: [{type: 'command', command: 'curl.exe -s -X POST http://localhost:3000/api/hooks/session-start -H "Content-Type: application/json" -d @-'}]}],
-  SessionEnd: [{matcher: '', hooks: [{type: 'command', command: 'curl.exe -s -X POST http://localhost:3000/api/hooks/session-end -H "Content-Type: application/json" -d @-'}]}],
-  PreToolUse: [{matcher: '', hooks: [{type: 'command', command: 'curl.exe -s -X POST http://localhost:3000/api/hooks/tool-use -H "Content-Type: application/json" -d @-'}]}],
-  PostToolUse: [{matcher: '', hooks: [{type: 'command', command: 'curl.exe -s -X POST http://localhost:3000/api/hooks/tool-complete -H "Content-Type: application/json" -d @-'}]}],
-  SubagentStart: [{matcher: '', hooks: [{type: 'command', command: 'curl.exe -s -X POST http://localhost:3000/api/hooks/agent-start -H "Content-Type: application/json" -d @-'}]}],
-  SubagentStop: [{matcher: '', hooks: [{type: 'command', command: 'curl.exe -s -X POST http://localhost:3000/api/hooks/agent-stop -H "Content-Type: application/json" -d @-'}]}],
-  Stop: [{matcher: '', hooks: [{type: 'command', command: 'curl.exe -s -X POST http://localhost:3000/api/hooks/stop -H "Content-Type: application/json" -d @-'}]}]
+  SessionStart: [{matcher: '', hooks: [{type: 'command', command: 'curl.exe -s --connect-timeout 1 -X POST http://localhost:3000/api/hooks/session-start -H "Content-Type: application/json" -d @- 2>nul || ver>nul'}]}],
+  SessionEnd: [{matcher: '', hooks: [{type: 'command', command: 'curl.exe -s --connect-timeout 1 -X POST http://localhost:3000/api/hooks/session-end -H "Content-Type: application/json" -d @- 2>nul || ver>nul'}]}],
+  PreToolUse: [{matcher: '', hooks: [{type: 'command', command: 'curl.exe -s --connect-timeout 1 -X POST http://localhost:3000/api/hooks/tool-use -H "Content-Type: application/json" -d @- 2>nul || ver>nul'}]}],
+  PostToolUse: [{matcher: '', hooks: [{type: 'command', command: 'curl.exe -s --connect-timeout 1 -X POST http://localhost:3000/api/hooks/tool-complete -H "Content-Type: application/json" -d @- 2>nul || ver>nul'}]}],
+  SubagentStart: [{matcher: '', hooks: [{type: 'command', command: 'curl.exe -s --connect-timeout 1 -X POST http://localhost:3000/api/hooks/agent-start -H "Content-Type: application/json" -d @- 2>nul || ver>nul'}]}],
+  SubagentStop: [{matcher: '', hooks: [{type: 'command', command: 'curl.exe -s --connect-timeout 1 -X POST http://localhost:3000/api/hooks/agent-stop -H "Content-Type: application/json" -d @- 2>nul || ver>nul'}]}],
+  Stop: [{matcher: '', hooks: [{type: 'command', command: 'curl.exe -s --connect-timeout 1 -X POST http://localhost:3000/api/hooks/stop -H "Content-Type: application/json" -d @- 2>nul || ver>nul'}]}]
 };
 settings.hooks = { ...settings.hooks, ...hooks };
 fs.writeFileSync(path, JSON.stringify(settings, null, 2));
-console.log('Hooks configured successfully');
+console.log('Hooks configured successfully (silent-fail when app not running)');
 "@
 node -e $nodeScript
 
