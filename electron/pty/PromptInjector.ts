@@ -1,10 +1,7 @@
 import type { PtySession } from './PtyManager';
 import { OutputParser } from './OutputParser';
-import { join } from 'path';
-import { homedir } from 'os';
 import { existsSync, readFileSync, unlinkSync } from 'fs';
-
-const OUTPUT_DIR = join(homedir(), '.claude');
+import { outputFilePath, OUTPUT_DIR, ensureDir } from '../../lib/state/paths';
 
 export interface InjectionResult {
   success: boolean;
@@ -18,7 +15,8 @@ export interface InjectOptions {
 }
 
 function getOutputPath(sessionId: string): string {
-  return join(OUTPUT_DIR, `agentmatrix-output-${sessionId}.txt`);
+  ensureDir(OUTPUT_DIR);
+  return outputFilePath(sessionId);
 }
 
 /** Check if the PTY output buffer indicates prompt is ready.

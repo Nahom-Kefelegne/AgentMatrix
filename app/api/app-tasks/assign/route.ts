@@ -1,13 +1,11 @@
 import { NextResponse } from 'next/server';
 import { writeFileSync, unlinkSync, existsSync } from 'fs';
-import { join } from 'path';
-import { homedir } from 'os';
 import type { Discussion } from '@/lib/state/appTaskStore';
-
-const TASK_DIR = join(homedir(), '.claude');
+import { taskFilePath, TASK_FILES_DIR, ensureDir } from '@/lib/state/paths';
 
 function getTaskFilePath(sessionId: string, taskId: string): string {
-  return join(TASK_DIR, `agentmatrix-task-${sessionId}-${taskId}.md`);
+  ensureDir(TASK_FILES_DIR);
+  return taskFilePath(sessionId, taskId);
 }
 
 /**

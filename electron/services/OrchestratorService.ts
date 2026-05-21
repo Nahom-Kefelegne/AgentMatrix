@@ -1,12 +1,9 @@
 import { PtyManager, type PtySession } from '../pty/PtyManager';
 import { injectPrompt, type InjectOptions } from '../pty/PromptInjector';
 import { OutputParser } from '../pty/OutputParser';
-import { homedir } from 'os';
-import { join } from 'path';
 import { readFileSync, writeFileSync } from 'fs';
 import { randomUUID } from 'crypto';
-
-const CACHE_PATH = join(homedir(), '.claude', 'agentmatrix-orchestrator.json');
+import { ORCHESTRATOR_PATH as CACHE_PATH, ensureDir, AGENTMATRIX_DIR } from '../../lib/state/paths';
 
 const SYSTEM_PROMPT = 'You are AgentMatrix Orchestrator. Execute tasks immediately. Write output to the file path specified in the prompt using Bash. Output only what is asked. No preamble. No questions. Do not modify any file except the specified output file.';
 
@@ -18,7 +15,10 @@ function readCachedId(): string | null {
 }
 
 function writeCachedId(sessionId: string): void {
-  try { writeFileSync(CACHE_PATH, JSON.stringify({ sessionId })); } catch {}
+  try {
+    ensureDir(AGENTMATRIX_DIR);
+    writeFileSync(CACHE_PATH, JSON.stringify({ sessionId }));
+  } catch {}
 }
 
 let orchestratorId: string | null = null;

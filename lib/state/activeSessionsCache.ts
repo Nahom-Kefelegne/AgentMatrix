@@ -1,8 +1,5 @@
 import { readFileSync, writeFileSync } from 'fs';
-import { join } from 'path';
-import { homedir } from 'os';
-
-const CACHE_PATH = join(homedir(), '.claude', 'agentmatrix-active-sessions.json');
+import { ACTIVE_SESSIONS_PATH as CACHE_PATH, ensureDir, AGENTMATRIX_DIR } from './paths';
 
 export interface CachedSession {
   id: string;
@@ -21,6 +18,7 @@ export function getActiveSessions(): CachedSession[] {
 
 export function saveActiveSessions(sessions: CachedSession[]): void {
   try {
+    ensureDir(AGENTMATRIX_DIR);
     writeFileSync(CACHE_PATH, JSON.stringify(sessions, null, 2));
   } catch {}
 }

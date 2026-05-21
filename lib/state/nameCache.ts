@@ -1,8 +1,5 @@
 import { readFileSync, writeFileSync } from 'fs';
-import { join } from 'path';
-import { homedir } from 'os';
-
-const CACHE_PATH = join(homedir(), '.claude', 'agentmatrix-names.json');
+import { NAMES_PATH as CACHE_PATH, ensureDir, AGENTMATRIX_DIR } from './paths';
 
 function readCache(): Record<string, string> {
   try {
@@ -14,6 +11,7 @@ function readCache(): Record<string, string> {
 
 function writeCache(cache: Record<string, string>): void {
   try {
+    ensureDir(AGENTMATRIX_DIR);
     writeFileSync(CACHE_PATH, JSON.stringify(cache, null, 2));
   } catch {
     // ignore

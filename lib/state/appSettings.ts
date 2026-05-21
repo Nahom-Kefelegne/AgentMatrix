@@ -1,8 +1,5 @@
 import { readFileSync, writeFileSync } from 'fs';
-import { join } from 'path';
-import { homedir } from 'os';
-
-const SETTINGS_PATH = join(homedir(), '.claude', 'agentmatrix-settings.json');
+import { SETTINGS_PATH, ensureDir, AGENTMATRIX_DIR } from './paths';
 
 export interface AppSettings {
   autoResume: boolean;
@@ -35,6 +32,7 @@ export function updateSettings(partial: Partial<AppSettings>): AppSettings {
   const current = getSettings();
   const updated = { ...current, ...partial };
   try {
+    ensureDir(AGENTMATRIX_DIR);
     writeFileSync(SETTINGS_PATH, JSON.stringify(updated, null, 2));
   } catch {}
   return updated;

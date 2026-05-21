@@ -1,13 +1,11 @@
 import { PtyManager } from '../pty/PtyManager';
 import { injectPrompt } from '../pty/PromptInjector';
-import { join } from 'path';
-import { homedir } from 'os';
 import { existsSync, unlinkSync } from 'fs';
-
-const HANDOFF_DIR = join(homedir(), '.claude');
+import { handoffFilePath, HANDOFF_DIR, ensureDir } from '../../lib/state/paths';
 
 export function getHandoffPath(handoffId: string): string {
-  return join(HANDOFF_DIR, `agentmatrix-handoff-${handoffId}.md`);
+  ensureDir(HANDOFF_DIR);
+  return handoffFilePath(handoffId);
 }
 
 /**

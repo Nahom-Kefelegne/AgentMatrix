@@ -1,14 +1,13 @@
 // Writes review markdown for Claude to read and act on
 import { NextResponse } from 'next/server';
 import { writeFileSync, unlinkSync, existsSync } from 'fs';
-import { join, basename } from 'path';
-import { homedir } from 'os';
+import { basename } from 'path';
 import type { ReviewComment } from '@/lib/types';
-
-const REVIEW_DIR = join(homedir(), '.claude');
+import { reviewFilePath, REVIEW_DIR, ensureDir } from '@/lib/state/paths';
 
 function getReviewFilePath(sessionId: string): string {
-  return join(REVIEW_DIR, `agentmatrix-review-${sessionId}.md`);
+  ensureDir(REVIEW_DIR);
+  return reviewFilePath(sessionId);
 }
 
 /**

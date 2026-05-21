@@ -1,8 +1,5 @@
 import { readFileSync, writeFileSync } from 'fs';
-import { join } from 'path';
-import { homedir } from 'os';
-
-const CONFIG_PATH = join(homedir(), '.claude', 'agentmatrix-ado.json');
+import { ADO_PATH as CONFIG_PATH, ensureDir, AGENTMATRIX_DIR } from './paths';
 
 export interface AdoConfig {
   organization: string;
@@ -19,5 +16,8 @@ export function getAdoConfig(): AdoConfig {
 }
 
 export function saveAdoConfig(config: AdoConfig): void {
-  try { writeFileSync(CONFIG_PATH, JSON.stringify(config, null, 2)); } catch {}
+  try {
+    ensureDir(AGENTMATRIX_DIR);
+    writeFileSync(CONFIG_PATH, JSON.stringify(config, null, 2));
+  } catch {}
 }

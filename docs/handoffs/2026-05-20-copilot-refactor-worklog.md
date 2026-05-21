@@ -38,8 +38,34 @@ This log tracks PR-by-PR progress through the phased refactor described in `docs
 
 ---
 
-### PR #2 — State storage migration (`~/.claude/agentmatrix-*` → `~/.agentmatrix/*`)
-*(not started)*
+### PR #2 — State storage migration (`~/.claude/agentmatrix-*` → `~/.agentmatrix/*`) ✅ 2026-05-20
+
+**Files changed:**
+- `lib/state/paths.ts` *(new)* — central registry of all on-disk paths. Exports `AGENTMATRIX_DIR`, named path constants per file, per-session path helpers (`outputFilePath`, `taskFilePath`, etc.), and `ensureDir` / `ensureAllDirs`. Zero I/O at import time.
+- `lib/state/migrateStateStorage.ts` *(new)* — one-shot migrator. Idempotent. Tries atomic `renameSync` first, falls back to copy on cross-device. Per-file: only moves when legacy exists AND modern doesn't (so user post-migration edits aren't clobbered).
+- `lib/state/appSettings.ts` — switched to `SETTINGS_PATH`.
+- `lib/state/nameCache.ts` — switched to `NAMES_PATH`.
+- `lib/state/appTaskStore.ts` — switched to `TASKS_PATH`.
+- `lib/state/adoConfig.ts` — switched to `ADO_PATH`.
+- `lib/state/activeSessionsCache.ts` — switched to `ACTIVE_SESSIONS_PATH`.
+- `electron/services/OrchestratorService.ts` — switched to `ORCHESTRATOR_PATH`.
+- `electron/pty/PromptInjector.ts` — switched to `outputFilePath()`; output now under `~/.agentmatrix/output/`.
+- `electron/services/HandoffService.ts` — switched to `handoffFilePath()`; handoffs now under `~/.agentmatrix/handoffs/`.
+- `app/api/app-tasks/assign/route.ts` — switched to `taskFilePath()`.
+- `app/api/sessions/review/route.ts` — switched to `reviewFilePath()`.
+- `electron/main.ts` — calls `migrateStateStorage()` once at `app.whenReady()` before any state module reads.
+
+**Design choices:**
+- Migrator does NOT delete legacy files immediately. Kept for two releases as a safety net for downgrades. Cleanup tracked as a future task.
+- Writers call `ensureDir` defensively before `writeFileSync`. Cheap (one stat) and survives the first-write race before the migrator has populated the dir.
+- Per-session path helpers (`outputFilePath`, etc.) live in `paths.ts` so consumers don't reinvent the filename scheme.
+
+**Perf notes:**
+- `paths.ts` does no I/O at import. `migrateStateStorage` is ~6 stat calls in the no-op case (the common path on every-startup-after-the-first), ~6 file copies on first run. All <1ms.
+- No long-blocking startup work added.
+
+**Verification:**
+- `npx tsc --noEmit` clean ✅
 
 ---
 

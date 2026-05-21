@@ -13,6 +13,7 @@ import { OutputParser } from './pty/OutputParser';
 import { setupTerminalBridge, requestSummary } from './terminalBridge';
 import { spawnOrchestrator, killOrchestrator, isOrchestrator } from './services/OrchestratorService';
 import { reapOrphansOnStartup, logReapResult } from './services/OrphanReaper';
+import { migrateStateStorage } from '../lib/state/migrateStateStorage';
 
 const isDev = process.env.NODE_ENV !== 'production';
 const port = parseInt(process.env.PORT || '3000', 10);
@@ -266,6 +267,11 @@ async function startServer(): Promise<void> {
 }
 
 app.whenReady().then(async () => {
+  // One-shot migration of state files from ~/.claude/agentmatrix-* to
+  // ~/.agentmatrix/*. Idempotent and fast (~6 stat calls in the no-op
+  // case). Runs before any state module touches disk.
+  migrateStateStorage();
+
   createWindow();
   createTray();
   await startServer();

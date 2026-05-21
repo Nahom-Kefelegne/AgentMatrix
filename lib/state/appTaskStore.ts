@@ -1,8 +1,5 @@
 import { readFileSync, writeFileSync } from 'fs';
-import { join } from 'path';
-import { homedir } from 'os';
-
-const STORE_PATH = join(homedir(), '.claude', 'agentmatrix-tasks.json');
+import { TASKS_PATH as STORE_PATH, ensureDir, AGENTMATRIX_DIR } from './paths';
 
 export interface Discussion {
   author: string;
@@ -43,6 +40,7 @@ function readStore(): AppTask[] {
 
 function writeStore(tasks: AppTask[]): void {
   try {
+    ensureDir(AGENTMATRIX_DIR);
     writeFileSync(STORE_PATH, JSON.stringify(tasks, null, 2));
   } catch {}
 }
