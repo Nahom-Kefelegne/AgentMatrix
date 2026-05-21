@@ -20,9 +20,19 @@ export async function POST(request: Request) {
 
     const lastActivity = Date.now();
 
+    // Return status to 'idle' so the UI doesn't appear stuck "working"
+    // between tool calls. Skip when subagents are still running or this
+    // event is itself from a subagent — those keep the parent at 'working'
+    // until SubagentStop arrives. Claude also flips back via its
+    // prompt-ready PTY signal, but Copilot does not — fixes that gap.
+    const hasActiveAgents = !!(session && session.agents.length > 0);
+    const isAgentEvent = !!payload.agent_id;
+    const shouldIdle = !hasActiveAgents && !isAgentEvent;
+
     updateSession(payload.session_id, {
       currentTool: undefined,
       lastActivity,
+      ...(shouldIdle ? { status: 'idle' as const } : {}),
     });
 
     const agentName = payload.agent_id ? getAgentName(payload.agent_id) : null;
@@ -42,6 +52,7 @@ export async function POST(request: Request) {
           currentTool: undefined,
           lastActivity,
           recentActions: updated.recentActions,
+          ...(shouldIdle ? { status: 'idle' as const } : {}),
         },
       });
     }
