@@ -53,6 +53,14 @@ export function getProvider(type: CliType): CliProvider {
   return getOrCreateProvider(type);
 }
 
+/** All known providers, one per CliType. Used by callers that need to
+ *  scan / probe / aggregate across all supported CLIs (session discovery,
+ *  process detection, etc.). Providers are cached singletons. */
+export function allProviders(): CliProvider[] {
+  const types: CliType[] = ['claude', 'copilot'];
+  return types.map(getOrCreateProvider);
+}
+
 /** Detect which CLIs are installed on this system. */
 export function detectInstalledCLIs(): CliType[] {
   const installed: CliType[] = [];

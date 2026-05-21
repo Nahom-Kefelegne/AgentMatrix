@@ -1,118 +1,66 @@
-import { execSync } from 'child_process';
-import { readFileSync, statSync } from 'fs';
-import { join } from 'path';
-import { homedir } from 'os';
-import type { SessionData } from '../types';
-import { SOCKET_EVENTS } from '../types';
+import type { SessionData, CliType } from '../types';
 import {
   DESK_POSITIONS,
   OVERFLOW_POSITIONS,
   ENTRANCE_POINT,
   CHARACTER_COLORS,
 } from '../constants';
-import { addSession, removeSession, getSession, updateSession, getAllSessions, getNextDeskIndex, isAppManaged } from './sessionStore';
+import {
+  addSession,
+  removeSession,
+  getSession,
+  updateSession,
+  getAllSessions,
+  getNextDeskIndex,
+  isAppManaged,
+} from './sessionStore';
 import { resolveSessionName, checkForRename } from './sessionName';
 import { getCachedName, setCachedName } from './nameCache';
+import { allProviders } from '../cli';
+import type { CliProvider, ActiveProcessInfo } from '../cli/CliProvider';
 
-const CLAUDE_PROJECTS_DIR = join(homedir(), '.claude', 'projects');
-const SCAN_INTERVAL_MS = 10_000; // 10 seconds
+const SCAN_INTERVAL_MS = 10_000;
 
-interface ActiveProcess {
-  sessionId: string;
-  resumeName?: string;
-  cwd?: string;
+interface ActiveProcess extends ActiveProcessInfo {
+  cliType: CliType;
 }
 
-/** Parse running Claude processes to get active session IDs and resume names */
-function getActiveProcesses(): ActiveProcess[] {
-  try {
-    const output = execSync(
-      "ps aux | grep '[c]laude.*--session-id' | grep -v grep",
-      { encoding: 'utf-8', timeout: 5000 },
-    );
-
-    const processes: ActiveProcess[] = [];
-    for (const line of output.split('\n')) {
-      const sessionMatch = line.match(/--session-id\s+([a-f0-9-]+)/);
-      if (sessionMatch) {
-        const resumeMatch = line.match(/--resume\s+(\S+)/);
-        processes.push({
-          sessionId: sessionMatch[1],
-          resumeName: resumeMatch ? resumeMatch[1] : undefined,
-        });
-      }
+/**
+ * Collect active processes across all known CLIs. Each provider owns
+ * its own detection strategy (Claude reads --session-id from ps; Copilot
+ * cross-references inuse.<PID>.lock files against live copilot PIDs).
+ *
+ * COST: one ps/wmic subprocess per provider — ~10-50ms total. Called
+ * every 10s by the scanner; never on render paths.
+ */
+function collectActiveProcesses(): ActiveProcess[] {
+  const out: ActiveProcess[] = [];
+  for (const provider of allProviders()) {
+    let entries: ActiveProcessInfo[] = [];
+    try {
+      entries = provider.detectActiveSessionIds();
+    } catch {
+      // Provider's detection is best-effort; never let one CLI take
+      // down the scanner.
+      continue;
     }
-    return processes;
-  } catch {
-    return [];
-  }
-}
-
-/** Find the transcript file for a session ID */
-function findTranscriptPath(sessionId: string): string | undefined {
-  try {
-    const output = execSync(
-      `find "${CLAUDE_PROJECTS_DIR}" -name "${sessionId}.jsonl" -type f 2>/dev/null`,
-      { encoding: 'utf-8', timeout: 5000 },
-    ).trim();
-    return output.split('\n')[0] || undefined;
-  } catch {
-    return undefined;
-  }
-}
-
-/** Extract cwd and other metadata from transcript first line */
-function parseTranscriptMeta(transcriptPath: string): { cwd?: string; slug?: string } {
-  try {
-    // Only read first 3KB instead of entire file (can be 10MB+)
-    const fd = require('fs').openSync(transcriptPath, 'r');
-    const buf = Buffer.alloc(3000);
-    require('fs').readSync(fd, buf, 0, 3000, 0);
-    require('fs').closeSync(fd);
-    const firstLine = buf.toString('utf-8').split('\n')[0];
-    const data = JSON.parse(firstLine);
-    let cwd = data.cwd;
-
-    // If no cwd in transcript, derive from project directory name
-    // e.g. ~/.claude/projects/-Users-johndoe-projects-myapp/xxx.jsonl → /Users/johndoe/projects/myapp
-    // Windows: ~/.claude/projects/-Q-src-teams-modular/xxx.jsonl → Q:\src\teams-modular
-    if (!cwd) {
-      const sep = require('path').sep;
-      const parts = transcriptPath.split(sep);
-      const projectsIdx = parts.indexOf('projects');
-      if (projectsIdx >= 0 && projectsIdx + 1 < parts.length) {
-        const dirName = parts[projectsIdx + 1]; // e.g. -Users-nkefelegne-Desktop-DEV or -Q-src-teams
-        if (process.platform === 'win32') {
-          // Windows: first segment after leading dash may be a drive letter
-          const stripped = dirName.replace(/^-/, '');
-          const segments = stripped.split('-');
-          if (segments.length > 0 && /^[A-Za-z]$/.test(segments[0])) {
-            // Drive letter path: Q-src-foo → Q:\src\foo
-            cwd = segments[0].toUpperCase() + ':\\' + segments.slice(1).join('\\');
-          } else {
-            cwd = '\\' + stripped.replace(/-/g, '\\');
-          }
-        } else {
-          cwd = dirName.replace(/^-/, '/').replace(/-/g, '/');
-        }
-      }
+    for (const e of entries) {
+      out.push({ ...e, cliType: provider.type });
     }
-
-    return { cwd, slug: data.slug };
-  } catch {
-    return {};
   }
+  return out;
 }
 
-/** Create a SessionData from a discovered active process */
-function createSessionFromProcess(proc: ActiveProcess): SessionData | null {
-  const transcriptPath = findTranscriptPath(proc.sessionId);
-  const meta = transcriptPath ? parseTranscriptMeta(transcriptPath) : {};
+function createSessionFromProcess(
+  proc: ActiveProcess,
+  provider: CliProvider,
+): SessionData {
+  const cwd = provider.findSessionCwd(proc.sessionId);
 
-  // Priority: --resume name > cached name > transcript rename/slug > cwd > session ID
+  // Priority: --resume name > cached name > slug/cwd fallback > session ID.
   const name = proc.resumeName
     || getCachedName(proc.sessionId)
-    || resolveSessionName(transcriptPath, meta.cwd, proc.sessionId);
+    || resolveSessionName(undefined, cwd, proc.sessionId);
 
   const deskIndex = getNextDeskIndex();
   const isDesk = deskIndex < DESK_POSITIONS.length;
@@ -135,18 +83,18 @@ function createSessionFromProcess(proc: ActiveProcess): SessionData | null {
     spawnPosition: ENTRANCE_POINT,
     recentActions: [],
     agents: [],
-    cwd: meta.cwd,
+    cwd,
+    cliType: proc.cliType,
     createdAt: Date.now(),
   };
 }
 
-/** Scan for active sessions and sync with store. Returns new/removed/updated sessions. */
 export function scanActiveSessions(): {
   added: SessionData[];
   removed: string[];
   updated: { sessionId: string; name: string }[];
 } {
-  const activeProcesses = getActiveProcesses();
+  const activeProcesses = collectActiveProcesses();
   const activeIds = new Set(activeProcesses.map(p => p.sessionId));
   const currentSessions = getAllSessions();
   const currentIds = new Set(currentSessions.map(s => s.id));
@@ -155,61 +103,69 @@ export function scanActiveSessions(): {
   const removed: string[] = [];
   const updated: { sessionId: string; name: string }[] = [];
 
-  // Add new sessions or update names for existing ones
+  const providerByType = new Map<CliType, CliProvider>();
+  for (const p of allProviders()) providerByType.set(p.type, p);
+
   for (const proc of activeProcesses) {
+    const provider = providerByType.get(proc.cliType);
+    if (!provider) continue;
+
     if (!currentIds.has(proc.sessionId)) {
-      const session = createSessionFromProcess(proc);
-      if (session) {
-        addSession(session);
-        setCachedName(session.id, session.name);
-        added.push(session);
-      }
-    } else {
-      const existing = getSession(proc.sessionId);
-      if (!existing) continue;
+      const session = createSessionFromProcess(proc, provider);
+      addSession(session);
+      setCachedName(session.id, session.name);
+      added.push(session);
+      continue;
+    }
 
-      // Update resume name if available
-      if (proc.resumeName && existing.name !== proc.resumeName) {
-        updateSession(proc.sessionId, { name: proc.resumeName });
-        setCachedName(proc.sessionId, proc.resumeName);
-        updated.push({ sessionId: proc.sessionId, name: proc.resumeName });
-      }
+    const existing = getSession(proc.sessionId);
+    if (!existing) continue;
 
-      // Fill in missing cwd
-      if (!existing.cwd) {
-        const transcriptPath = findTranscriptPath(proc.sessionId);
-        if (transcriptPath) {
-          const meta = parseTranscriptMeta(transcriptPath);
-          if (meta.cwd) {
-            updateSession(proc.sessionId, { cwd: meta.cwd });
-          }
-        }
-      }
+    if (proc.resumeName && existing.name !== proc.resumeName) {
+      updateSession(proc.sessionId, { name: proc.resumeName });
+      setCachedName(proc.sessionId, proc.resumeName);
+      updated.push({ sessionId: proc.sessionId, name: proc.resumeName });
+    }
+
+    if (!existing.cwd) {
+      const cwd = provider.findSessionCwd(proc.sessionId);
+      if (cwd) updateSession(proc.sessionId, { cwd });
     }
   }
 
-  // Re-check names for all existing sessions — only picks up /rename from CLI.
-  // We intentionally do NOT re-resolve with resolveSessionName() here, because
-  // slug/cwd fallbacks can overwrite a good name with a worse one (e.g. a slug
-  // found in conversation content of a forked/compacted session).
+  // Re-check names for /rename detected via Claude transcript scan.
+  // Copilot doesn't have an equivalent in-transcript rename signal yet;
+  // its workspace.yaml `name` field is captured at discovery time and
+  // not mutated mid-session.
+  //
+  // Build the transcript-path lookup once per tick. discoverSessions()
+  // does directory walks + partial reads — calling it inside the loop
+  // would re-scan disk N times.
+  const claudeProvider = providerByType.get('claude');
+  const transcriptPathById = new Map<string, string>();
+  if (claudeProvider) {
+    try {
+      for (const s of claudeProvider.discoverSessions()) {
+        if (s.transcriptPath) transcriptPathById.set(s.id, s.transcriptPath);
+      }
+    } catch { /* leave map empty */ }
+  }
   for (const proc of activeProcesses) {
-    if (currentIds.has(proc.sessionId) && !proc.resumeName) {
-      const existing = getSession(proc.sessionId);
-      if (!existing) continue;
-      const transcriptPath = findTranscriptPath(proc.sessionId);
-      if (transcriptPath) {
-        const renamed = checkForRename(transcriptPath);
-        if (renamed && renamed !== existing.name) {
-          updateSession(proc.sessionId, { name: renamed });
-          setCachedName(proc.sessionId, renamed);
-          updated.push({ sessionId: proc.sessionId, name: renamed });
-        }
-      }
+    if (!currentIds.has(proc.sessionId) || proc.resumeName) continue;
+    if (proc.cliType !== 'claude') continue;
+    const existing = getSession(proc.sessionId);
+    if (!existing) continue;
+
+    const transcriptPath = transcriptPathById.get(proc.sessionId);
+    if (!transcriptPath) continue;
+    const renamed = checkForRename(transcriptPath);
+    if (renamed && renamed !== existing.name) {
+      updateSession(proc.sessionId, { name: renamed });
+      setCachedName(proc.sessionId, renamed);
+      updated.push({ sessionId: proc.sessionId, name: renamed });
     }
   }
 
-  // Remove sessions that are no longer running
-  // Skip sessions launched/resumed by the app
   for (const session of currentSessions) {
     if (isAppManaged(session.id)) continue;
     if (!activeIds.has(session.id)) {
@@ -223,17 +179,14 @@ export function scanActiveSessions(): {
 
 let scanTimer: ReturnType<typeof setInterval> | null = null;
 
-/** Start periodic scanning. Calls onChange with added/removed/updated sessions. */
 export function startSessionScanner(
   onChange: (added: SessionData[], removed: string[], updated: { sessionId: string; name: string }[]) => void,
 ): void {
-  // Initial scan
   const initial = scanActiveSessions();
   if (initial.added.length > 0 || initial.removed.length > 0 || initial.updated.length > 0) {
     onChange(initial.added, initial.removed, initial.updated);
   }
 
-  // Periodic scan
   scanTimer = setInterval(() => {
     const result = scanActiveSessions();
     if (result.added.length > 0 || result.removed.length > 0 || result.updated.length > 0) {

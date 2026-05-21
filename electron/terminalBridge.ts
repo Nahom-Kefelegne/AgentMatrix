@@ -15,15 +15,22 @@ import { queryOrchestrator, getOrchestratorId, isOrchestrator, resetOrchestrator
 import { generateHandoffSummary, injectHandoffIntoSession } from './services/HandoffService';
 import { OutputParser } from './pty/OutputParser';
 import type { PtySession } from './pty/PtyManager';
+import { getProvider } from '../lib/cli';
+import type { CliType } from '../lib/types';
 export { requestSummary };
 
 /**
- * Watch newly spawned session output for trust/permission prompts and auto-accept them.
- * Works for both Claude ("trust this folder") and Copilot ("Do you trust the files in this folder").
+ * Watch newly spawned session output for trust/permission prompts and
+ * auto-accept them. Trust-prompt phrasing is provider-owned via
+ * `provider.getTrustPromptPatterns()`.
  */
 function watchForTrustPrompt(ptyManager: PtyManager, sessionId: string, sessionName: string): void {
   const ptySession = ptyManager.getSession(sessionId);
   if (!ptySession) return;
+
+  const provider = getProvider((ptySession.cliType as CliType) || 'claude');
+  const patterns = provider.getTrustPromptPatterns();
+  if (patterns.length === 0) return;
 
   let buffer = '';
   let accepted = false;
@@ -36,15 +43,10 @@ function watchForTrustPrompt(ptyManager: PtyManager, sessionId: string, sessionN
     buffer += data;
     const clean = OutputParser.stripAnsi(buffer);
 
-    // Detect trust prompts from either Claude or Copilot
-    if (clean.includes('trust this folder') || clean.includes('trust this project') ||
-        clean.includes('Do you trust the files') || clean.includes('Confirm folder trust') ||
-        clean.includes('Is this a project') || clean.includes('Yes, I trust')) {
+    if (patterns.some(p => clean.includes(p))) {
       accepted = true;
       console.log(`[trust-prompt] ${sessionName}: detected trust prompt, auto-accepting...`);
-      // Send Enter to accept the pre-selected "Yes" / "Yes, I trust" option
       setTimeout(() => ptySession.pty.write('\r'), 300);
-      // Restore original handler after acceptance
       setTimeout(() => {
         if (ptySession.onData === monitor) ptySession.onData = prevOnData;
       }, 2000);
@@ -56,7 +58,6 @@ function watchForTrustPrompt(ptyManager: PtyManager, sessionId: string, sessionN
 
   ptySession.onData = monitor;
 
-  // Stop monitoring after 30s
   setTimeout(() => {
     if (!accepted && ptySession.onData === monitor) {
       ptySession.onData = prevOnData;

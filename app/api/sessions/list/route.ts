@@ -1,118 +1,81 @@
 import { NextResponse } from 'next/server';
-import { readdirSync, existsSync, statSync, openSync, readSync, closeSync } from 'fs';
-import { join } from 'path';
-import { homedir } from 'os';
-import { execSync } from 'child_process';
 import { getCachedName } from '@/lib/state/nameCache';
+import { allProviders } from '@/lib/cli';
+import type { CliType } from '@/lib/types';
+import type { CliProvider, DiscoveredSession } from '@/lib/cli/CliProvider';
 
 interface SessionInfo {
   id: string;
   name: string;
-  slug: string;
-  projectDir: string;
+  cwd: string;
   lastModified: number;
   active: boolean;
+  cliType: CliType;
+  /** Legacy fields retained for UI backwards compatibility — will be
+   *  removed in Phase 1 once ResumeModal stops referencing them. */
+  slug: string;
+  projectDir: string;
 }
 
-function getActiveSessionIds(): Set<string> {
-  try {
-    const output = execSync(
-      "ps aux | grep '[c]laude.*--session-id' | grep -o '\\-\\-session-id [^ ]*' | awk '{print $2}'",
-      { encoding: 'utf-8', timeout: 5000 },
-    );
-    return new Set(output.trim().split('\n').filter(Boolean));
-  } catch {
-    return new Set();
-  }
-}
-
-/** Read name from first 3KB of transcript (slug) */
-function readSlug(filePath: string): string {
-  try {
-    const fd = openSync(filePath, 'r');
-    const buf = Buffer.alloc(3000);
-    readSync(fd, buf, 0, 3000, 0);
-    closeSync(fd);
-    const match = buf.toString('utf-8').match(/"slug"\s*:\s*"([^"]+)"/);
-    return match ? match[1] : '';
-  } catch { return ''; }
-}
-
-/** Parse a project directory for sessions */
-function parseProjectDir(
-  projectPath: string,
-  projectDirName: string,
-  activeIds: Set<string>,
-): SessionInfo[] {
-  const sessions: SessionInfo[] = [];
-  try {
-    const files = readdirSync(projectPath).filter(f => f.endsWith('.jsonl'));
-    for (const file of files) {
-      const sessionId = file.replace('.jsonl', '');
-      const filePath = join(projectPath, file);
-      try {
-        const slug = readSlug(filePath);
-        // Name priority: cache > slug > short ID
-        const name = getCachedName(sessionId) || slug || `Session-${sessionId.slice(0, 8)}`;
-        const stat = statSync(filePath);
-        sessions.push({
-          id: sessionId,
-          name,
-          slug,
-          projectDir: projectDirName,
-          lastModified: stat.mtimeMs,
-          active: activeIds.has(sessionId),
-        });
-      } catch {}
-    }
-  } catch {}
-  return sessions;
-}
-
+/**
+ * List on-disk sessions for either a single CWD (default) or all
+ * sessions globally across both CLIs.
+ *
+ * GET /api/sessions/list?cwd=...                 → sessions in that dir
+ * GET /api/sessions/list?global=true             → all sessions everywhere
+ * GET /api/sessions/list?cliType=copilot...      → restrict to one CLI
+ *
+ * COST: discoverSessions() is the expensive part — see provider docs.
+ * `global=true` calls it once per provider; cwd-scoped filters in-memory
+ * after the discovery, so still one discovery per provider.
+ */
 export async function GET(request: Request) {
   try {
     const { searchParams } = new URL(request.url);
     const cwd = searchParams.get('cwd') || '';
     const global = searchParams.get('global') === 'true';
+    const cliFilter = searchParams.get('cliType') as CliType | null;
 
-    const projectsDir = join(homedir(), '.claude', 'projects');
-    const activeIds = getActiveSessionIds();
+    const providers: CliProvider[] = cliFilter
+      ? allProviders().filter(p => p.type === cliFilter)
+      : allProviders();
 
-    if (global) {
-      // Search ALL project directories
-      const allSessions: SessionInfo[] = [];
+    const activeByCli = new Map<CliType, Set<string>>();
+    for (const p of providers) {
       try {
-        const dirs = readdirSync(projectsDir);
-        for (const dir of dirs) {
-          const dirPath = join(projectsDir, dir);
-          try {
-            const stat = statSync(dirPath);
-            if (stat.isDirectory()) {
-              allSessions.push(...parseProjectDir(dirPath, dir, activeIds));
-            }
-          } catch {}
-        }
-      } catch {}
-      allSessions.sort((a, b) => b.lastModified - a.lastModified);
-      return NextResponse.json({ sessions: allSessions });
+        const active = new Set(p.detectActiveSessionIds().map(a => a.sessionId));
+        activeByCli.set(p.type, active);
+      } catch {
+        activeByCli.set(p.type, new Set());
+      }
     }
 
-    // Search specific project directory
-    if (!cwd) {
-      return NextResponse.json({ sessions: [] });
+    const all: SessionInfo[] = [];
+    for (const provider of providers) {
+      let discovered: DiscoveredSession[] = [];
+      try {
+        discovered = provider.discoverSessions();
+      } catch {
+        continue;
+      }
+      const active = activeByCli.get(provider.type) ?? new Set<string>();
+      for (const s of discovered) {
+        if (!global && cwd && s.cwd !== cwd) continue;
+        all.push({
+          id: s.id,
+          name: getCachedName(s.id) || s.name || `Session-${s.id.slice(0, 8)}`,
+          cwd: s.cwd || '',
+          lastModified: s.lastModified ?? 0,
+          active: active.has(s.id),
+          cliType: provider.type,
+          slug: '',
+          projectDir: '',
+        });
+      }
     }
 
-    const projectDirName = cwd.replace(/\//g, '-');
-    const projectPath = join(projectsDir, projectDirName);
-
-    if (!existsSync(projectPath)) {
-      return NextResponse.json({ sessions: [] });
-    }
-
-    const sessions = parseProjectDir(projectPath, projectDirName, activeIds);
-    sessions.sort((a, b) => b.lastModified - a.lastModified);
-
-    return NextResponse.json({ sessions });
+    all.sort((a, b) => b.lastModified - a.lastModified);
+    return NextResponse.json({ sessions: all });
   } catch (error) {
     console.error('[sessions/list]', error);
     return NextResponse.json({ error: 'Internal error' }, { status: 500 });

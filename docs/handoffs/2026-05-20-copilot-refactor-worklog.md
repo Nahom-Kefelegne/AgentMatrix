@@ -69,17 +69,37 @@ This log tracks PR-by-PR progress through the phased refactor described in `docs
 
 ---
 
-### PR #3 — Multi-CLI session discovery & process detection
-*(not started)*
+### PR #3 — Multi-CLI session discovery & process detection ✅ 2026-05-20
 
-Targets the consumers of the PR #1 interface additions:
-- `lib/state/sessionScanner.ts` → use `provider.detectActiveSessionIds()` + `provider.findSessionCwd()` for both CLIs.
-- `app/api/sessions/list/route.ts` → call `provider.discoverSessions()` per CLI, merge.
-- `app/api/sessions/resolve/route.ts` → same.
-- `app/api/sessions/spawn/route.ts` → use `provider.findBinary()` not hardcoded `claude`.
-- `electron/pty/PtyManager.ts` — guard MCP injection on `provider.supportsMcp`; delegate `findSessionCwd` to provider.
-- `electron/main.ts` lines 203–218 — read trust/context patterns from provider.
-- `electron/terminalBridge.ts watchForTrustPrompt` — same.
+Wires the PR #1 interface additions into every legacy consumer.
+
+**Files changed:**
+- `lib/cli/index.ts` — added `allProviders()` helper that returns one cached provider per CliType.
+- `lib/state/sessionScanner.ts` — rewritten. Calls `allProviders()` and aggregates `detectActiveSessionIds()` across both CLIs. Tags each `ActiveProcess` with `cliType`. Uses `provider.findSessionCwd()` for cwd lookup. Memoizes `discoverSessions()` once per scan tick (the rename re-check loop previously could trigger N full disk scans per tick).
+- `electron/pty/PtyManager.ts`:
+  - `findSessionCwd(id, cliType?)` now delegates to the right provider. If `cliType` unknown, probes both.
+  - Removed the private `decodeDirName` helper and the inlined `~/.claude/projects/` scan — both lived in `ClaudeProvider` already.
+  - MCP system-prompt injection gated on `provider.supportsMcp` instead of `cliType === 'claude'`.
+  - Removed unused `path.join` import.
+  - `spawnResume` passes `cliType` into `findSessionCwd` so cross-CLI lookups don't accidentally pick the wrong on-disk format.
+- `electron/main.ts` — auto-resume monitor reads `getTrustPromptPatterns()` + `getContextPromptPatterns()` from the resumed session's provider rather than inlining the strings.
+- `electron/terminalBridge.ts` — `watchForTrustPrompt` reads patterns from the spawned session's provider.
+- `app/api/sessions/spawn/route.ts` — uses `provider.findBinary()` instead of hardcoded `'claude'`. Accepts optional `cliType` in request body; rejects non-Claude with 501 because the `--print` argument shape is Claude-specific. Documented inline.
+- `app/api/sessions/resolve/route.ts` — uses `allProviders()` + `provider.findSessionCwd()`. Removed its inline duplicate of `decodeDirName` and the `~/.claude/projects/` scan. Returns `cliType` so callers know which CLI owns the session.
+- `app/api/sessions/list/route.ts` — uses `provider.discoverSessions()` + `provider.detectActiveSessionIds()` per provider. New `cliType` query param filters to one CLI. Response retains legacy `slug`/`projectDir` fields (empty strings) so ResumeModal's `SessionInfo` interface keeps compiling — Phase 1 will remove them.
+
+**Perf notes:**
+- Scanner memoizes `discoverSessions()` per tick. The previous code did N disk scans per tick when N Claude sessions needed rename re-checks; now it's one.
+- `findSessionCwd(id, cliType)`: when `cliType` is known, only one provider is probed. When unknown, probes both — but Copilot's lookup is O(1) (single workspace.yaml read), so the worst case is "Claude scan + tiny Copilot stat."
+- `/api/sessions/list?global=true` calls `discoverSessions()` once per provider. No subprocess spawns for filesystem reads anywhere in the route now.
+
+**Deliberate punts (Phase 1 / 4 cleanup):**
+- ResumeModal's `slug`/`projectDir` UI surface — keeping for now so I don't touch UI without live testing.
+- Copilot headless `--prompt` shape in `/api/sessions/spawn` — needs API design + testing; deferred to a future PR.
+
+**Verification:**
+- `npx tsc --noEmit` clean ✅
+- No regressions for Claude: the existing fast paths still hit `ClaudeProvider` and behave identically.
 
 ---
 

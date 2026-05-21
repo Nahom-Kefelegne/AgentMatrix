@@ -14,6 +14,7 @@ import { setupTerminalBridge, requestSummary } from './terminalBridge';
 import { spawnOrchestrator, killOrchestrator, isOrchestrator } from './services/OrchestratorService';
 import { reapOrphansOnStartup, logReapResult } from './services/OrphanReaper';
 import { migrateStateStorage } from '../lib/state/migrateStateStorage';
+import { getProvider } from '../lib/cli';
 
 const isDev = process.env.NODE_ENV !== 'production';
 const port = parseInt(process.env.PORT || '3000', 10);
@@ -191,8 +192,14 @@ async function startServer(): Promise<void> {
                     io!.emit('session:context', { sessionId: s.id, usage });
                   };
 
-                  // Watch for interactive prompts during resume (trust, large context, etc.)
-                  // Auto-accept to prevent sessions hanging on unattended prompts
+                  // Watch for interactive prompts during resume (trust,
+                  // large-context compaction, etc.) and auto-accept so
+                  // unattended sessions don't hang. Pattern lists come
+                  // from the provider — they know what their own CLI
+                  // prints.
+                  const resumeProvider = getProvider(s.cliType || 'claude');
+                  const trustPatterns = resumeProvider.getTrustPromptPatterns();
+                  const contextPatterns = resumeProvider.getContextPromptPatterns();
                   const prevOnData = pty.onData;
                   let resumeBuffer = '';
                   let handled = false;
@@ -201,17 +208,13 @@ async function startServer(): Promise<void> {
                     if (handled) return;
                     resumeBuffer += data;
                     const clean = OutputParser.stripAnsi(resumeBuffer);
-                    // Trust prompt
-                    if (clean.includes('trust this folder') || clean.includes('trust this project') ||
-                        clean.includes('Is this a project') || clean.includes('Yes, I trust')) {
+                    if (trustPatterns.some(p => clean.includes(p))) {
                       handled = true;
                       console.log(`[auto-resume] ${name}: detected trust prompt, auto-accepting`);
                       setTimeout(() => pty.pty.write('\r'), 300);
+                      return;
                     }
-                    // Large context / compaction prompt — pick "continue as-is" (usually first option / Enter)
-                    if (clean.includes('conversation is getting long') || clean.includes('context is large') ||
-                        clean.includes('continue as-is') || clean.includes('start fresh') ||
-                        clean.includes('compact') || clean.includes('summarize the conversation')) {
+                    if (contextPatterns.some(p => clean.includes(p))) {
                       handled = true;
                       console.log(`[auto-resume] ${name}: detected context prompt, choosing continue as-is`);
                       setTimeout(() => pty.pty.write('\r'), 300);
@@ -219,7 +222,6 @@ async function startServer(): Promise<void> {
                     }
                   };
                   pty.onData = resumeMonitor;
-                  // Stop monitoring after 30s
                   setTimeout(() => {
                     if (pty.onData === resumeMonitor) {
                       pty.onData = prevOnData;

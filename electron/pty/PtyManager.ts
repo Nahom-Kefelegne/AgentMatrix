@@ -1,4 +1,3 @@
-import { join } from 'path';
 import { homedir } from 'os';
 import type { IPty } from 'node-pty';
 import { OutputParser, type PtyState, type StateInfo } from './OutputParser';
@@ -70,97 +69,28 @@ export class PtyManager {
   }
 
   /**
-   * Decode a Claude project dir name back to a real filesystem path.
-   * Claude encodes path separators as '-', but folder names can also contain '-'.
-   * We greedily try to match existing directories from left to right.
+   * Resolve the original working directory for a session ID. Delegates
+   * to the right provider's `findSessionCwd` since each CLI has its own
+   * on-disk layout. If `cliType` is unknown, probes both providers.
    *
-   * macOS/Linux: "Users-johndoe-projects-my-app" → /Users/johndoe/projects/my-app
-   * Windows:     "Q-src-teams-modular" → Q:\src\teams-modular
-   *              "C-Users-name-project" → C:\Users\name\project
+   * COST: provider-dependent. Claude scans its project dirs and reads a
+   * partial transcript header; Copilot opens one workspace.yaml.
    */
-  private decodeDirName(encoded: string, existsSync: (p: string) => boolean): string | null {
-    const segments = encoded.split('-');
-    const isWin = process.platform === 'win32';
-    const sep = isWin ? '\\' : '/';
-    let path = '';
-    let i = 0;
-
-    // Windows: check if first segment is a drive letter (single letter)
-    if (isWin && segments.length > 0 && /^[A-Za-z]$/.test(segments[0])) {
-      path = segments[0].toUpperCase() + ':';
-      i = 1;
-      // Check if just the drive root exists
-      if (!existsSync(path + '\\')) {
-        path = '';
-        i = 0;
-      }
-    }
-
-    while (i < segments.length) {
-      let found = false;
-      for (let end = segments.length; end > i; end--) {
-        const joined = segments.slice(i, end).join('-');
-        const candidate = path ? path + sep + joined : (isWin ? joined : '/' + joined);
-        if (existsSync(candidate)) {
-          path = candidate;
-          i = end;
-          found = true;
-          break;
-        }
-      }
-      if (!found) {
-        path = path ? path + sep + segments[i] : (isWin ? segments[i] : '/' + segments[i]);
-        i++;
-      }
-    }
-    return existsSync(path) ? path : null;
-  }
-
-  findSessionCwd(sessionId: string): string | undefined {
-    try {
-      const { existsSync, readdirSync, statSync, openSync, readSync, closeSync } = require('fs');
-      const projectsDir = join(homedir(), '.claude', 'projects');
-      if (!existsSync(projectsDir)) return undefined;
-
-      // Cross-platform: scan directories instead of using `find`
-      let transcriptPath: string | undefined;
-      const dirs = readdirSync(projectsDir);
-      for (const dir of dirs) {
-        const dirPath = join(projectsDir, dir);
-        try {
-          if (!statSync(dirPath).isDirectory()) continue;
-          const candidate = join(dirPath, `${sessionId}.jsonl`);
-          if (existsSync(candidate)) { transcriptPath = candidate; break; }
-        } catch {}
-      }
-      if (!transcriptPath) return undefined;
-
-      // Try reading cwd from transcript first line
+  findSessionCwd(sessionId: string, cliType?: CliType): string | undefined {
+    if (cliType) {
       try {
-        const fd = openSync(transcriptPath, 'r');
-        const buf = Buffer.alloc(4000);
-        readSync(fd, buf, 0, 4000, 0);
-        closeSync(fd);
-        const firstLine = buf.toString('utf-8').split('\n')[0];
-        const parsed = JSON.parse(firstLine);
-        if (parsed.cwd && existsSync(parsed.cwd)) {
-          return parsed.cwd;
-        }
-      } catch { /* fall through to dir name decoding */ }
-
-      // Fall back to decoding project dir name
-      const { sep } = require('path');
-      const parts = transcriptPath.split(sep);
-      const idx = parts.indexOf('projects');
-      if (idx < 0 || idx + 1 >= parts.length) return undefined;
-      const encoded = parts[idx + 1].replace(/^-/, ''); // strip leading dash
-      const resolved = this.decodeDirName(encoded, existsSync);
-      console.log(`[findSessionCwd] id=${sessionId.slice(0, 12)} encoded="${encoded}" resolved="${resolved}"`);
-      return resolved || undefined;
-    } catch (err) {
-      console.error('[findSessionCwd] error:', err);
-      return undefined;
+        return this.getProviderForType(cliType).findSessionCwd(sessionId);
+      } catch {
+        return undefined;
+      }
     }
+    for (const p of [this.getProviderForType('claude'), this.getProviderForType('copilot')]) {
+      try {
+        const cwd = p.findSessionCwd(sessionId);
+        if (cwd) return cwd;
+      } catch { /* try next */ }
+    }
+    return undefined;
   }
 
   private createPtySession(id: string, ptyProcess: IPty, cliType: CliType): PtySession {
@@ -291,9 +221,11 @@ export class PtyManager {
     const cliType = opts.cliType || 'claude';
     const provider = this.getProviderForType(cliType);
 
-    // For Claude, always inject MCP status instructions + user's custom prompt
+    // Inject MCP status instructions only when the CLI supports the
+    // MCP-aware system prompt scheme. Copilot's prompt grammar differs;
+    // until that's verified, supportsMcp gates this off for Copilot.
     let systemPrompt = opts.systemPrompt;
-    if (cliType === 'claude') {
+    if (provider.supportsMcp) {
       const { MCP_SYSTEM_PROMPT: mcpInstructions } = require('../../lib/constants/mcpPrompt');
       systemPrompt = systemPrompt
         ? `${mcpInstructions} ${systemPrompt}`
@@ -324,7 +256,7 @@ export class PtyManager {
     const cliType = opts.cliType || 'claude';
     const provider = this.getProviderForType(cliType);
 
-    const foundCwd = this.findSessionCwd(opts.resumeId);
+    const foundCwd = this.findSessionCwd(opts.resumeId, cliType);
     const cwd = foundCwd ?? opts.cwd ?? homedir();
     console.log(`[spawnResume] id=${id.slice(0, 12)} resumeId=${opts.resumeId.slice(0, 12)} cli=${cliType} foundCwd=${foundCwd} optsCwd=${opts.cwd} finalCwd=${cwd}`);
 

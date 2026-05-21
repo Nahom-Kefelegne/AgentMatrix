@@ -3,33 +3,53 @@ import { spawn } from 'child_process';
 import { openSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
+import { getProvider } from '@/lib/cli';
+import type { CliType } from '@/lib/types';
 
+/**
+ * Headless "fire-and-forget" task spawn. Used by external integrations
+ * that want to kick off a CLI with one prompt and not interact with it.
+ * For interactive sessions, see the socket flow in `terminalBridge.ts`.
+ *
+ * The argument shape (--print, --dangerously-skip-permissions, then task
+ * as positional) is Claude-specific. Copilot's headless equivalent
+ * (--prompt) hasn't been wired through here yet.
+ */
 export async function POST(request: Request) {
   try {
-    const { task, cwd, name } = await request.json();
+    const { task, cwd, name, cliType: rawCli } = await request.json();
+    const cliType: CliType = rawCli === 'copilot' ? 'copilot' : 'claude';
 
     if (!task || !cwd) {
       return NextResponse.json({ error: 'Missing task or cwd' }, { status: 400 });
     }
 
+    if (cliType !== 'claude') {
+      return NextResponse.json(
+        { error: `Headless spawn is not yet supported for cliType=${cliType}` },
+        { status: 501 },
+      );
+    }
+
+    const provider = getProvider(cliType);
+    const binary = provider.findBinary();
+
     const sessionName = name || `task-${Date.now()}`;
-    // Use --print for non-interactive mode, skip permissions
     const args = ['--print', '--dangerously-skip-permissions', task];
 
-    const logFile = join(tmpdir(), `claude-spawn-${sessionName}.log`);
+    const logFile = join(tmpdir(), `agentmatrix-spawn-${sessionName}.log`);
     const out = openSync(logFile, 'a');
 
-    // Strip CLAUDECODE env to prevent "nested session" error
+    // Strip CLAUDECODE env to prevent "nested session" error.
     const env = { ...process.env };
     delete env.CLAUDECODE;
 
-    const child = spawn('claude', args, {
+    const child = spawn(binary, args, {
       cwd,
       detached: true,
       stdio: ['ignore', out, out],
       env,
     });
-
     child.unref();
 
     return NextResponse.json({ ok: true, name: sessionName, logFile });
