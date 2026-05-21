@@ -5,6 +5,11 @@ import { useSocketContext } from './SocketProvider';
 import { Modal, FormField, OptionGroup, OptionButton, TextInput, TextArea, SelectInput } from './ui/Modal';
 import { FolderPicker } from './ui/FolderPicker';
 import type { CliType } from '@/lib/types';
+import {
+  CLAUDE_MODELS, CLAUDE_PERMISSION_MODES,
+  COPILOT_MODELS, COPILOT_PERMISSION_MODES, COPILOT_MODES,
+  EFFORT_LEVELS,
+} from '@/lib/cli/uiMetadata';
 
 interface CliHealthInfo {
   type: CliType;
@@ -13,56 +18,6 @@ interface CliHealthInfo {
   binaryPath: string | null;
   error?: string;
 }
-
-// ─── Claude-specific configs ───
-
-const CLAUDE_PERMISSION_MODES = [
-  { value: 'default', label: 'Default', desc: 'Ask for each tool use' },
-  { value: 'bypassPermissions', label: 'Skip Permissions', desc: 'Auto-approve everything' },
-  { value: 'acceptEdits', label: 'Accept Edits', desc: 'Auto-approve file edits, ask for others' },
-  { value: 'plan', label: 'Plan Mode', desc: 'Plan only, no execution' },
-  { value: 'auto', label: 'Auto', desc: 'Let Claude decide when to ask' },
-];
-
-const CLAUDE_MODELS = [
-  { value: '', label: 'Default' },
-  { value: 'opus', label: 'Opus (Latest)' },
-  { value: 'sonnet', label: 'Sonnet (Latest)' },
-  { value: 'haiku', label: 'Haiku (Latest)' },
-  { value: 'claude-opus-4-6', label: 'Claude Opus 4.6' },
-  { value: 'claude-sonnet-4-6', label: 'Claude Sonnet 4.6' },
-];
-
-// ─── Copilot-specific configs ───
-
-const COPILOT_MODES = [
-  { value: 'interactive', label: 'Interactive', desc: 'Back-and-forth, approve each action' },
-  { value: 'plan', label: 'Plan', desc: 'Build structured plan before executing' },
-  { value: 'autopilot', label: 'Autopilot', desc: 'Work autonomously end-to-end' },
-];
-
-const COPILOT_PERMISSION_MODES = [
-  { value: 'default', label: 'Default', desc: 'Ask before risky actions' },
-  { value: 'bypassPermissions', label: 'YOLO', desc: 'Allow all tools and paths' },
-];
-
-const COPILOT_MODELS = [
-  { value: '', label: 'Default' },
-  { value: 'claude-sonnet-4-5', label: 'Claude Sonnet 4.5' },
-  { value: 'gpt-5', label: 'GPT-5' },
-  { value: 'claude-opus-4-6', label: 'Claude Opus 4.6' },
-  { value: 'claude-sonnet-4-6', label: 'Claude Sonnet 4.6' },
-  { value: 'gemini-3-pro', label: 'Gemini 3 Pro' },
-];
-
-// ─── Shared configs ───
-
-const EFFORT_LEVELS = [
-  { value: '', label: 'Default' },
-  { value: 'low', label: 'Low' },
-  { value: 'medium', label: 'Medium' },
-  { value: 'high', label: 'High' },
-];
 
 /** Inline SVG icons for CLI types */
 const CLI_ICONS: Record<CliType, { svg: string; color: string; name: string }> = {

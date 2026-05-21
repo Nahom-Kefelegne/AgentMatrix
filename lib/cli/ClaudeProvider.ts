@@ -12,6 +12,7 @@ import type {
   ActiveProcessInfo,
   PermissionMode,
 } from './CliProvider';
+import { CLAUDE_MODELS, CLAUDE_PERMISSION_MODES } from './uiMetadata';
 
 /**
  * Strip ANSI escape codes from terminal output.
@@ -34,23 +35,6 @@ const CLAUDE_ICON_SVG = `<svg width="16" height="16" viewBox="0 0 248 248" fill=
 </svg>`;
 
 const CLAUDE_PROJECTS_DIR = join(homedir(), '.claude', 'projects');
-
-const PERMISSION_MODES: PermissionMode[] = [
-  { value: 'default', label: 'Default', desc: 'Ask for each tool use' },
-  { value: 'bypassPermissions', label: 'Skip Permissions', desc: 'Auto-approve everything' },
-  { value: 'acceptEdits', label: 'Accept Edits', desc: 'Auto-approve file edits, ask for others' },
-  { value: 'plan', label: 'Plan Mode', desc: 'Plan only, no execution' },
-  { value: 'auto', label: 'Auto', desc: 'Let Claude decide when to ask' },
-];
-
-const MODELS = [
-  { value: '', label: 'Default' },
-  { value: 'opus', label: 'Opus (Latest)' },
-  { value: 'sonnet', label: 'Sonnet (Latest)' },
-  { value: 'haiku', label: 'Haiku (Latest)' },
-  { value: 'claude-opus-4-6', label: 'Claude Opus 4.6' },
-  { value: 'claude-sonnet-4-6', label: 'Claude Sonnet 4.6' },
-];
 
 const TRUST_PROMPT_PATTERNS = [
   'trust this folder',
@@ -243,8 +227,8 @@ export class ClaudeProvider implements CliProvider {
 
   getTrustPromptPatterns(): string[] { return TRUST_PROMPT_PATTERNS; }
   getContextPromptPatterns(): string[] { return CONTEXT_PROMPT_PATTERNS; }
-  getModelList() { return MODELS; }
-  getPermissionModes(): PermissionMode[] { return PERMISSION_MODES; }
+  getModelList() { return CLAUDE_MODELS; }
+  getPermissionModes(): PermissionMode[] { return CLAUDE_PERMISSION_MODES; }
 
   /**
    * COST: O(N) directory scans + N small file reads. Call from UI flows

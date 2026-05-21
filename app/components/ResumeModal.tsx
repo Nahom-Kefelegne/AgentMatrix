@@ -5,6 +5,8 @@ import { useOrchestrator } from '@/lib/hooks/useOrchestrator';
 import { Modal, OptionGroup, OptionButton, TextInput } from './ui/Modal';
 import { useThemeContext } from './ThemeProvider';
 import { FolderPicker } from './ui/FolderPicker';
+import { buildResumeShellCommand } from '@/lib/cli/uiMetadata';
+import type { CliType } from '@/lib/types';
 
 interface SessionInfo {
   id: string;
@@ -13,6 +15,7 @@ interface SessionInfo {
   projectDir?: string;
   lastModified: number;
   active: boolean;
+  cliType?: CliType;
 }
 
 interface ResumeModalProps {
@@ -59,7 +62,9 @@ function SessionRow({ s, globalSearch, onResumeInApp, onClose }: {
           <button className="btn-primary" onClick={() => { onResumeInApp(s.id); onClose(); }}>Resume in App</button>
         )}
         <button className="btn-outline" onClick={() => {
-          navigator.clipboard.writeText(`claude --resume ${s.id}`);
+          navigator.clipboard.writeText(
+            buildResumeShellCommand({ cliType: s.cliType || 'claude', resumeId: s.id }),
+          );
           setCopied(true);
           setTimeout(() => setCopied(false), 3000);
         }}>
@@ -127,7 +132,19 @@ export default function ResumeModal({ isOpen, onClose, onResumeInApp }: ResumeMo
     if (!sessionCwd) { setDirectIdError('Session not found'); return; }
     if (onResumeInApp) { onResumeInApp(id); onClose(); }
     else {
-      navigator.clipboard.writeText(`cd ${sessionCwd} && claude --resume ${id}`);
+      // resolveSessionCwd via /api/sessions/resolve returns cliType too;
+      // fetch it again here so the copy reflects the right CLI.
+      let cliType: CliType = 'claude';
+      try {
+        const res = await fetch(`/api/sessions/resolve?id=${encodeURIComponent(id)}`);
+        if (res.ok) {
+          const data = await res.json();
+          if (data.cliType === 'copilot' || data.cliType === 'claude') cliType = data.cliType;
+        }
+      } catch { /* default to claude */ }
+      navigator.clipboard.writeText(
+        `cd ${sessionCwd} && ${buildResumeShellCommand({ cliType, resumeId: id })}`,
+      );
       setCopied(id);
       setTimeout(() => setCopied(null), 3000);
     }

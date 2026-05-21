@@ -250,7 +250,7 @@ function TaskDetailModal({ task, onClose, onUpdate, onComment, onAssign, onDelet
           {task.status === 'pending' && <button onClick={() => onAssign(task)} style={{ padding: '8px 16px', borderRadius: 6, border: 'none', background: '#4a9eff', color: '#fff', fontSize: 14, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit' }}>Assign to Session</button>}
           {task.status === 'assigned' && task.assignedTo && onSyncClaude && (
             <button onClick={() => onSyncClaude(task)} style={{ padding: '8px 16px', borderRadius: 6, border: '1px solid #cc5de840', background: 'transparent', color: '#cc5de8', fontSize: 14, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit' }}>
-              Sync with Claude
+              Sync to Session
             </button>
           )}
           {task.source === 'ado' && task.adoId && (

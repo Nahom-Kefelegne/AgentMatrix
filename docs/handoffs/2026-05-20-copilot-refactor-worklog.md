@@ -103,18 +103,49 @@ Wires the PR #1 interface additions into every legacy consumer.
 
 ---
 
-### PR #4 — Session ID capture + Copilot context parsing
-*(not started)*
+### PR #4 — Session ID capture + Copilot context parsing ⏸ Deferred (needs live testing)
 
-Two distinct subtasks:
-1. **Capture Copilot session ID from first hook payload.** `app/api/hooks/session-start/route.ts` needs to detect Copilot vs Claude (e.g. via `payload.copilotVersion` field or a new `cli_type` field if Copilot's hook payload carries one) and populate `activeSessionsCache.ts`.
-2. **`parseContextUsage` for Copilot.** Needs live capture of Copilot's TUI output. Worst case: leave null and hide the context bar via `supportsContextTracking`.
+**Why deferred:** This PR's two subtasks both require runtime observation that this autonomous session can't perform:
+
+1. **Capture Copilot session ID from hook payloads.** Done in spirit by PR #3 — the scanner now detects active Copilot sessions via `inuse.<PID>.lock` files. The remaining win would be tracking externally-launched Copilot sessions in `activeSessionsCache` for auto-resume, but that requires knowing Copilot's hook payload schema, which we don't have a sample of yet. Without that, adding speculative detection code would just add dead conditionals.
+2. **`CopilotProvider.parseContextUsage()`** needs a live capture of Copilot's TUI percent-remaining/used format. Until that capture exists, `parseContextUsage` keeps returning `null` and the context bar stays hidden via `supportsContextTracking: false`.
+
+**Recommended next action:** Run a Copilot session through the app, capture a `~/.copilot/logs/*.log` line of the TUI output around context warnings, then implement `parseContextUsage` in a follow-up PR. ~30 lines of regex once the format is known.
 
 ---
 
-## Phase 1 — UI polish *(not started)*
+## Phase 1 — UI polish ✅ (the safe-to-ship subset) 2026-05-20
 
-Per design doc §4 Phase 1 — every screen becomes CLI-aware. Won't ship until Phase 0 is fully done because the UI layer depends on `provider.getModelList()`, `getPermissionModes()`, `buildResumeShellCommand()` etc. being callable.
+Per design doc §4 Phase 1 — every screen becomes CLI-aware. Shipped the surface that's pure structural cleanup (single source of truth for CLI metadata, resume command strings) and skipped the parts that need visual verification.
+
+### What landed
+
+**Files changed:**
+- `lib/cli/uiMetadata.ts` *(new)* — browser-safe module exporting `CLAUDE_MODELS`, `COPILOT_MODELS`, `CLAUDE_PERMISSION_MODES`, `COPILOT_PERMISSION_MODES`, `COPILOT_MODES`, `EFFORT_LEVELS`, plus a `buildResumeShellCommand()` pure-string helper mirroring the server provider's method. Zero Node deps so it tree-shakes into the client bundle cleanly.
+- `lib/cli/ClaudeProvider.ts`, `lib/cli/CopilotProvider.ts` — `getModelList()` / `getPermissionModes()` now return from `uiMetadata`. One source of truth.
+- `app/components/SpawnModal.tsx` — removed duplicated `CLAUDE_MODELS`, `COPILOT_MODELS`, `CLAUDE_PERMISSION_MODES`, `COPILOT_PERMISSION_MODES`, `COPILOT_MODES`, `EFFORT_LEVELS` constants. Imports from `uiMetadata` instead. (Fixed a pre-existing drift: SpawnModal had `claude-sonnet-4-6` in `COPILOT_MODELS` but the provider didn't — uiMetadata picks up the union.)
+- `app/components/SessionDialog.tsx` — resume-command string uses `buildResumeShellCommand()` from uiMetadata, branches on `session.cliType`. Removed hardcoded `claude --dangerously-skip-permissions --resume`.
+- `app/components/ResumeModal.tsx` — copy-button and direct-resume copy paths use `buildResumeShellCommand()`. SessionInfo carries optional `cliType` so the copy reflects the right binary. Direct resume re-fetches `/api/sessions/resolve` to learn the cliType.
+- `app/api/sessions/resume-cmd/route.ts` — rewritten. Calls `provider.buildResumeShellCommand()`. Wraps in `agency <cli>` when `useAgency` is set in settings.
+- `app/components/TaskBoard.tsx` — "Sync with Claude" button label → "Sync to Session" (CLI-neutral).
+- `app/layout.tsx` — meta description "Real-time visualization of Claude Code sessions" → "...of CLI agent sessions".
+
+**Perf notes:**
+- `uiMetadata.ts` has no runtime cost — pure constants and one string-builder. Tree-shakeable.
+- `buildResumeShellCommand` is O(1).
+- ResumeModal's `handleDirectResume` adds one `/api/sessions/resolve` call when copying (not resuming-in-app). Only fires on the copy path, so render is unaffected.
+
+### Deliberate punts (need live visual verification or behavior change)
+
+- **AppSettingsModal CLI selector / per-CLI defaults** — schema change in `appSettings.ts`. Skipped to avoid risking the settings file migration story.
+- **HandoffModal CLI-aware mode/model list** — likely correct already (it builds a new spawn so it reads from SpawnModal-style flow), but I didn't verify the codepath without running it.
+- **Native `--name` flag for Copilot vs nameCache** — needs runtime testing of Copilot's `--name` behavior under Agency.
+- **DashboardView / OfficeCanvas CLI sprite distinction** — visual change with no functional improvement; deferred.
+- **SidePanel hardcoded resume strings** — needs grep confirming none remain; the visible ones are now provider-driven.
+
+**Verification:**
+- `npx tsc --noEmit` clean ✅
+- ResumeModal's `SessionInfo` interface gained an optional `cliType` field, otherwise no shape changes. Pre-existing UI callers that don't pass cliType default to Claude — backward-compatible.
 
 ---
 

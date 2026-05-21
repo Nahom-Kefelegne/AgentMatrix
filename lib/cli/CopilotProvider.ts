@@ -12,6 +12,7 @@ import type {
   ActiveProcessInfo,
   PermissionMode,
 } from './CliProvider';
+import { COPILOT_MODELS, COPILOT_PERMISSION_MODES } from './uiMetadata';
 
 /**
  * Strip ANSI escape codes from terminal output.
@@ -35,19 +36,6 @@ const COPILOT_ICON_SVG = `<svg width="16" height="16" viewBox="0 0 16 16" fill="
 
 const COPILOT_CONFIG_DIR = join(homedir(), '.copilot');
 const COPILOT_SESSION_STATE_DIR = join(COPILOT_CONFIG_DIR, 'session-state');
-
-const PERMISSION_MODES: PermissionMode[] = [
-  { value: 'default', label: 'Default', desc: 'Ask before risky actions' },
-  { value: 'bypassPermissions', label: 'YOLO', desc: 'Allow all tools and paths' },
-];
-
-const MODELS = [
-  { value: '', label: 'Default' },
-  { value: 'claude-sonnet-4-5', label: 'Claude Sonnet 4.5' },
-  { value: 'gpt-5', label: 'GPT-5' },
-  { value: 'claude-opus-4-6', label: 'Claude Opus 4.6' },
-  { value: 'gemini-3-pro', label: 'Gemini 3 Pro' },
-];
 
 const TRUST_PROMPT_PATTERNS = [
   'Do you trust the files',
@@ -227,8 +215,8 @@ export class CopilotProvider implements CliProvider {
 
   getTrustPromptPatterns(): string[] { return TRUST_PROMPT_PATTERNS; }
   getContextPromptPatterns(): string[] { return CONTEXT_PROMPT_PATTERNS; }
-  getModelList() { return MODELS; }
-  getPermissionModes(): PermissionMode[] { return PERMISSION_MODES; }
+  getModelList() { return COPILOT_MODELS; }
+  getPermissionModes(): PermissionMode[] { return COPILOT_PERMISSION_MODES; }
 
   /**
    * COST: O(N) directory scans + one tiny YAML read per session

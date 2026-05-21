@@ -7,7 +7,7 @@ const geist = Geist({ subsets: ['latin'], variable: '--font-sans' });
 
 export const metadata: Metadata = {
   title: "Agent Matrix",
-  description: "Real-time visualization of Claude Code sessions",
+  description: "Real-time visualization of CLI agent sessions",
 };
 
 export default function RootLayout({

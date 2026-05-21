@@ -9,6 +9,7 @@ import ContextBar from './ContextBar';
 import { useSocketContext } from './SocketProvider';
 import { useSessionContext } from '@/lib/hooks/useSessionContext';
 import ChangesViewer from './ChangesViewer';
+import { buildResumeShellCommand } from '@/lib/cli/uiMetadata';
 
 /** CLI icon metadata */
 const CLI_BADGE_META: Record<string, { svg: string; color: string; name: string }> = {
@@ -423,7 +424,10 @@ export default function SessionDialog({
     }, 5000);
   };
 
-  const cliCmd = `cd ${session.cwd || '~'} && claude --dangerously-skip-permissions --resume ${session.name}`;
+  const cliType = session.cliType || 'claude';
+  // Claude can resume by name; Copilot resumes by ID. Match provider behavior.
+  const resumeToken = cliType === 'copilot' ? session.id : session.name;
+  const cliCmd = `cd ${session.cwd || '~'} && ${buildResumeShellCommand({ cliType, resumeId: resumeToken })}`;
 
   return (
     <>
