@@ -176,9 +176,14 @@ export class CopilotProvider implements CliProvider {
 
   buildSpawnArgs(opts: SpawnOptions): string[] {
     const args: string[] = [];
+    // YOLO / bypass-permissions in current Copilot CLI is --allow-all
+    // (equivalent to --allow-all-tools --allow-all-paths --allow-all-urls).
+    // Older versions used --yolo; that flag was renamed/removed in 1.0.3x.
     if (opts.permissionMode === 'bypassPermissions') {
-      args.push('--yolo');
+      args.push('--allow-all');
     }
+    // --mode accepts "interactive" | "plan" | "autopilot". Skip the flag
+    // when interactive since that's the default.
     if (opts.copilotMode && opts.copilotMode !== 'interactive') {
       args.push('--mode', opts.copilotMode);
     }
