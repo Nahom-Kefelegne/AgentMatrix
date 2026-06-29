@@ -245,7 +245,7 @@ function PaneSlot({ id, sessions, readOnly, border }: {
       borderBottom: border === 'bottom' ? '1px solid' : 'none',
     }} className="dark:border-[#1e1e24] border-[#e5e5e5]">
       {s ? (
-        <TerminalPanel sessionId={s.id} sessionName={s.name} cwd={s.cwd} visible readOnly={readOnly} />
+        <TerminalPanel sessionId={s.id} sessionName={s.name} cwd={s.cwd} visible readOnly={readOnly} cliType={s.cliType} />
       ) : (
         <div style={{
           height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center',

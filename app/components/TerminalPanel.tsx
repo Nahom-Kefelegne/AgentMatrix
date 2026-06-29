@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { useSocketContext } from './SocketProvider';
+import type { CliType } from '@/lib/types';
 
 interface TerminalPanelProps {
   sessionId: string;
@@ -9,6 +10,7 @@ interface TerminalPanelProps {
   cwd?: string;
   visible?: boolean;
   readOnly?: boolean;
+  cliType?: CliType;
 }
 
 // Debounce for container resize events. 150ms is the xterm.js community sweet
@@ -39,7 +41,7 @@ const TERMINAL_THEME = {
   brightWhite: '#ffffff',
 };
 
-export default function TerminalPanel({ sessionId, sessionName, cwd, visible, readOnly }: TerminalPanelProps) {
+export default function TerminalPanel({ sessionId, sessionName, cwd, visible, readOnly, cliType }: TerminalPanelProps) {
   const { socketRef } = useSocketContext();
   const containerRef = useRef<HTMLDivElement>(null);
   const termRef = useRef<any>(null);
@@ -220,12 +222,30 @@ export default function TerminalPanel({ sessionId, sessionName, cwd, visible, re
 
       // ── Output handling ──
 
-      // Strip screen-clear sequences only when user is scrolled up viewing history,
-      // so history isn't wiped when the CLI TUI redraws.
+      // Strip screen-clear sequences only when user is scrolled up viewing
+      // history, so history isn't wiped when the CLI TUI redraws.
       const stripClear = (s: string) =>
         s.replace(/\x1b\[2J/g, '')
          .replace(/\x1b\[3J/g, '')
          .replace(/\x1b\[H/g, '');
+
+      // Copilot's TUI uses the alternate-screen buffer (\x1b[?1049h /
+      // \x1b[?47h), which has NO scrollback by design. The user can't
+      // scroll up past the visible viewport to re-read a long response.
+      // Stripping alt-screen mode forces all rendering into the main
+      // screen, where xterm's 5000-line scrollback can hold it.
+      //
+      // We also unconditionally strip \x1b[3J (erase-scrollback) for
+      // Copilot — without this, Copilot can wipe scrollback between
+      // turns even when the user is at the bottom.
+      //
+      // Claude's TUI tolerates either mode; we leave it untouched.
+      const stripCopilotScrollKillers = (s: string) =>
+        s.replace(/\x1b\[\?1049[hl]/g, '')   // primary alt-screen toggle
+         .replace(/\x1b\[\?47[hl]/g, '')      // legacy alt-screen toggle
+         .replace(/\x1b\[\?1047[hl]/g, '')    // alt-screen w/ save (xterm)
+         .replace(/\x1b\[\?1048[hl]/g, '')    // save/restore cursor (xterm)
+         .replace(/\x1b\[3J/g, '');           // erase scrollback
 
       const isAtBottom = () => {
         const buf = terminal.buffer.active;
@@ -233,10 +253,15 @@ export default function TerminalPanel({ sessionId, sessionName, cwd, visible, re
       };
 
       const handleData = (msg: { sessionId: string; data: string }) => {
-        if (msg.sessionId === sessionId) {
-          terminal.write(isAtBottom() ? msg.data : stripClear(msg.data));
-          if (statusRef.current !== 'connected') setStatus('connected');
-        }
+        if (msg.sessionId !== sessionId) return;
+        let payload = msg.data;
+        // Copilot: always strip — needed live AND when scrolled up.
+        if (cliType === 'copilot') payload = stripCopilotScrollKillers(payload);
+        // Anyone (Claude included): when user is scrolled up, drop
+        // visible-screen clears so the history they're reading isn't wiped.
+        if (!isAtBottom()) payload = stripClear(payload);
+        terminal.write(payload);
+        if (statusRef.current !== 'connected') setStatus('connected');
       };
 
       const handleExit = (msg: { sessionId: string; exitCode: number }) => {

@@ -517,7 +517,7 @@ export default function SessionDialog({
             flexDirection: 'column',
             willChange: 'transform',
           }}>
-            <TerminalPanel sessionId={session.id} sessionName={session.name} cwd={session.cwd} visible={activeTab === 'console' && !terminalFullscreen} readOnly={readOnly} />
+            <TerminalPanel sessionId={session.id} sessionName={session.name} cwd={session.cwd} visible={activeTab === 'console' && !terminalFullscreen} readOnly={readOnly} cliType={session.cliType} />
             {/* Terminal fullscreen — floating top-right corner */}
             <button
               className="terminal-fullscreen-btn"
