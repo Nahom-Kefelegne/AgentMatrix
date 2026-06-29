@@ -7,8 +7,9 @@
     "dev": "tsx server.ts",
     "build": "next build",
     "start": "NODE_ENV=production tsx server.ts",
-    "electron:dev": "electron .",
-    "electron:build": "npm run build && cp -r .next/static .next/standalone/.next/static && cp -r public .next/standalone/public && electron-builder"
+    "build:preload": "esbuild electron/preload.ts --bundle --platform=node --format=cjs --external:electron --outfile=electron/preload.js",
+    "electron:dev": "npm run build:preload && electron .",
+    "electron:build": "npm run build:preload && npm run build && cp -r .next/static .next/standalone/.next/static && cp -r public .next/standalone/public && electron-builder"
   },
   "dependencies": {
     "@base-ui/react": "^1.2.0",
@@ -42,5 +43,8 @@
     "electron": "^33.0.0",
     "electron-builder": "^25.0.0",
     "typescript": "^5"
+  },
+  "overrides": {
+    "node-gyp": "^11.0.0"
   }
 }

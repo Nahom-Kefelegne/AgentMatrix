@@ -16,8 +16,17 @@ import { reapOrphansOnStartup, logReapResult } from './services/OrphanReaper';
 import { migrateStateStorage } from '../lib/state/migrateStateStorage';
 import { getProvider } from '../lib/cli';
 
-const isDev = process.env.NODE_ENV !== 'production';
+// Dev vs prod is determined by whether Electron is running from a packaged
+// app bundle — NOT by NODE_ENV, which is unset when a packaged app is
+// launched by double-click and would wrongly select the dev server path.
+const isDev = !app.isPackaged;
 const port = parseInt(process.env.PORT || '3000', 10);
+
+// Smoke-test mode for CI / build verification: boot the server + window but
+// skip all destructive/stateful startup (orphan reaping, auto-resume,
+// orchestrator). Lets a packaged build be launched safely to confirm it runs
+// without touching the user's live sessions or killing real CLI processes.
+const SMOKE_TEST = process.env.AGENTMATRIX_SMOKE_TEST === '1';
 
 let mainWindow: BrowserWindow | null = null;
 let tray: Tray | null = null;
@@ -136,7 +145,7 @@ async function startServer(): Promise<void> {
       setupTerminalBridge(io!, ptyManager);
 
       // Spawn orchestrator session (hidden, app-only)
-      spawnOrchestrator(ptyManager);
+      if (!SMOKE_TEST) spawnOrchestrator(ptyManager);
 
       httpServer.listen(port, () => {
         console.log(`> Server ready on http://localhost:${port}`);
@@ -147,19 +156,21 @@ async function startServer(): Promise<void> {
         // writing to the same transcript .jsonl, which corrupts parent UUIDs
         // and makes "thousands of lines disappear on resume". Killing orphans
         // first prevents this race entirely.
-        try {
-          const reaped = reapOrphansOnStartup();
-          logReapResult('startup', reaped);
-        } catch (err) {
-          console.error('[orphan-reaper] failed:', err);
-          // Don't block startup if reaper fails — just log it
+        if (!SMOKE_TEST) {
+          try {
+            const reaped = reapOrphansOnStartup();
+            logReapResult('startup', reaped);
+          } catch (err) {
+            console.error('[orphan-reaper] failed:', err);
+            // Don't block startup if reaper fails — just log it
+          }
         }
 
         // Auto-resume sessions from last run
         const settings = getSettings();
         const summaryPromises: Promise<void>[] = [];
 
-        if (settings.autoResume) {
+        if (settings.autoResume && !SMOKE_TEST) {
           const cached = getActiveSessions();
           if (cached.length > 0) {
             console.log(`[auto-resume] Resuming ${cached.length} session(s)...`);
@@ -265,6 +276,23 @@ async function startServer(): Promise<void> {
 
         resolve();
       });
+  });
+}
+
+// Prevent two copies of the SAME packaged app from running at once. Two
+// instances share ~/.agentmatrix state and would both auto-resume the same
+// cached sessions, racing two writers into one transcript .jsonl and breaking
+// its parent-UUID chain. The second launch just surfaces the existing window
+// and exits.
+if (!app.requestSingleInstanceLock()) {
+  app.quit();
+} else {
+  app.on('second-instance', () => {
+    if (mainWindow) {
+      if (mainWindow.isMinimized()) mainWindow.restore();
+      mainWindow.show();
+      mainWindow.focus();
+    }
   });
 }
 
