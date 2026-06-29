@@ -10,6 +10,16 @@ import { homedir } from 'os';
 const dev = process.env.NODE_ENV !== 'production';
 const port = parseInt(process.env.PORT || '3000', 10);
 
+// Keep all traffic on loopback — several API routes execute CLI commands and
+// this server can spawn shells over Socket.io, so an externally-reachable port
+// would be a remote-code-execution surface. See electron/main.ts for the full
+// rationale; this is the standalone (npm run dev/start) entry point.
+const LOOPBACK_HOST = '127.0.0.1';
+function isLoopbackHost(hostHeader: string | undefined): boolean {
+  const host = (hostHeader || '').split(':')[0].toLowerCase().replace(/^\[|\]$/g, '');
+  return host === 'localhost' || host === '127.0.0.1' || host === '::1';
+}
+
 const app = next({ dev });
 const handle = app.getRequestHandler();
 
@@ -112,13 +122,15 @@ function setupEditorTerminals(socket: any) {
 
 app.prepare().then(() => {
   const httpServer = createServer((req, res) => {
+    if (!isLoopbackHost(req.headers.host)) { res.statusCode = 403; res.end('Forbidden'); return; }
     handle(req, res);
   });
 
   const io = new SocketIOServer(httpServer, {
     path: SOCKET_PATH,
     addTrailingSlash: false,
-    cors: { origin: '*' },
+    cors: { origin: [/^https?:\/\/localhost(:\d+)?$/, /^https?:\/\/127\.0\.0\.1(:\d+)?$/] },
+    allowRequest: (req, cb) => cb(null, isLoopbackHost(req.headers.host)),
   });
 
   (globalThis as Record<string, unknown>).__socketIO = io;
@@ -151,7 +163,7 @@ app.prepare().then(() => {
     }
   });
 
-  httpServer.listen(port, () => {
-    console.log(`> Ready on http://localhost:${port}`);
+  httpServer.listen(port, LOOPBACK_HOST, () => {
+    console.log(`> Ready on http://${LOOPBACK_HOST}:${port}`);
   });
 });

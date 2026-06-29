@@ -28,6 +28,24 @@ const port = parseInt(process.env.PORT || '3000', 10);
 // without touching the user's live sessions or killing real CLI processes.
 const SMOKE_TEST = process.env.AGENTMATRIX_SMOKE_TEST === '1';
 
+// All HTTP/Socket.io traffic stays on the loopback interface. Binding to
+// 127.0.0.1 (not 0.0.0.0) means no other machine on the LAN/VPN can reach the
+// API. This matters because several routes execute CLI commands (e.g.
+// /api/sessions/spawn runs `claude --dangerously-skip-permissions <task>`),
+// so an externally-reachable port would be a remote-code-execution surface.
+const LOOPBACK_HOST = '127.0.0.1';
+
+// Reject any request whose Host header isn't loopback. This blocks DNS
+// rebinding: a malicious web page can resolve its own domain to 127.0.0.1 and
+// make the browser POST to our API, but the Host header still carries the
+// attacker's domain, which we refuse here. Legitimate clients — the app's own
+// renderer and the CLI hooks (curl → localhost) — always send a
+// localhost/127.0.0.1 Host.
+function isLoopbackHost(hostHeader: string | undefined): boolean {
+  const host = (hostHeader || '').split(':')[0].toLowerCase().replace(/^\[|\]$/g, '');
+  return host === 'localhost' || host === '127.0.0.1' || host === '::1';
+}
+
 let mainWindow: BrowserWindow | null = null;
 let tray: Tray | null = null;
 export let io: SocketIOServer | null = null;
@@ -100,18 +118,21 @@ async function startServer(): Promise<void> {
     const nextApp = next({ dev: true, dir: appDir });
     const handle = nextApp.getRequestHandler();
     await nextApp.prepare();
-    httpServer = createServer((req, res) => handle(req, res));
+    httpServer = createServer((req, res) => {
+      if (!isLoopbackHost(req.headers.host)) { res.statusCode = 403; res.end('Forbidden'); return; }
+      handle(req, res);
+    });
   } else {
     const standaloneDir = path.join(appDir, '.next', 'standalone');
     process.env.PORT = String(port);
-    process.env.HOSTNAME = 'localhost';
+    process.env.HOSTNAME = LOOPBACK_HOST;
     process.chdir(standaloneDir);
 
     const { parse } = require('url');
     const NextServer = require('next/dist/server/next-server').default;
     const conf = require(path.join(standaloneDir, '.next', 'required-server-files.json')).config;
     const nextServer = new NextServer({
-      hostname: 'localhost',
+      hostname: LOOPBACK_HOST,
       port,
       dir: standaloneDir,
       dev: false,
@@ -119,7 +140,10 @@ async function startServer(): Promise<void> {
       conf,
     });
     const handler = nextServer.getRequestHandler();
-    httpServer = createServer((req, res) => handler(req, res, parse(req.url || '', true)));
+    httpServer = createServer((req, res) => {
+      if (!isLoopbackHost(req.headers.host)) { res.statusCode = 403; res.end('Forbidden'); return; }
+      handler(req, res, parse(req.url || '', true));
+    });
   }
 
   return new Promise((resolve) => {
@@ -127,7 +151,12 @@ async function startServer(): Promise<void> {
       io = new SocketIOServer(httpServer, {
         path: SOCKET_PATH,
         addTrailingSlash: false,
-        cors: { origin: '*' },
+        // Only the app's own loopback origin may connect; and the websocket
+        // upgrade is gated on a loopback Host header (same DNS-rebind guard
+        // as the HTTP routes — the upgrade request bypasses the createServer
+        // handler above, so it's enforced here too).
+        cors: { origin: [/^https?:\/\/localhost(:\d+)?$/, /^https?:\/\/127\.0\.0\.1(:\d+)?$/] },
+        allowRequest: (req, cb) => cb(null, isLoopbackHost(req.headers.host)),
       });
 
       (globalThis as Record<string, unknown>).__socketIO = io;
@@ -147,8 +176,8 @@ async function startServer(): Promise<void> {
       // Spawn orchestrator session (hidden, app-only)
       if (!SMOKE_TEST) spawnOrchestrator(ptyManager);
 
-      httpServer.listen(port, () => {
-        console.log(`> Server ready on http://localhost:${port}`);
+      httpServer.listen(port, LOOPBACK_HOST, () => {
+        console.log(`> Server ready on http://${LOOPBACK_HOST}:${port}`);
 
         // Reap orphan CLI processes from previous app runs BEFORE auto-resuming.
         // When Electron crashes / force-quits, its PTY children (claude/copilot)
@@ -305,8 +334,10 @@ app.whenReady().then(async () => {
   createWindow();
   createTray();
   await startServer();
-  // Navigate to app now that server is ready
-  mainWindow?.loadURL(`http://localhost:${port}`);
+  // Navigate to app now that server is ready. Use 127.0.0.1 explicitly so the
+  // renderer connects to the loopback address the server is bound to, with no
+  // dependence on how "localhost" resolves (IPv4 vs IPv6).
+  mainWindow?.loadURL(`http://${LOOPBACK_HOST}:${port}`);
   // DevTools available via Cmd+Option+I if needed
 
   app.on('activate', () => {
