@@ -229,14 +229,39 @@ export function setupTerminalBridge(io: SocketIOServer, ptyManager: PtyManager):
         console.log(`[terminal:resume] sessionId=${sessionId.slice(0, 12)} hasPty=${ptyManager.hasPty(sessionId)}`);
         if (ptyManager.hasPty(sessionId)) {
           const existingPty = ptyManager.getSession(sessionId);
-          // Replay buffered output so terminal isn't blank
-          if (existingPty && existingPty.outputBuffer.length > 0) {
-            const replay = existingPty.outputBuffer.join('');
-            socket.emit('terminal:data', { sessionId, data: replay });
-          }
+          // Wire live output BEFORE deciding how to seed the screen so we
+          // don't miss any data that arrives between replay and onOutput hookup.
           ptyManager.onOutput(sessionId, (data) => {
             socket.emit('terminal:data', { sessionId, data });
           });
+          // Seed the screen. Two strategies depending on the CLI:
+          //
+          // - Claude: replay the cached output buffer. Claude's TUI tolerates
+          //   re-emitting old content into new dimensions because its redraw
+          //   uses screen-relative clears that re-anchor naturally.
+          //
+          // - Copilot: skip the replay and instead ask the TUI to repaint via
+          //   Ctrl+L (form-feed). Copilot leans on absolute cursor positioning
+          //   (\x1b[<row>;<col>H), so replaying chunks captured at the OLD
+          //   dims into a window at NEW dims paints orphan box-drawing
+          //   borders, phantom right-side text, and double prompt frames.
+          //   The 150ms delay lets the SIGWINCH from the just-emitted
+          //   terminal:resize land first so the repaint targets new dims.
+          //   Tracked in agentmatrix tui fitting bug.
+          if (existingPty && existingPty.outputBuffer.length > 0) {
+            const isCopilot = existingPty.cliType === 'copilot';
+            if (isCopilot) {
+              setTimeout(() => {
+                const live = ptyManager.getSession(sessionId);
+                if (live) {
+                  try { live.pty.write('\x0c'); } catch { /* PTY may have exited */ }
+                }
+              }, 150);
+            } else {
+              const replay = existingPty.outputBuffer.join('');
+              socket.emit('terminal:data', { sessionId, data: replay });
+            }
+          }
           // Ensure callbacks are set (might be missing from auto-resume)
           if (existingPty) {
             if (!existingPty.onStateChange) {
@@ -341,6 +366,9 @@ export function setupTerminalBridge(io: SocketIOServer, ptyManager: PtyManager):
     socket.on('terminal:resize', ({ sessionId, cols, rows }: { sessionId: string; cols: number; rows: number }) => {
       const ptySession = ptyManager.getSession(sessionId);
       if (ptySession && ptySession.status !== 'closed') {
+        if (process.env.AGENTMATRIX_DEBUG_PTY === '1') {
+          console.log(`[pty:resize] id=${sessionId.slice(0, 12)} cli=${ptySession.cliType} cols=${cols} rows=${rows}`);
+        }
         ptySession.pty.resize(cols, rows);
       }
     });

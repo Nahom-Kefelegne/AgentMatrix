@@ -1,7 +1,19 @@
 import { homedir } from 'os';
+import { existsSync, mkdirSync, appendFileSync } from 'fs';
+import { join } from 'path';
 import type { IPty } from 'node-pty';
 import { OutputParser, type PtyState, type StateInfo } from './OutputParser';
 import type { CliProvider, CliType } from '../../lib/cli/CliProvider';
+
+// Opt-in raw PTY stream tee — set AGENTMATRIX_DEBUG_PTY=1 to dump every
+// chunk to ~/.agentmatrix/debug/<sessionId>.bin. Used to diagnose TUI
+// fitting/repaint bugs by replaying the exact byte stream later.
+const DEBUG_PTY = process.env.AGENTMATRIX_DEBUG_PTY === '1';
+const DEBUG_DIR = join(homedir(), '.agentmatrix', 'debug');
+if (DEBUG_PTY) {
+  try { if (!existsSync(DEBUG_DIR)) mkdirSync(DEBUG_DIR, { recursive: true }); } catch { /* ignore */ }
+  console.log(`[pty:debug] raw stream tee enabled → ${DEBUG_DIR}/<sessionId>.bin`);
+}
 
 export interface PtySession {
   id: string;
@@ -107,6 +119,9 @@ export class PtyManager {
       session.outputBuffer.push(data);
       if (session.outputBuffer.length > 500) session.outputBuffer = session.outputBuffer.slice(-300);
       if (session.onData) session.onData(data);
+      if (DEBUG_PTY) {
+        try { appendFileSync(join(DEBUG_DIR, `${id}.bin`), data); } catch { /* ignore */ }
+      }
 
       // Parse context usage — check single chunk AND recent buffer
       // Delegate to the provider for CLI-specific parsing
