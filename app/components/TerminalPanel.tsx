@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useSocketContext } from './SocketProvider';
 import type { CliType } from '@/lib/types';
+import { TERMINAL_THEME } from '@/lib/terminalTheme';
 
 interface TerminalPanelProps {
   sessionId: string;
@@ -16,30 +17,6 @@ interface TerminalPanelProps {
 // Debounce for container resize events. 150ms is the xterm.js community sweet
 // spot: prevents reflow storms during drag/animation while still feeling snappy.
 const RESIZE_DEBOUNCE_MS = 150;
-
-const TERMINAL_THEME = {
-  background: '#0c0c18',
-  foreground: '#e8e8f0',
-  cursor: '#4a9eff',
-  cursorAccent: '#0c0c18',
-  selectionBackground: '#4a9eff50',
-  black: '#222238',
-  red: '#ff6b6b',
-  green: '#51cf66',
-  yellow: '#ffd43b',
-  blue: '#4a9eff',
-  magenta: '#cc5de8',
-  cyan: '#20c997',
-  white: '#e8e8f0',
-  brightBlack: '#888',
-  brightRed: '#ff8787',
-  brightGreen: '#69db7c',
-  brightYellow: '#ffe066',
-  brightBlue: '#74c0fc',
-  brightMagenta: '#da77f2',
-  brightCyan: '#38d9a9',
-  brightWhite: '#ffffff',
-};
 
 export default function TerminalPanel({ sessionId, sessionName, cwd, visible, readOnly, cliType }: TerminalPanelProps) {
   const { socketRef } = useSocketContext();

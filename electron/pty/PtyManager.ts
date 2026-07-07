@@ -23,7 +23,9 @@ export interface PtySession {
   currentState: PtyState;
   contextUsage: number | null; // % used (0-100)
   outputBuffer: string[];
-  onData: ((data: string) => void) | null;
+  cols: number;
+  rows: number;
+  subscribers: Set<(data: string) => void>;
   onReady: (() => void) | null;
   onStateChange: ((info: StateInfo) => void) | null;
   onContextUpdate: ((usage: number) => void) | null;
@@ -111,14 +113,20 @@ export class PtyManager {
       id, pty: ptyProcess, cliType, status: 'starting',
       currentState: 'busy', contextUsage: null,
       outputBuffer: [],
-      onData: null, onReady: null, onStateChange: null, onContextUpdate: null,
+      cols: 80, rows: 24,
+      subscribers: new Set(), onReady: null, onStateChange: null, onContextUpdate: null,
       pendingPrompt: null,
     };
 
     ptyProcess.onData((data: string) => {
       session.outputBuffer.push(data);
       if (session.outputBuffer.length > 500) session.outputBuffer = session.outputBuffer.slice(-300);
-      if (session.onData) session.onData(data);
+      // Fan out to every live subscriber (socket emit, trust/context monitors,
+      // etc.). A single mutable callback used to clobber whichever consumer
+      // registered last; a Set lets them coexist.
+      for (const sub of session.subscribers) {
+        try { sub(data); } catch (err) { console.error(`[pty:sub] ${id.slice(0, 8)}`, err); }
+      }
       if (DEBUG_PTY) {
         try { appendFileSync(join(DEBUG_DIR, `${id}.bin`), data); } catch { /* ignore */ }
       }
@@ -307,8 +315,8 @@ export class PtyManager {
   onOutput(sessionId: string, callback: (data: string) => void): () => void {
     const session = this.sessions.get(sessionId);
     if (!session) throw new Error(`Session ${sessionId} not found`);
-    session.onData = callback;
-    return () => { if (session.onData === callback) session.onData = null; };
+    session.subscribers.add(callback);
+    return () => { session.subscribers.delete(callback); };
   }
 
   onReady(sessionId: string, callback: () => void): () => void {
@@ -330,6 +338,33 @@ export class PtyManager {
   hasPty(sessionId: string): boolean { return this.sessions.has(sessionId); }
   getSession(sessionId: string): PtySession | undefined { return this.sessions.get(sessionId); }
   getAllSessions(): PtySession[] { return Array.from(this.sessions.values()); }
+
+  /**
+   * Force a full-screen TUI (notably Copilot) to repaint its current frame by
+   * nudging the PTY size, which triggers a SIGWINCH-driven redraw. Used on
+   * reconnect so an alt-screen app repaints into the freshly-attached client
+   * without clearing history (never Ctrl+L). No-op if the PTY has exited.
+   */
+  forceRepaint(sessionId: string): void {
+    const session = this.sessions.get(sessionId);
+    if (!session || session.status === 'closed') return;
+    const cols = Math.max(2, session.cols || 80);
+    const rows = Math.max(2, session.rows || 24);
+    const nudgeCols = cols > 2 ? cols - 1 : cols + 1;
+    try {
+      session.pty.resize(nudgeCols, rows);
+      setTimeout(() => {
+        const live = this.sessions.get(sessionId);
+        if (!live || live.status === 'closed') return;
+        try {
+          live.pty.resize(cols, rows);
+          live.cols = cols;
+          live.rows = rows;
+        } catch { /* PTY may have exited */ }
+      }, 50);
+    } catch { /* PTY may have exited */ }
+  }
+
   dispose(): void { for (const [id] of this.sessions) this.kill(id); }
 
   /**

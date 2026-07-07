@@ -13,7 +13,10 @@
  * auto-resume runs.
  */
 
-import { execSync, spawnSync } from 'child_process';
+import { spawnSync } from 'child_process';
+import { existsSync, readdirSync, unlinkSync } from 'fs';
+import { homedir } from 'os';
+import { join } from 'path';
 
 interface OrphanProcess {
   pid: number;
@@ -61,7 +64,7 @@ export function findRunningCliProcesses(): OrphanProcess[] {
     // Copilot: ~/.copilot-cli/<version>/copilot with --resume or --log-dir
     // Agency: ~/.config/agency/.../agency claude or agency copilot
     const isClaude = /\/claude(-cli\/[^\/]+)?\/claude\s|\/claude\s.*--session-id|\/claude\s.*--resume/.test(command);
-    const isCopilot = /\/copilot-cli\/[^\/]+\/copilot\s|\/copilot\s.*--resume|\/copilot\s.*--log-dir/.test(command);
+    const isCopilot = /\/copilot-cli\/[^\/]+\/copilot\s|\/copilot\s.*--resume|\/copilot\s.*--session-id|\/copilot\s.*--log-dir/.test(command);
     const isAgencyWrapper = /\/agency\/.*\/agency\s+(claude|copilot)/.test(command);
 
     if (!isClaude && !isCopilot && !isAgencyWrapper) continue;
@@ -78,12 +81,16 @@ export function findRunningCliProcesses(): OrphanProcess[] {
     let sessionId: string | null = null;
 
     // Prefer --session-id over --resume (a process with both is operating as session-id)
-    const sessionIdMatch = command.match(/--session-id\s+([a-f0-9-]{36})/);
+    const sessionIdMatch = command.match(/--session-id(?:\s+|=)([a-f0-9-]{36})/);
     if (sessionIdMatch) {
       sessionId = sessionIdMatch[1];
     } else {
       const resumeMatch = command.match(/--resume[\s=]+([a-f0-9-]{36})/);
       if (resumeMatch) sessionId = resumeMatch[1];
+    }
+    if (!sessionId) {
+      const stateDirMatch = command.match(/\/session-state\/([a-f0-9-]{36})(?:\/|\b)/);
+      if (stateDirMatch) sessionId = stateDirMatch[1];
     }
 
     // Skip if we couldn't extract a session ID — likely not relevant.
@@ -102,28 +109,64 @@ export function findRunningCliProcesses(): OrphanProcess[] {
   return orphans;
 }
 
-/** Kill a single PID gracefully (SIGTERM, then SIGKILL after 2s). */
-function killPid(pid: number): boolean {
+function sleepSync(ms: number): void {
+  try {
+    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+  } catch {
+    const deadline = Date.now() + ms;
+    while (Date.now() < deadline) { /* fallback spin */ }
+  }
+}
+
+function isAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** Kill a single PID synchronously (SIGTERM, then SIGKILL after grace). */
+function killPidSync(pid: number, graceMs = 2000): boolean {
   try {
     process.kill(pid, 'SIGTERM');
-  } catch (e) {
+  } catch {
     // Process already dead or insufficient permissions
     return false;
   }
 
-  // Give it 2 seconds to clean up, then force kill
-  setTimeout(() => {
-    try {
-      // process.kill with signal 0 just checks if alive
-      process.kill(pid, 0);
-      // Still alive — force it
-      process.kill(pid, 'SIGKILL');
-    } catch {
-      // Already dead — good
-    }
-  }, 2000);
+  const deadline = Date.now() + graceMs;
+  while (Date.now() < deadline) {
+    if (!isAlive(pid)) return true;
+    sleepSync(100);
+  }
+
+  try { process.kill(pid, 'SIGKILL'); } catch { /* already dead */ }
 
   return true;
+}
+
+function shouldCleanupCopilotLocks(o: OrphanProcess): boolean {
+  return o.cliType === 'copilot' || /\bagency\s+copilot\b/.test(o.command);
+}
+
+function cleanupCopilotLocks(sessionId: string | null): number {
+  if (!sessionId) return 0;
+  const sessionDir = join(homedir(), '.copilot', 'session-state', sessionId);
+  if (!existsSync(sessionDir)) return 0;
+
+  let removed = 0;
+  try {
+    for (const file of readdirSync(sessionDir)) {
+      if (!/^inuse\.\d+\.lock$/.test(file)) continue;
+      try {
+        unlinkSync(join(sessionDir, file));
+        removed++;
+      } catch { /* lock disappeared or is owned by another process */ }
+    }
+  } catch { /* session dir disappeared */ }
+  return removed;
 }
 
 /**
@@ -167,7 +210,15 @@ export function reapOrphansOnStartup(): { killed: number; freedBytes: number; de
   for (const o of toKill) {
     const ageMb = (o.rssBytes / 1024 / 1024).toFixed(0);
     details.push(`  killed ${o.cliType} pid=${o.pid} session=${(o.sessionId || 'none').slice(0, 8)} rss=${ageMb}MB`);
-    if (killPid(o.pid)) freed += o.rssBytes;
+    if (killPidSync(o.pid)) {
+      freed += o.rssBytes;
+      if (shouldCleanupCopilotLocks(o)) {
+        const removed = cleanupCopilotLocks(o.sessionId);
+        if (removed > 0) {
+          details.push(`    removed ${removed} stale Copilot lock file(s) for ${(o.sessionId || 'none').slice(0, 8)}`);
+        }
+      }
+    }
   }
 
   return { killed: toKill.length, freedBytes: freed, details };
@@ -198,9 +249,15 @@ export function reapOrphansForSessions(sessionIds: string[]): { killed: number; 
 
     const rssMb = (o.rssBytes / 1024 / 1024).toFixed(0);
     details.push(`  killed ${o.cliType} pid=${o.pid} session=${o.sessionId.slice(0, 8)} rss=${rssMb}MB`);
-    if (killPid(o.pid)) {
+    if (killPidSync(o.pid)) {
       freed += o.rssBytes;
       killed++;
+      if (shouldCleanupCopilotLocks(o)) {
+        const removed = cleanupCopilotLocks(o.sessionId);
+        if (removed > 0) {
+          details.push(`    removed ${removed} stale Copilot lock file(s) for ${o.sessionId.slice(0, 8)}`);
+        }
+      }
     }
   }
 

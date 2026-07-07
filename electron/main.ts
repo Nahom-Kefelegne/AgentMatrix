@@ -203,7 +203,8 @@ async function startServer(): Promise<void> {
           const cached = getActiveSessions();
           if (cached.length > 0) {
             console.log(`[auto-resume] Resuming ${cached.length} session(s)...`);
-            for (const s of cached) {
+            const resumeStaggerMs = settings.useAgency ? 1500 : 0;
+            const resumeOne = (s: typeof cached[number]) => {
               try {
                 const name = getCachedName(s.id) || s.name;
                 const { DESK_POSITIONS: DP, OVERFLOW_POSITIONS: OP, ENTRANCE_POINT: EP, CHARACTER_COLORS: CC } = require('../lib/constants');
@@ -240,11 +241,9 @@ async function startServer(): Promise<void> {
                   const resumeProvider = getProvider(s.cliType || 'claude');
                   const trustPatterns = resumeProvider.getTrustPromptPatterns();
                   const contextPatterns = resumeProvider.getContextPromptPatterns();
-                  const prevOnData = pty.onData;
                   let resumeBuffer = '';
                   let handled = false;
                   const resumeMonitor = (data: string) => {
-                    if (prevOnData) prevOnData(data);
                     if (handled) return;
                     resumeBuffer += data;
                     const clean = OutputParser.stripAnsi(resumeBuffer);
@@ -252,6 +251,7 @@ async function startServer(): Promise<void> {
                       handled = true;
                       console.log(`[auto-resume] ${name}: detected trust prompt, auto-accepting`);
                       setTimeout(() => pty.pty.write('\r'), 300);
+                      pty.subscribers.delete(resumeMonitor);
                       return;
                     }
                     if (contextPatterns.some(p => clean.includes(p))) {
@@ -259,18 +259,22 @@ async function startServer(): Promise<void> {
                       console.log(`[auto-resume] ${name}: detected context prompt, choosing continue as-is`);
                       setTimeout(() => pty.pty.write('\r'), 300);
                       io!.emit('session:context-warning', { sessionId: s.id, message: 'Session context is large — resumed as-is' });
+                      pty.subscribers.delete(resumeMonitor);
                     }
                   };
-                  pty.onData = resumeMonitor;
-                  setTimeout(() => {
-                    if (pty.onData === resumeMonitor) {
-                      pty.onData = prevOnData;
-                    }
-                  }, 30000);
+                  pty.subscribers.add(resumeMonitor);
+                  setTimeout(() => { pty.subscribers.delete(resumeMonitor); }, 30000);
                 }
                 console.log(`[auto-resume] ${name} (${s.id.slice(0, 8)})`);
               } catch (err) {
                 console.error(`[auto-resume] Failed: ${s.name}`, err);
+              }
+            };
+            for (const [index, s] of cached.entries()) {
+              if (resumeStaggerMs > 0 && index > 0) {
+                setTimeout(() => resumeOne(s), index * resumeStaggerMs);
+              } else {
+                resumeOne(s);
               }
             }
           }
@@ -350,6 +354,33 @@ app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') app.quit();
 });
 
+async function closeLiveSessionsForExit(reason: string): Promise<void> {
+  console.log(`[shutdown] ${reason}: closing sessions...`);
+  try { io?.emit('app:shutting-down', { count: ptyManager.getAllSessions().length }); } catch {}
+
+  try {
+    await ptyManager.gracefulShutdown(5000);
+  } catch (err) {
+    console.error('[shutdown] gracefulShutdown error:', err);
+  }
+
+  try { killOrchestrator(); } catch {}
+
+  // Keep active-sessions.json intact. Auto-resume is the user-facing contract:
+  // after a clean shutdown the next launch should restore the same desks. The
+  // orphan reaper still protects against duplicate writers before resume.
+}
+
+async function exitFromSignal(signal: NodeJS.Signals): Promise<void> {
+  if (shuttingDown) return;
+  shuttingDown = true;
+  await closeLiveSessionsForExit(signal);
+  process.exit(0);
+}
+
+process.on('SIGINT', () => void exitFromSignal('SIGINT'));
+process.on('SIGTERM', () => void exitFromSignal('SIGTERM'));
+
 // Graceful shutdown — intercept quit, cleanly close all sessions so their
 // SessionEnd hooks fire and transcripts are flushed, then force-exit.
 // Without this, PTY processes get SIGKILL'd on app exit and transcripts can
@@ -364,19 +395,7 @@ app.on('before-quit', async (e) => {
   shuttingDown = true;
   e.preventDefault();
 
-  // Tell the UI (if still open) that we're closing
-  try { io?.emit('app:shutting-down', { count: ptyManager.getAllSessions().length }); } catch {}
-
-  try {
-    // Send /exit to all sessions, wait up to 5s for clean close, force-kill stragglers
-    await ptyManager.gracefulShutdown(5000);
-  } catch (err) {
-    console.error('[shutdown] gracefulShutdown error:', err);
-  }
-
-  // Orchestrator is a regular PtyManager session, so it's already closed by
-  // gracefulShutdown. This is a no-op safety net for orchestrator state cleanup.
-  try { killOrchestrator(); } catch {}
+  await closeLiveSessionsForExit('before-quit');
 
   // Force-exit to bypass the before-quit/close event loop entirely.
   // app.quit() would re-fire before-quit and try to close windows, which

@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import type { SessionData, Action, CliType } from '@/lib/types';
-import TerminalPanel from './TerminalPanel';
+import SessionConsole from './SessionConsole';
 import HandoffModal from './HandoffModal';
 import FullscreenTerminal from './FullscreenTerminal';
 import ContextBar from './ContextBar';
@@ -517,7 +517,7 @@ export default function SessionDialog({
             flexDirection: 'column',
             willChange: 'transform',
           }}>
-            <TerminalPanel sessionId={session.id} sessionName={session.name} cwd={session.cwd} visible={activeTab === 'console' && !terminalFullscreen} readOnly={readOnly} cliType={session.cliType} />
+            <SessionConsole sessionId={session.id} sessionName={session.name} cwd={session.cwd} visible={activeTab === 'console' && !terminalFullscreen} readOnly={readOnly} cliType={session.cliType} />
             {/* Terminal fullscreen — floating top-right corner */}
             <button
               className="terminal-fullscreen-btn"

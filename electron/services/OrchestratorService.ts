@@ -57,13 +57,10 @@ function spawnFresh(ptyManager: PtyManager): boolean {
  */
 function startupMonitor(session: PtySession): void {
   let buffer = '';
-  let accepted = false;
-  const prevOnData = session.onData;
+  let done = false;
 
   const monitor = (data: string) => {
-    // Always forward
-    if (prevOnData) prevOnData(data);
-    if (accepted) return;
+    if (done) return;
 
     buffer += data;
     const clean = OutputParser.stripAnsi(buffer);
@@ -71,14 +68,11 @@ function startupMonitor(session: PtySession): void {
     // Check for trust prompt keywords
     if (clean.includes('trust this folder') || clean.includes('trust this project') ||
         clean.includes('Is this a project') || clean.includes('Yes, I trust')) {
-      accepted = true;
       console.log('[orchestrator] detected trust prompt, auto-accepting...');
       // Send Enter to accept pre-selected "Yes, I trust"
       setTimeout(() => session.pty.write('\r'), 300);
-      // Restore original handler after acceptance
-      setTimeout(() => {
-        if (session.onData === monitor) session.onData = prevOnData;
-      }, 2000);
+      // Stop monitoring after acceptance
+      setTimeout(() => { done = true; session.subscribers.delete(monitor); }, 2000);
       return;
     }
 
@@ -86,12 +80,13 @@ function startupMonitor(session: PtySession): void {
     if (buffer.length > 10000) buffer = buffer.slice(-5000);
   };
 
-  session.onData = monitor;
+  session.subscribers.add(monitor);
 
   // Stop monitoring after 60s — trust prompt shows in first few seconds if at all
   setTimeout(() => {
-    if (!accepted && session.onData === monitor) {
-      session.onData = prevOnData;
+    if (!done) {
+      done = true;
+      session.subscribers.delete(monitor);
       console.log('[orchestrator] startup monitor done, no trust prompt detected');
     }
   }, 60000);

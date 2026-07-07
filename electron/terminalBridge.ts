@@ -33,35 +33,28 @@ function watchForTrustPrompt(ptyManager: PtyManager, sessionId: string, sessionN
   if (patterns.length === 0) return;
 
   let buffer = '';
-  let accepted = false;
-  const prevOnData = ptySession.onData;
+  let done = false;
 
   const monitor = (data: string) => {
-    if (prevOnData) prevOnData(data);
-    if (accepted) return;
+    if (done) return;
 
     buffer += data;
     const clean = OutputParser.stripAnsi(buffer);
 
     if (patterns.some(p => clean.includes(p))) {
-      accepted = true;
       console.log(`[trust-prompt] ${sessionName}: detected trust prompt, auto-accepting...`);
-      setTimeout(() => ptySession.pty.write('\r'), 300);
-      setTimeout(() => {
-        if (ptySession.onData === monitor) ptySession.onData = prevOnData;
-      }, 2000);
+      setTimeout(() => { try { ptySession.pty.write('\r'); } catch { /* PTY may have exited */ } }, 300);
+      setTimeout(() => { done = true; ptySession.subscribers.delete(monitor); }, 2000);
       return;
     }
 
     if (buffer.length > 10000) buffer = buffer.slice(-5000);
   };
 
-  ptySession.onData = monitor;
+  ptySession.subscribers.add(monitor);
 
   setTimeout(() => {
-    if (!accepted && ptySession.onData === monitor) {
-      ptySession.onData = prevOnData;
-    }
+    if (!done) { done = true; ptySession.subscribers.delete(monitor); }
   }, 30000);
 }
 
@@ -102,6 +95,23 @@ function createSessionEntry(id: string, name: string, cwd: string): SessionData 
 export function setupTerminalBridge(io: SocketIOServer, ptyManager: PtyManager): void {
   io.on('connection', (socket) => {
 
+    // Track this socket's PTY output subscriptions so wiring is idempotent:
+    // re-subscribing (remount / reconnect / repeated resume) replaces the
+    // prior subscription for the same session instead of stacking duplicate
+    // emits, and everything is torn down on disconnect so we don't leak
+    // subscribers on the (now Set-based) PtySession.
+    const outputSubs = new Map<string, () => void>();
+    const subscribeOutput = (sessionId: string): void => {
+      outputSubs.get(sessionId)?.();
+      outputSubs.set(sessionId, ptyManager.onOutput(sessionId, (data) => {
+        socket.emit('terminal:data', { sessionId, data });
+      }));
+    };
+    socket.on('disconnect', () => {
+      for (const unsub of outputSubs.values()) unsub();
+      outputSubs.clear();
+    });
+
     // Launch a brand new CLI session (Claude or Copilot)
     socket.on('terminal:new', (opts: {
       cwd: string;
@@ -139,9 +149,7 @@ export function setupTerminalBridge(io: SocketIOServer, ptyManager: PtyManager):
           copilotMode: opts.copilotMode,
         });
 
-        ptyManager.onOutput(sessionUuid, (data) => {
-          socket.emit('terminal:data', { sessionId: sessionUuid, data });
-        });
+        subscribeOutput(sessionUuid);
 
         // Wire up callbacks
         const newPty = ptyManager.getSession(sessionUuid);
@@ -197,9 +205,7 @@ export function setupTerminalBridge(io: SocketIOServer, ptyManager: PtyManager):
         });
 
         // Wire up output (same pattern as terminal:new)
-        ptyManager.onOutput(sessionUuid, (data) => {
-          socket.emit('terminal:data', { sessionId: sessionUuid, data });
-        });
+        subscribeOutput(sessionUuid);
 
         const newPty = ptyManager.getSession(sessionUuid);
         if (newPty) {
@@ -231,36 +237,25 @@ export function setupTerminalBridge(io: SocketIOServer, ptyManager: PtyManager):
           const existingPty = ptyManager.getSession(sessionId);
           // Wire live output BEFORE deciding how to seed the screen so we
           // don't miss any data that arrives between replay and onOutput hookup.
-          ptyManager.onOutput(sessionId, (data) => {
-            socket.emit('terminal:data', { sessionId, data });
-          });
+          subscribeOutput(sessionId);
           // Seed the screen. Two strategies depending on the CLI:
           //
           // - Claude: replay the cached output buffer. Claude's TUI tolerates
           //   re-emitting old content into new dimensions because its redraw
           //   uses screen-relative clears that re-anchor naturally.
           //
-          // - Copilot: skip the replay and instead ask the TUI to repaint via
-          //   Ctrl+L (form-feed). Copilot leans on absolute cursor positioning
-          //   (\x1b[<row>;<col>H), so replaying chunks captured at the OLD
-          //   dims into a window at NEW dims paints orphan box-drawing
-          //   borders, phantom right-side text, and double prompt frames.
-          //   The 150ms delay lets the SIGWINCH from the just-emitted
-          //   terminal:resize land first so the repaint targets new dims.
-          //   Tracked in agentmatrix tui fitting bug.
-          if (existingPty && existingPty.outputBuffer.length > 0) {
-            const isCopilot = existingPty.cliType === 'copilot';
-            if (isCopilot) {
-              setTimeout(() => {
-                const live = ptyManager.getSession(sessionId);
-                if (live) {
-                  try { live.pty.write('\x0c'); } catch { /* PTY may have exited */ }
-                }
-              }, 150);
-            } else {
-              const replay = existingPty.outputBuffer.join('');
-              socket.emit('terminal:data', { sessionId, data: replay });
-            }
+          // - Copilot: a full-screen alt-screen TUI that paints with absolute
+          //   cursor positioning, so replaying stale-dims chunks corrupts the
+          //   frame. Instead force a fresh repaint by nudging the PTY size,
+          //   which makes Copilot redraw the current frame at the live dims via
+          //   SIGWINCH. We subscribed this client above first, so the redraw
+          //   reaches it — even for an idle session with no buffered output.
+          //   Never Ctrl+L (that clears the screen).
+          if (existingPty?.cliType === 'copilot') {
+            setTimeout(() => ptyManager.forceRepaint(sessionId), 75);
+          } else if (existingPty && existingPty.outputBuffer.length > 0) {
+            const replay = existingPty.outputBuffer.join('');
+            socket.emit('terminal:data', { sessionId, data: replay });
           }
           // Ensure callbacks are set (might be missing from auto-resume)
           if (existingPty) {
@@ -279,9 +274,7 @@ export function setupTerminalBridge(io: SocketIOServer, ptyManager: PtyManager):
         // Orchestrator — just attach output, don't create session/sprite/auto-resume
         if (isOrchestrator(sessionId)) {
           if (!ptyManager.hasPty(sessionId)) return;
-          ptyManager.onOutput(sessionId, (data) => {
-            socket.emit('terminal:data', { sessionId, data });
-          });
+          subscribeOutput(sessionId);
           return;
         }
 
@@ -307,9 +300,7 @@ export function setupTerminalBridge(io: SocketIOServer, ptyManager: PtyManager):
 
         ptyManager.spawnResume(sessionId, { cwd, resumeId: sessionId, cliType: existing?.cliType });
 
-        ptyManager.onOutput(sessionId, (data) => {
-          socket.emit('terminal:data', { sessionId, data });
-        });
+        subscribeOutput(sessionId);
 
         const rPty = ptyManager.getSession(sessionId);
         if (rPty) {
@@ -369,6 +360,8 @@ export function setupTerminalBridge(io: SocketIOServer, ptyManager: PtyManager):
         if (process.env.AGENTMATRIX_DEBUG_PTY === '1') {
           console.log(`[pty:resize] id=${sessionId.slice(0, 12)} cli=${ptySession.cliType} cols=${cols} rows=${rows}`);
         }
+        ptySession.cols = cols;
+        ptySession.rows = rows;
         ptySession.pty.resize(cols, rows);
       }
     });
@@ -437,9 +430,7 @@ export function setupTerminalBridge(io: SocketIOServer, ptyManager: PtyManager):
         systemPrompt: data.systemPrompt,
       });
 
-      ptyManager.onOutput(sessionUuid, (outData) => {
-        socket.emit('terminal:data', { sessionId: sessionUuid, data: outData });
-      });
+      subscribeOutput(sessionUuid);
 
       // Auto-accept trust prompts for handoff sessions too
       watchForTrustPrompt(ptyManager, sessionUuid, name);
