@@ -220,6 +220,34 @@ config format, per-event payloads, discovery locations).
 ### Track C (old) — deferred infra
 - **C3.** Windows orphan reaping (OrphanReaper returns [] on Windows).
 
+### Orchestrator → Copilot migration (investigated 2026-07-08)
+
+The orchestrator (a hidden agent powering Resume Modal **deep search**) still spawns as
+**Claude**, so it will break when Claude access ends. Migrate it to Copilot.
+
+**Findings:**
+- `OrchestratorService.spawnFresh`/`spawnResume` call `spawnNew`/`spawnResume` with no
+  `cliType` → defaults to Claude.
+- `queryOrchestrator` already routes through `captureQuery`, which uses **ACP** for
+  Copilot — so once the orchestrator is a Copilot session, queries run via ACP for free.
+- **ACP + tools + permissions verified** (real `AcpClient`): a grep/shell query
+  succeeded, the permission auto-approve handler fired, found a marker file in ~7.6s. So
+  deep search (which greps transcripts) works via ACP.
+- Deep search instruction (`ResumeModal.handleDeepSearch`) greps only
+  `~/.claude/projects/*/*.jsonl` — Claude-specific.
+- `startupMonitor` hardcodes Claude trust-prompt strings.
+
+**Plan (implementing):**
+- **Orch-1:** orchestrator spawns as Copilot (`cliType: 'copilot'` in spawnFresh +
+  spawnResume). Identity via Track B (`--session-id`/`-n`). Queries auto-route via ACP.
+- **Orch-2:** `startupMonitor` uses `provider.getTrustPromptPatterns()` so a Copilot
+  orchestrator's trust prompt is handled.
+- **Orch-3:** deep search instruction covers BOTH `~/.claude/projects` and
+  `~/.copilot/session-state/*/events.jsonl` (no Claude regression; Copilot sessions now
+  findable).
+- Keep the orchestrator PTY (creates/holds the session on disk for ACP); queries run
+  out-of-band via ACP. PTY-elimination is a later optimization.
+
 ### Copilot context-usage bar (investigated 2026-07-08)
 
 The context % bar is blank for Copilot (`parseContextUsage` returns null) but works

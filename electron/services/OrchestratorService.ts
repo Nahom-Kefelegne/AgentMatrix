@@ -35,8 +35,10 @@ function spawnFresh(ptyManager: PtyManager): boolean {
     ptyManager.spawnNew(id, {
       cwd,
       sessionUuid: id,
+      name: 'agentMatrixOrchestrator(doNotUseManually)',
       permissionMode: 'bypassPermissions',
       systemPrompt: SYSTEM_PROMPT,
+      cliType: 'copilot',
     });
     orchestratorId = id;
     orchestratorSession = ptyManager.getSession(id) || null;
@@ -60,6 +62,16 @@ function startupMonitor(session: PtySession): void {
   let buffer = '';
   let done = false;
 
+  // Trust-prompt phrasing is provider-owned. Fall back to a small default set
+  // if the provider exposes none.
+  const { getProvider } = require('../../lib/cli');
+  let trustPatterns: string[] = [];
+  try {
+    trustPatterns = getProvider(session.cliType || 'copilot').getTrustPromptPatterns();
+  } catch { /* use fallback */ }
+  const fallback = ['trust this folder', 'trust this project', 'Is this a project', 'Yes, I trust', 'Do you trust'];
+  const patterns = trustPatterns.length > 0 ? [...trustPatterns, ...fallback] : fallback;
+
   const monitor = (data: string) => {
     if (done) return;
 
@@ -67,8 +79,7 @@ function startupMonitor(session: PtySession): void {
     const clean = OutputParser.stripAnsi(buffer);
 
     // Check for trust prompt keywords
-    if (clean.includes('trust this folder') || clean.includes('trust this project') ||
-        clean.includes('Is this a project') || clean.includes('Yes, I trust')) {
+    if (patterns.some(p => clean.includes(p))) {
       console.log('[orchestrator] detected trust prompt, auto-accepting...');
       // Send Enter to accept pre-selected "Yes, I trust"
       setTimeout(() => session.pty.write('\r'), 300);
@@ -104,8 +115,8 @@ export function spawnOrchestrator(ptyManager: PtyManager): void {
 
     if (cachedId) {
       try {
-        const cwd = ptyManager.findSessionCwd(cachedId) || process.cwd();
-        ptyManager.spawnResume(cachedId, { cwd, resumeId: cachedId });
+        const cwd = ptyManager.findSessionCwd(cachedId, 'copilot') || process.cwd();
+        ptyManager.spawnResume(cachedId, { cwd, resumeId: cachedId, cliType: 'copilot' });
         orchestratorId = cachedId;
         orchestratorSession = ptyManager.getSession(cachedId) || null;
         console.log(`[orchestrator] resumed id=${cachedId.slice(0, 12)}`);

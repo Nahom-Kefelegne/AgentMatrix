@@ -42,7 +42,14 @@ export class AcpClient {
 
   /** Spawn `copilot --acp` and perform the ACP handshake. */
   async initialize(): Promise<void> {
-    const proc = spawn(this.binaryPath, ['--acp'], {
+    // `--allow-all` grants the ACP process tool/path/url access so internal
+    // queries that use tools (e.g. the orchestrator's deep-search grep across
+    // ~/.copilot and ~/.claude, outside the process cwd) can run. All AcpClient
+    // usage is our own controlled instructions — never arbitrary user prompts —
+    // and the permission handler below already auto-approves, so this only
+    // removes an unnecessary round-trip. Summary/handoff don't invoke tools, so
+    // it's a no-op for them.
+    const proc = spawn(this.binaryPath, ['--acp', '--allow-all'], {
       cwd: this.cwd,
       stdio: ['pipe', 'pipe', 'pipe'],
       env: { ...process.env },

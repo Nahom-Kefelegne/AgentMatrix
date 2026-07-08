@@ -162,22 +162,23 @@ export default function ResumeModal({ isOpen, onClose, onResumeInApp }: ResumeMo
     setDeepError('');
     abortRef.current = false;
     const instruction = [
-      `URGENT: Complete in under 60 seconds.`,
-      `Find sessions related to: "${deepQuery.trim()}"`,
-      `Use grep -rl on ~/.claude/projects/*/*.jsonl with keywords from the query.`,
-      `Spawn maximum subagents to search project directories in parallel.`,
-      `Session ID = filename without .jsonl. Output ONLY session IDs, one per line.`,
-      `No explanation. No reasoning. No thinking. Just IDs.`,
-      `If no matches output "NO_MATCHES". Max 10 results.`,
+      `Execute immediately, no preamble, no questions.`,
+      `Find coding sessions whose transcripts mention: "${deepQuery.trim()}".`,
+      `Run: grep -rli "${deepQuery.trim().replace(/"/g, '')}" ~/.claude/projects/*/*.jsonl ~/.copilot/session-state/*/events.jsonl 2>/dev/null`,
+      `For each matching path, extract the session UUID: for a Claude path it is the filename without .jsonl; for a Copilot path it is the parent directory name.`,
+      `Output ONLY the UUIDs, one per line, max 10. If there are no matches, output exactly NO_MATCHES.`,
     ].join(' ');
     const result = await queryOrchestrator(instruction, 120000);
     if (abortRef.current) return;
     setDeepSearching(false);
-    if (!result.success || result.lines.length === 0 || result.lines[0] === 'NO_MATCHES') {
+    if (!result.success || /NO_MATCHES/i.test(result.content)) {
       setDeepError('No matching sessions found');
       return;
     }
-    const ids = result.lines.filter(l => /^[0-9a-f-]{8,}$/i.test(l.trim())).map(l => l.trim()).slice(0, 10);
+    // Extract UUIDs from anywhere in the output — the agent may wrap them in
+    // file paths or prose, so match rather than require whole-line UUIDs.
+    const uuidRe = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi;
+    const ids = [...new Set((result.content.match(uuidRe) || []).map(s => s.toLowerCase()))].slice(0, 10);
     if (ids.length === 0) { setDeepError('No matching sessions found'); return; }
     const resolved = await Promise.all(ids.map(async (id) => {
       try {
@@ -267,7 +268,7 @@ export default function ResumeModal({ isOpen, onClose, onResumeInApp }: ResumeMo
             deepResults.map(s => <SessionRow key={s.id} s={s} globalSearch onResumeInApp={onResumeInApp} onClose={onClose} />)
           ) : (
             <div style={{ color: muted, fontSize: 14, textAlign: 'center', padding: '40px 0' }}>
-              Describe what you worked on and Claude will search your session transcripts.
+              Describe what you worked on and the orchestrator will search your Claude and Copilot session transcripts.
             </div>
           )}
         </>
