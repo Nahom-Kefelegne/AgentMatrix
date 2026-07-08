@@ -1,6 +1,6 @@
 import { PtyManager } from '../pty/PtyManager';
-import { injectPrompt } from '../pty/PromptInjector';
-import { existsSync, unlinkSync } from 'fs';
+import { captureQuery } from '../../lib/cli/acp/captureQuery';
+import { existsSync, unlinkSync, writeFileSync } from 'fs';
 import { handoffFilePath, HANDOFF_DIR, ensureDir } from '../../lib/state/paths';
 
 export function getHandoffPath(handoffId: string): string {
@@ -31,23 +31,20 @@ export async function generateHandoffSummary(
     `URGENT: Complete in under 30 seconds.`,
     `Create a context handoff document for: "${contextRequest}"`,
     `Include: decisions, file paths, code patterns, current state, next steps.`,
-    `Be concise but thorough. No preamble.`,
-    `Write the output to ${handoffPath} instead of the default output file.`,
+    `Be concise but thorough. Output only the document, no preamble.`,
   ].join(' ');
 
-  // Override the output file path for this injection
-  const result = await injectPrompt(sourcePty, instruction, { timeoutMs: 90000 });
+  // Capture the summary out-of-band (ACP for Copilot, PTY injector for Claude)
+  // and persist it to the handoff file ourselves.
+  const result = await captureQuery(ptyManager, sourcePty, instruction, { timeoutMs: 90000 });
 
-  // The injector writes to the per-session output file, but we told Claude
-  // to write to the handoff path instead. Check if it exists.
+  // The Claude PTY-injector path may have written to the per-session output
+  // file OR returned content; the ACP path returns content directly. In all
+  // cases, if we got content, write it to the handoff path.
   if (existsSync(handoffPath)) {
     return { success: true };
   }
-
-  // Fallback: Claude might have written to the default output file
-  // In that case, the result.content has the summary
   if (result.success && result.content.length > 0) {
-    const { writeFileSync } = require('fs');
     writeFileSync(handoffPath, result.content);
     return { success: true };
   }

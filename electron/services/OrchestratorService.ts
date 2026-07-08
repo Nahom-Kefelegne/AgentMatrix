@@ -1,5 +1,6 @@
 import { PtyManager, type PtySession } from '../pty/PtyManager';
-import { injectPrompt, type InjectOptions } from '../pty/PromptInjector';
+import { type InjectOptions } from '../pty/PromptInjector';
+import { captureQuery } from '../../lib/cli/acp/captureQuery';
 import { OutputParser } from '../pty/OutputParser';
 import { readFileSync, writeFileSync } from 'fs';
 import { randomUUID } from 'crypto';
@@ -153,11 +154,11 @@ export async function queryOrchestrator(
   opts?: InjectOptions,
 ): Promise<{ success: boolean; content: string; lines: string[] }> {
   const session = ensureAlive();
-  if (!session) {
+  if (!session || !ptyManagerRef) {
     return { success: false, content: '', lines: [] };
   }
 
-  return injectPrompt(session, instruction, opts);
+  return captureQuery(ptyManagerRef, session, instruction, opts ?? {});
 }
 
 /** Get the orchestrator session ID (for excluding from UI) */

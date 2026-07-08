@@ -167,12 +167,58 @@ verified live against Copilot). B3 satisfied by B1. B2 deferred.
 - **Close-while-clicking race**: shared `endingSessions` guard in `terminalBridge`;
   `terminal:resume` refuses a session mid-teardown (covers dashboard + modal paths).
 
-### Track C — Infra replacement (later PRs)
-- **C1.** ACP runner lib (`lib/cli/acp/`) replacing `PromptInjector` for
-  Summary/Handoff/Orchestrator (bypass Agency; PTY fallback).
-- **C2.** Hook expansion (permissionRequest, errorOccurred, postToolUseFailure,
-  preCompact, userPromptSubmitted).
-- **C3.** Windows orphan reaping.
+### Track C — Hooks + ACP (investigated 2026-07-07; reframed per user)
+
+Full hooks reference: `docs/design/copilot-hooks-reference.md` (13 documented events,
+config format, per-event payloads, discovery locations).
+
+**Key findings:**
+- Copilot has a **native hooks system** (we don't write hooks — we configure them). It
+  reads hook config from `~/.copilot/hooks/*.json`, `.github/hooks/*.json`, settings
+  files, etc. and fires `command`/`http`/`prompt` hooks.
+- **13 documented events** (we only wired 7): `sessionStart`, `sessionEnd`,
+  `userPromptSubmitted`, `preToolUse` (can allow/deny/modify tools), `postToolUse`,
+  `postToolUseFailure`, `agentStop`/`Stop`, `subagentStart`, `subagentStop`,
+  `errorOccurred`, `preCompact`, `notification` (CLI-only), `permissionRequest`
+  (CLI-only, can allow/deny).
+- **CRITICAL BUG (verified):** Copilot **blocks HTTP hooks to localhost** unless
+  `COPILOT_HOOK_ALLOW_LOCALHOST=1` is in the CLI's env. AgentMatrix uses
+  `http://localhost:3000` hooks but **never sets this var**, so **all Copilot hooks are
+  silently dead** right now — the app receives no session/tool events from Copilot.
+- The hook config (`~/.copilot/hooks/agentmatrix.json`) is a **manual on-disk artifact**
+  — nothing in the codebase generates it, so it's missing on a fresh install.
+
+**Plan:**
+- **C-hooks-1 (localhost fix, HIGH):** set `COPILOT_HOOK_ALLOW_LOCALHOST=1` in the
+  Copilot spawn env so hooks fire at all.
+- **C-hooks-2 (config gen):** generate `~/.copilot/hooks/agentmatrix.json` on startup
+  (idempotent) instead of relying on a hand-placed file.
+- **C-hooks-3 (expand events):** add routes + wiring for the high-value new events —
+  `errorOccurred`, `postToolUseFailure`, `preCompact`, `userPromptSubmitted`,
+  `notification`, `permissionRequest` — to enrich session state (errors, compaction,
+  live prompts, background-agent notifications, permission surfacing).
+- **C-acp (ACP runner):** build `lib/cli/acp/` (`copilot --acp`) to replace the
+  Claude-era `PromptInjector` for Summary/Handoff/Orchestrator (bypass Agency; PTY
+  fallback). ACP verified working: `initialize` → `session/load{sessionId,cwd,
+  mcpServers:[]}` → `session/prompt{sessionId,prompt:[{type:text,text}]}`, streams
+  `agent_message_chunk`, ~2.5s, loads full history, **safe alongside a live PTY**.
+
+  **Mini-plan (executing):**
+  - `lib/cli/acp/AcpClient.ts` — spawn `copilot --acp` (direct binary via
+    `CopilotProvider.findBinary`, bypass Agency), JSON-RPC over stdio; `initialize` →
+    `loadSession` → `prompt` (collect streamed text) → `dispose`; timeout + kill;
+    auto-approve any `session/request_permission` defensively.
+  - `lib/cli/acp/captureQuery.ts` — unified helper: if session is Copilot
+    (`supportsAcp`) run via ACP, else fall back to `injectPrompt` (Claude PTY). Same
+    `{success, content, lines}` return shape as PromptInjector so callers don't change.
+  - Wire `SummaryService`, `HandoffService`, `OrchestratorService` through the helper.
+    Claude keeps PromptInjector; orchestrator (currently Claude) uses fallback until it
+    migrates to Copilot, then gets ACP for free.
+  - Keep `PromptInjector` (Claude fallback + safety net). ACP is experimental → never
+    the only path.
+
+### Track C (old) — deferred infra
+- **C3.** Windows orphan reaping (OrphanReaper returns [] on Windows).
 
 ---
 

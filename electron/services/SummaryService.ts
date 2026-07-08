@@ -1,6 +1,7 @@
 import type { Server as SocketIOServer } from 'socket.io';
 import type { PtyManager } from '../pty/PtyManager';
-import { injectPrompt, type InjectOptions } from '../pty/PromptInjector';
+import { type InjectOptions } from '../pty/PromptInjector';
+import { captureQuery } from '../../lib/cli/acp/captureQuery';
 import { updateSession } from '../../lib/state/sessionStore';
 import { SOCKET_EVENTS } from '../../lib/types';
 
@@ -25,7 +26,7 @@ export async function requestSummary(
   const ptySession = ptyManager.getSession(sessionId);
   if (!ptySession || ptySession.status === 'closed') return [];
 
-  const result = await injectPrompt(ptySession, SUMMARY_INSTRUCTION, opts);
+  const result = await captureQuery(ptyManager, ptySession, SUMMARY_INSTRUCTION, opts);
   const bullets = parseBullets(result.lines);
 
   if (bullets.length > 0) {
