@@ -74,8 +74,18 @@ export async function GET(request: Request) {
       }
     }
 
-    all.sort((a, b) => b.lastModified - a.lastModified);
-    return NextResponse.json({ sessions: all });
+    // A single session id can surface more than once — Claude stores the same
+    // session transcript under multiple project dirs (one per cwd it was
+    // resumed from), and discoverSessions returns one entry per file. Collapse
+    // to one row per id, keeping the most recently modified copy, so the UI
+    // has stable unique React keys and no duplicate rows.
+    const byId = new Map<string, SessionInfo>();
+    for (const s of all) {
+      const prev = byId.get(s.id);
+      if (!prev || s.lastModified > prev.lastModified) byId.set(s.id, s);
+    }
+    const deduped = [...byId.values()].sort((a, b) => b.lastModified - a.lastModified);
+    return NextResponse.json({ sessions: deduped });
   } catch (error) {
     console.error('[sessions/list]', error);
     return NextResponse.json({ error: 'Internal error' }, { status: 500 });

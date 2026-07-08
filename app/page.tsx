@@ -170,7 +170,7 @@ function OfficeView() {
 
       <SetupModal isOpen={showSetup} onClose={() => setShowSetup(false)} connected={connected} sessionCount={sessions.size} />
       <TaskBoard isOpen={showTaskBoard} onClose={() => { setShowTaskBoard(false); setOpenTaskId(null); }} onOpenSession={(id) => setSelectedSessionId(id)} initialTaskId={openTaskId} />
-      <ResumeModal isOpen={showResume} onClose={() => setShowResume(false)} onResumeInApp={(sid) => { setSelectedSessionId(sid); socketRef?.current?.emit('terminal:resume' as any, { sessionId: sid }); }} />
+      <ResumeModal isOpen={showResume} onClose={() => setShowResume(false)} onResumeInApp={(sid, cliType) => { setSelectedSessionId(sid); socketRef?.current?.emit('terminal:resume' as any, { sessionId: sid, cliType }); }} />
       <SpawnModal isOpen={showSpawn} onClose={() => setShowSpawn(false)} onSessionSpawned={(sid) => setSelectedSessionId(sid)} />
       <AppSettingsModal isOpen={showSettings} onClose={() => setShowSettings(false)} onViewOrchestrator={(id) => setOrchestratorViewId(id)} />
 

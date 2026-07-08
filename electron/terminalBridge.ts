@@ -237,7 +237,7 @@ export function setupTerminalBridge(io: SocketIOServer, ptyManager: PtyManager):
     });
 
     // Resume a past session by ID
-    socket.on('terminal:resume', ({ sessionId }: { sessionId: string }) => {
+    socket.on('terminal:resume', ({ sessionId, cliType: requestedCliType }: { sessionId: string; cliType?: CliType }) => {
       try {
         // Refuse to resume a session that's mid-teardown. Without this, a
         // click on the sprite during the close animation reconnects (warm
@@ -295,8 +295,18 @@ export function setupTerminalBridge(io: SocketIOServer, ptyManager: PtyManager):
 
         const { getCachedName: getName } = require('../lib/state/nameCache');
         const existing = getSession(sessionId);
+        // Resolve which CLI owns this session. Prefer the caller's explicit
+        // hint (the Resume modal knows it from discovery), then any tracked
+        // entry, then probe disk (Copilot session-state vs Claude projects).
+        // Without this, a cold resume falls through to spawnResume's 'claude'
+        // default and Copilot sessions would wrongly resume as Claude.
+        const resolvedCliType: CliType | undefined =
+          requestedCliType || existing?.cliType ||
+          (ptyManager.findSessionCwd(sessionId, 'copilot') ? 'copilot'
+            : ptyManager.findSessionCwd(sessionId, 'claude') ? 'claude'
+            : undefined);
         const name = existing?.name || getName(sessionId) || `Session-${sessionId.slice(0, 8)}`;
-        const foundCwd = ptyManager.findSessionCwd(sessionId);
+        const foundCwd = ptyManager.findSessionCwd(sessionId, resolvedCliType);
         const cwd = existing?.cwd || foundCwd || homedir();
 
         // Create session entry so sprite appears
@@ -310,7 +320,7 @@ export function setupTerminalBridge(io: SocketIOServer, ptyManager: PtyManager):
 
         // Track for auto-resume
         const active = getActiveSessions().filter(s => s.id !== sessionId);
-        active.push({ id: sessionId, name, cwd, cliType: existing?.cliType });
+        active.push({ id: sessionId, name, cwd, cliType: resolvedCliType });
         saveActiveSessions(active);
 
         // Guard against running an already-running session. Copilot does NOT
@@ -323,7 +333,7 @@ export function setupTerminalBridge(io: SocketIOServer, ptyManager: PtyManager):
         const reaped = reapOrphansForSessions([sessionId]);
         if (reaped.killed > 0) logReapResult(`resume ${name}`, reaped);
 
-        ptyManager.spawnResume(sessionId, { cwd, resumeId: sessionId, cliType: existing?.cliType });
+        ptyManager.spawnResume(sessionId, { cwd, resumeId: sessionId, cliType: resolvedCliType });
 
         subscribeOutput(sessionId);
 

@@ -22,7 +22,7 @@ interface SessionInfo {
 interface ResumeModalProps {
   isOpen: boolean;
   onClose: () => void;
-  onResumeInApp?: (sessionId: string) => void;
+  onResumeInApp?: (sessionId: string, cliType?: CliType) => void;
 }
 
 type SearchMode = 'project' | 'all' | 'deep';
@@ -38,7 +38,7 @@ function formatTimeAgo(ms: number): string {
 }
 
 function SessionRow({ s, globalSearch, onResumeInApp, onClose }: {
-  s: SessionInfo; globalSearch: boolean; onResumeInApp?: (id: string) => void; onClose: () => void;
+  s: SessionInfo; globalSearch: boolean; onResumeInApp?: (id: string, cliType?: CliType) => void; onClose: () => void;
 }) {
   const { theme } = useThemeContext();
   const dark = theme === 'dark';
@@ -63,7 +63,7 @@ function SessionRow({ s, globalSearch, onResumeInApp, onClose }: {
       <div style={{ fontSize: 12, color: dark ? '#3f3f46' : '#d4d4d8', marginBottom: 12, fontFamily: 'monospace' }}>{s.id.slice(0, 12)}...</div>
       <div style={{ display: 'flex', gap: 8 }}>
         {onResumeInApp && (
-          <button className="btn-primary" onClick={() => { onResumeInApp(s.id); onClose(); }}>Resume in App</button>
+          <button className="btn-primary" onClick={() => { onResumeInApp(s.id, s.cliType); onClose(); }}>Resume in App</button>
         )}
         <button className="btn-outline" onClick={() => {
           navigator.clipboard.writeText(
