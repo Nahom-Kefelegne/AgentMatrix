@@ -9,7 +9,8 @@
     "start": "NODE_ENV=production tsx server.ts",
     "build:preload": "esbuild electron/preload.ts --bundle --platform=node --format=cjs --external:electron --outfile=electron/preload.js",
     "electron:dev": "npm run build:preload && electron .",
-    "electron:build": "npm run build:preload && npm run build && cp -r .next/static .next/standalone/.next/static && cp -r public .next/standalone/public && electron-builder"
+    "electron:build": "npm run build:preload && npm run build && cp -r .next/static .next/standalone/.next/static && cp -r public .next/standalone/public && electron-builder",
+    "rebuild:native": "electron-rebuild -f -w node-pty"
   },
   "dependencies": {
     "@base-ui/react": "^1.2.0",

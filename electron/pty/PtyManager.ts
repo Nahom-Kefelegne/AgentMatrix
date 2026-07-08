@@ -230,12 +230,35 @@ export class PtyManager {
     const label = useAgency ? `agency ${provider.type}` : provider.type;
     console.log(`[spawnPty] ${label} cwd="${safeCwd}" args=${spawnArgs.join(' ')}`);
 
+    // Wrap node-pty spawn so its cryptic native failure becomes actionable.
+    // `posix_spawnp failed` (macOS/Linux) means node-pty's native helper
+    // (build/Release/spawn-helper + pty.node) is missing, the wrong CPU arch,
+    // or not executable for this machine — almost always because node_modules
+    // was copied between machines or wasn't rebuilt for Electron.
+    const spawnWithHint = (file: string, args: string[]): IPty => {
+      try {
+        return pty.spawn(file, args, { cwd: safeCwd, cols: 80, rows: 24, env });
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : String(err);
+        if (/posix_spawnp|spawn.?helper|ENOENT|dlopen|invalid ELF|not.*executable/i.test(msg)) {
+          throw new Error(
+            `node-pty failed to spawn a process ("${msg}"). Its native module is ` +
+            `missing or incompatible with this machine (wrong CPU arch, or ` +
+            `node_modules copied from another computer). Rebuild it for this ` +
+            `machine's Electron:\n` +
+            `  npm run rebuild:native   (alias for: npx electron-rebuild -f -w node-pty)\n` +
+            `or reinstall cleanly:\n` +
+            `  rm -rf node_modules package-lock.json && npm install && npx electron-rebuild`,
+          );
+        }
+        throw err;
+      }
+    };
+
     // Use 80 cols default — CLI TUI renders welcome screen at spawn time.
     // The terminal panel will resize the PTY to match when it opens.
     if (process.platform === 'win32') {
-      return pty.spawn(spawnBinary, spawnArgs, {
-        cwd: safeCwd, cols: 80, rows: 24, env,
-      });
+      return spawnWithHint(spawnBinary, spawnArgs);
     }
     const shell = process.env.SHELL || '/bin/bash';
     // Shell-quote every token so args containing spaces or shell metacharacters
@@ -244,9 +267,7 @@ export class PtyManager {
     // POSIX-safe form. This replaces per-provider ad-hoc quoting.
     const shQuote = (s: string) => `'${String(s).replace(/'/g, `'\\''`)}'`;
     const fullCmd = [spawnBinary, ...spawnArgs].map(shQuote).join(' ');
-    return pty.spawn(shell, ['-c', `cd "${safeCwd}" && ${fullCmd}`], {
-      cwd: safeCwd, cols: 80, rows: 24, env,
-    });
+    return spawnWithHint(shell, ['-c', `cd "${safeCwd}" && ${fullCmd}`]);
   }
 
   spawnNew(id: string, opts: {
