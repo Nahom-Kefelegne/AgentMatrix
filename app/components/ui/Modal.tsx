@@ -26,12 +26,13 @@ export function Modal({ isOpen, onClose, title, maxWidth = 580, footer, children
   );
 }
 
-export function FormField({ label, optional, children }: { label: string; optional?: boolean; children: React.ReactNode }) {
+export function FormField({ label, optional, required, children }: { label: string; optional?: boolean; required?: boolean; children: React.ReactNode }) {
   return (
     <div className="form-field">
       <label className="form-label">
         {label}
         {optional && <span className="form-label-optional">(optional)</span>}
+        {required && <span className="form-label-required" title="Required">*</span>}
       </label>
       {children}
     </div>

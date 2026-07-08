@@ -821,6 +821,12 @@
 }
 .dark .form-label-optional { color: #a1a1aa; }
 
+.form-label-required {
+  margin-left: 4px;
+  color: #f87171;
+  font-weight: 600;
+}
+
 .form-input {
   width: 100%;
   border-radius: 10px;

@@ -61,9 +61,20 @@ export default function SpawnModal({ isOpen, onClose, onSessionSpawned }: SpawnM
   // Copilot-specific state
   const [copilotMode, setCopilotMode] = useState('interactive');
 
+  const [nameTouched, setNameTouched] = useState(false);
+  const nameValid = sessionName.trim().length > 0;
+
   useEffect(() => {
     if (!cwd) fetch('/api/system').then(r => r.json()).then(d => setCwd(d.homedir || '')).catch(() => {});
   }, []);
+
+  // Reset the name field each time the modal is closed so a new session starts clean.
+  useEffect(() => {
+    if (!isOpen) {
+      setSessionName('');
+      setNameTouched(false);
+    }
+  }, [isOpen]);
 
   useEffect(() => {
     if (isOpen && !healthLoaded) {
@@ -117,6 +128,7 @@ export default function SpawnModal({ isOpen, onClose, onSessionSpawned }: SpawnM
   const handleLaunch = useCallback(() => {
     const socket = socketRef.current;
     if (!socket) return;
+    if (!sessionName.trim()) { setNameTouched(true); return; }
     setLaunching(true);
     const handleSpawned = (data: { sessionId: string }) => {
       socket.off('terminal:spawned' as any, handleSpawned);
@@ -127,7 +139,7 @@ export default function SpawnModal({ isOpen, onClose, onSessionSpawned }: SpawnM
     socket.on('terminal:spawned' as any, handleSpawned);
     socket.emit('terminal:new' as any, {
       cwd,
-      name: sessionName.trim() || undefined,
+      name: sessionName.trim(),
       permissionMode,
       model: model || undefined,
       effort: effort || undefined,
@@ -145,7 +157,7 @@ export default function SpawnModal({ isOpen, onClose, onSessionSpawned }: SpawnM
       footer={
         <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10 }}>
           <button className="btn-outline" onClick={onClose}>Cancel</button>
-          <button className="btn-primary" onClick={handleLaunch} disabled={launching}>
+          <button className="btn-primary" onClick={handleLaunch} disabled={launching || !nameValid}>
             {launching ? 'Launching...' : 'Launch Session'}
           </button>
         </div>
@@ -226,8 +238,14 @@ export default function SpawnModal({ isOpen, onClose, onSessionSpawned }: SpawnM
       <FormField label="Working Directory">
         <FolderPicker value={cwd} onChange={setCwd} />
       </FormField>
-      <FormField label="Session Name" optional>
-        <TextInput value={sessionName} onChange={setSessionName} placeholder="my-session" />
+      <FormField label="Session Name" required>
+        <TextInput value={sessionName} onChange={setSessionName}
+          onBlur={() => setNameTouched(true)}
+          error={nameTouched && !nameValid}
+          placeholder="my-session" />
+        {nameTouched && !nameValid && (
+          <div style={{ fontSize: 12, color: '#f87171', marginTop: 4 }}>Session name is required.</div>
+        )}
       </FormField>
 
       {/* Copilot: Agent Mode selector */}
