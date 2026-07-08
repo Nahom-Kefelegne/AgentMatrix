@@ -69,7 +69,7 @@ export function useXterm(options: UseXtermOptions): UseXtermHandle {
     let disposed = false;
 
     (async () => {
-      const { Terminal } = await import('xterm');
+      const { Terminal } = await import('@xterm/xterm');
       const { FitAddon } = await import('@xterm/addon-fit');
 
       // Load CSS once

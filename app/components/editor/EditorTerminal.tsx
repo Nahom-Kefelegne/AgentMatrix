@@ -27,7 +27,7 @@ export default function EditorTerminal({ terminalId, cwd, visible }: EditorTermi
     let cleanup = false;
 
     (async () => {
-      const { Terminal } = await import('xterm');
+      const { Terminal } = await import('@xterm/xterm');
       const { FitAddon } = await import('@xterm/addon-fit');
 
       if (!document.querySelector('link[data-xterm-css]')) {

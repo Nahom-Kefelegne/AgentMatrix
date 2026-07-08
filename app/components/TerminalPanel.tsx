@@ -50,7 +50,7 @@ export default function TerminalPanel({ sessionId, sessionName, cwd, visible, re
 
     (async () => {
       // Dynamic import xterm (browser-only)
-      const { Terminal } = await import('xterm');
+      const { Terminal } = await import('@xterm/xterm');
       const { FitAddon } = await import('@xterm/addon-fit');
       let WebglAddon: any = null;
       try { WebglAddon = (await import('@xterm/addon-webgl')).WebglAddon; } catch {}
