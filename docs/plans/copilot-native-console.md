@@ -237,16 +237,24 @@ The orchestrator (a hidden agent powering Resume Modal **deep search**) still sp
   `~/.claude/projects/*/*.jsonl` — Claude-specific.
 - `startupMonitor` hardcodes Claude trust-prompt strings.
 
-**Plan (implementing):**
-- **Orch-1:** orchestrator spawns as Copilot (`cliType: 'copilot'` in spawnFresh +
-  spawnResume). Identity via Track B (`--session-id`/`-n`). Queries auto-route via ACP.
-- **Orch-2:** `startupMonitor` uses `provider.getTrustPromptPatterns()` so a Copilot
-  orchestrator's trust prompt is handled.
-- **Orch-3:** deep search instruction covers BOTH `~/.claude/projects` and
-  `~/.copilot/session-state/*/events.jsonl` (no Claude regression; Copilot sessions now
-  findable).
-- Keep the orchestrator PTY (creates/holds the session on disk for ACP); queries run
-  out-of-band via ACP. PTY-elimination is a later optimization.
+**Plan (implemented + validated 2026-07-08):**
+- **Orch-1:** ✅ orchestrator spawns as Copilot (`cliType: 'copilot'`), Track B identity.
+  Queries auto-route via ACP.
+- **Orch-2:** ✅ `startupMonitor` uses provider trust patterns (+ fallback).
+- **Orch-3:** ✅ deep search greps BOTH Claude + Copilot transcripts; UUID extraction
+  matches anywhere in output (robust to paths/prose).
+- **Orch-4 (guard):** ✅ resume only when the cached id is a real Copilot session on
+  disk, else spawn fresh (clean Claude→Copilot transition, no dead PTY).
+- **Orch-5 (spawn-arg quoting fix):** ✅ found+fixed a regression where `sh -c` spawn
+  didn't shell-quote args, so a Copilot `-n <name>` with spaces/parens (e.g. the
+  orchestrator name `agentMatrixOrchestrator(doNotUseManually)`) crashed the spawn
+  (exit 1). Now all spawn args are POSIX single-quoted; removed Claude's redundant
+  system-prompt pre-quoting.
+
+Validated live: the orchestrator spawns as a healthy Copilot session (no exit-1),
+and e2e ACP deep search across Claude+Copilot transcripts returns the correct
+session UUID. Keep the orchestrator PTY (creates/holds the session for ACP);
+PTY-elimination is a later optimization.
 
 ### Copilot context-usage bar (investigated 2026-07-08)
 
