@@ -158,6 +158,17 @@ export class PtyManager {
           }
           if (session.onReady) session.onReady();
           if (session.onStateChange) session.onStateChange({ state: 'ready' });
+
+          // A turn just completed, so the context grew. For CLIs that track
+          // usage on disk (Copilot), read the new figure off the main thread
+          // and emit it. CLIs that parse usage from the TUI text (Claude)
+          // return null here and update via parseContextUsage above.
+          void provider.getContextUsage(id).then((ctxPct) => {
+            const live = this.sessions.get(id);
+            if (!live || ctxPct === null || ctxPct === live.contextUsage) return;
+            live.contextUsage = ctxPct;
+            if (live.onContextUpdate) live.onContextUpdate(ctxPct);
+          }).catch(() => { /* usage unavailable — leave bar as-is */ });
         }
       } else if (prev === 'ready') {
         session.currentState = 'busy';

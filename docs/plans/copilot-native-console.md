@@ -220,6 +220,30 @@ config format, per-event payloads, discovery locations).
 ### Track C (old) — deferred infra
 - **C3.** Windows orphan reaping (OrphanReaper returns [] on Windows).
 
+### Copilot context-usage bar (investigated 2026-07-08)
+
+The context % bar is blank for Copilot (`parseContextUsage` returns null) but works
+for Claude. **Findings:**
+- Copilot emits **no context %** in its TUI text stream, so the Claude-style
+  text-parse approach can't work.
+- `~/.copilot/session-store.db` → `assistant_usage_events.input_tokens` is the
+  **running context total** (grows each turn — it's the full context sent to the
+  model). Latest turn's `input_tokens` = current context size.
+- The **`sqlite3` CLI is available** (`/usr/bin/sqlite3`); `-readonly` reads are
+  WAL-safe (works while Copilot writes) and fast (~12ms). Avoids a native SQLite dep.
+- Copilot runs a **~1M context** window (long_context tier; TUI footer "1M context").
+
+**Plan (implementing):**
+- **Ctx-1:** `CliProvider.getContextUsage(sessionId): Promise<number|null>`. Copilot
+  reads the latest `input_tokens` via `sqlite3 -readonly` (async `execFile`, UUID-
+  validated, graceful null on any failure incl. Windows/no-sqlite3) and computes
+  `input_tokens / windowForModel` (default 1,000,000). Claude returns null (keeps its
+  text `parseContextUsage`).
+- **Ctx-2:** in `PtyManager`, on a Copilot busy→ready transition, fire-and-forget
+  `getContextUsage(id)` and emit `onContextUpdate` (non-blocking). Flip
+  `supportsContextTracking=true` for Copilot.
+- **Ctx-3:** `ContextBar` already renders when `usage !== null` — no UI change needed.
+
 ---
 
 ## 6. Validation & guardrails

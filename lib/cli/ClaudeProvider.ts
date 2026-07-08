@@ -230,6 +230,14 @@ export class ClaudeProvider implements CliProvider {
     return null;
   }
 
+  /**
+   * Claude prints context usage in its TUI, so usage comes from
+   * `parseContextUsage` on the output stream, not from disk. No-op here.
+   */
+  async getContextUsage(_sessionId: string): Promise<number | null> {
+    return null;
+  }
+
   getTrustPromptPatterns(): string[] { return TRUST_PROMPT_PATTERNS; }
   getContextPromptPatterns(): string[] { return CONTEXT_PROMPT_PATTERNS; }
   getModelList() { return CLAUDE_MODELS; }

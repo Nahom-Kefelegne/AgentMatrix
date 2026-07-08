@@ -103,7 +103,20 @@ export interface CliProvider {
 
   // ─── TUI parsing ─────────────────────────────────────────────────
   detectPromptReady(text: string): boolean;
+  /**
+   * Parse context-window usage (% used, 0-100) from a chunk of TUI output.
+   * Used for CLIs that print usage in their terminal (Claude). CLIs that don't
+   * (Copilot) return null here and implement `getContextUsage` instead.
+   */
   parseContextUsage(text: string): number | null;
+  /**
+   * Compute context-window usage (% used, 0-100) for a session from the CLI's
+   * own on-disk state, rather than the TUI text stream. Used for Copilot
+   * (reads token accounting from session-store.db). Returns null when
+   * unavailable (e.g. Claude, which uses `parseContextUsage`, or when the data
+   * can't be read). Must not block — implementations run off the main thread.
+   */
+  getContextUsage(sessionId: string): Promise<number | null>;
   /**
    * Substrings indicating the CLI is asking to confirm workspace/folder
    * trust on first launch. The watcher sends Enter to auto-accept.

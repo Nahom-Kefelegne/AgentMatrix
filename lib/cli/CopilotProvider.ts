@@ -1,4 +1,4 @@
-import { execSync } from 'child_process';
+import { execSync, execFile } from 'child_process';
 import { existsSync, readdirSync, statSync, openSync, readSync, closeSync, readFileSync, writeFileSync } from 'fs';
 import { join } from 'path';
 import { homedir } from 'os';
@@ -36,6 +36,19 @@ const COPILOT_ICON_SVG = `<svg width="16" height="16" viewBox="0 0 16 16" fill="
 
 const COPILOT_CONFIG_DIR = join(homedir(), '.copilot');
 const COPILOT_SESSION_STATE_DIR = join(COPILOT_CONFIG_DIR, 'session-state');
+/** Global SQLite store with per-turn token accounting. */
+const COPILOT_SESSION_STORE_DB = join(COPILOT_CONFIG_DIR, 'session-store.db');
+
+/**
+ * Context-window size (tokens) per model, used to turn a raw input-token count
+ * into a "% used" gauge. Copilot's long_context tier advertises "1M context"
+ * for the models it runs, so 1,000,000 is a sane default; override per model as
+ * needed. This is an approximate gauge, like Claude's text-parsed value.
+ */
+const DEFAULT_CONTEXT_WINDOW = 1_000_000;
+function contextWindowForModel(_model: string): number {
+  return DEFAULT_CONTEXT_WINDOW;
+}
 
 const TRUST_PROMPT_PATTERNS = [
   'Do you trust the files',
@@ -138,7 +151,7 @@ export class CopilotProvider implements CliProvider {
 
   readonly supportsMcp = false;          // No MCP system-prompt injection until verified.
   readonly supportsFork = false;         // No --fork-session equivalent.
-  readonly supportsContextTracking = false; // parseContextUsage returns null today.
+  readonly supportsContextTracking = true;  // getContextUsage reads session-store.db.
   readonly supportsSubagents = true;     // /fleet + subagent hooks supported.
   readonly supportsAcp = true;           // `copilot --acp --stdio` available.
 
@@ -272,10 +285,48 @@ export class CopilotProvider implements CliProvider {
   }
 
   parseContextUsage(_text: string): number | null {
-    // Copilot's TUI context-usage format hasn't been characterized yet.
-    // Returning null disables the context bar for Copilot until then.
-    // Tracked in design doc Phase 0 task 0.9.
+    // Copilot doesn't print context usage in its TUI text stream — usage is
+    // tracked on disk instead. See getContextUsage().
     return null;
+  }
+
+  /**
+   * Context-window usage (% used, 0-100) read from Copilot's own token
+   * accounting in `~/.copilot/session-store.db`. The latest turn's
+   * `input_tokens` is the running context total (the full context sent to the
+   * model), so `input_tokens / windowForModel` is the fill level.
+   *
+   * Uses the `sqlite3` CLI in `-readonly` mode (WAL-safe: works while Copilot
+   * writes) via async execFile so it never blocks the main thread. Returns null
+   * on any failure (no `sqlite3` binary — e.g. some Windows setups —, no data
+   * yet, malformed id, or read error), which cleanly hides the bar.
+   */
+  async getContextUsage(sessionId: string): Promise<number | null> {
+    if (!UUID_RE.test(sessionId)) return null;
+    if (!existsSync(COPILOT_SESSION_STORE_DB)) return null;
+
+    const sql =
+      `SELECT input_tokens, model FROM assistant_usage_events ` +
+      `WHERE session_id='${sessionId}' ORDER BY turn_index DESC, created_at DESC LIMIT 1;`;
+
+    const row = await new Promise<string | null>((resolve) => {
+      execFile(
+        'sqlite3',
+        ['-readonly', '-separator', '|', COPILOT_SESSION_STORE_DB, sql],
+        { timeout: 2000, windowsHide: true },
+        (err, stdout) => resolve(err ? null : stdout.trim()),
+      );
+    });
+    if (!row) return null;
+
+    const [inputStr, model] = row.split('|');
+    const inputTokens = parseInt(inputStr, 10);
+    if (!Number.isFinite(inputTokens) || inputTokens <= 0) return null;
+
+    const pct = Math.round((inputTokens / contextWindowForModel(model || '')) * 100);
+    // Clamp to 0-99 so the gauge never claims a full/over-full window from a
+    // rough estimate.
+    return Math.max(0, Math.min(99, pct));
   }
 
   getTrustPromptPatterns(): string[] { return TRUST_PROMPT_PATTERNS; }
