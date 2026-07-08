@@ -108,11 +108,17 @@ export function useXterm(options: UseXtermOptions): UseXtermHandle {
       // at runtime instead of rendering blank.
       const isWindows = navigator.platform?.toLowerCase().includes('win');
 
+      // Track the active GPU/canvas renderer addon so cleanup can dispose it
+      // explicitly and in the right order (see __cleanup below).
+      let rendererAddon: any = null;
+
       const loadCanvas = async (): Promise<boolean> => {
         try {
           const { CanvasAddon } = await import('@xterm/addon-canvas');
           if (disposed) return false;
-          terminal.loadAddon(new CanvasAddon());
+          const addon = new CanvasAddon();
+          terminal.loadAddon(addon);
+          rendererAddon = addon;
           return true;
         } catch { return false; }
       };
@@ -123,9 +129,11 @@ export function useXterm(options: UseXtermOptions): UseXtermHandle {
           const addon = new WebglAddon();
           addon.onContextLoss(() => {
             try { addon.dispose(); } catch {}
+            if (rendererAddon === addon) rendererAddon = null;
             if (!disposed) void loadCanvas();
           });
           terminal.loadAddon(addon);
+          rendererAddon = addon;
           return true;
         } catch { return false; }
       };
@@ -219,13 +227,19 @@ export function useXterm(options: UseXtermOptions): UseXtermHandle {
       (terminal as any).__cleanup = () => {
         disposed = true;
         if (debounceTimer) clearTimeout(debounceTimer);
-        resizeObserver.disconnect();
+        try { resizeObserver.disconnect(); } catch {}
         window.removeEventListener('resize', onWindowResize);
         window.removeEventListener('focus', onWindowFocus);
         document.removeEventListener('visibilitychange', onVisibilityChange);
-        onResizeDisposable.dispose();
-        fitAddon.dispose();
-        terminal.dispose();
+        try { onResizeDisposable.dispose(); } catch {}
+        // Dispose the GPU/canvas renderer addon FIRST, while the terminal's
+        // render service is still alive. Letting terminal.dispose() dispose it
+        // implicitly hits an xterm addon-dispose ordering race that throws
+        // "Cannot read properties of undefined (reading '_isDisposed')".
+        try { rendererAddon?.dispose(); } catch {}
+        rendererAddon = null;
+        try { fitAddon.dispose(); } catch {}
+        try { terminal.dispose(); } catch {}
       };
     })();
 

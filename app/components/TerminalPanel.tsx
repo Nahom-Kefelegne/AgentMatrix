@@ -84,8 +84,14 @@ export default function TerminalPanel({ sessionId, sessionName, cwd, visible, re
       // WebGL renderer for GPU-accelerated rendering. Skipped on Windows
       // (remote desktop makes GPU text grainy — canvas renderer looks better).
       const isWindows = navigator.platform?.toLowerCase().includes('win');
+      // Keep a reference so cleanup can dispose it first (see __cleanup).
+      let rendererAddon: any = null;
       if (WebglAddon && !isWindows && !disposed) {
-        try { terminal.loadAddon(new WebglAddon()); } catch {}
+        try {
+          const addon = new WebglAddon();
+          terminal.loadAddon(addon);
+          rendererAddon = addon;
+        } catch {}
       }
 
       termRef.current = terminal;
@@ -302,15 +308,20 @@ export default function TerminalPanel({ sessionId, sessionName, cwd, visible, re
       (terminal as any).__cleanup = () => {
         disposed = true;                                                     // 1. Flag — all callbacks bail
         if (debounceTimer) clearTimeout(debounceTimer);                      // 2. Cancel pending fit
-        resizeObserver.disconnect();                                         // 3. Stop observing
+        try { resizeObserver.disconnect(); } catch {}                        // 3. Stop observing
         window.removeEventListener('resize', onWindowResize);                // 4. Remove listeners
         window.removeEventListener('focus', onWindowFocus);
         document.removeEventListener('visibilitychange', onVisibilityChange);
         socket.off('terminal:data' as any, handleData);                      // 5. Remove socket listeners
         socket.off('terminal:exit' as any, handleExit);
-        onResizeDisposable.dispose();                                        // 6. Dispose xterm event sub
-        fitAddon.dispose();                                                  // 7. Dispose addon BEFORE terminal
-        terminal.dispose();                                                  // 8. Terminal last
+        try { onResizeDisposable.dispose(); } catch {}                       // 6. Dispose xterm event sub
+        // 7. Dispose the WebGL renderer addon FIRST, while the render service
+        // is still alive — disposing it implicitly during terminal.dispose()
+        // hits an xterm addon-dispose race ("reading '_isDisposed'").
+        try { rendererAddon?.dispose(); } catch {}
+        rendererAddon = null;
+        try { fitAddon.dispose(); } catch {}                                 // 8. Dispose fit addon
+        try { terminal.dispose(); } catch {}                                 // 9. Terminal last
       };
     })();
 

@@ -171,8 +171,8 @@ export default function EditorTerminal({ terminalId, cwd, visible }: EditorTermi
         socket.off('editor:terminal:data' as any, handleData);
         socket.off('editor:terminal:exit' as any, handleExit);
         socket.emit('editor:terminal:kill' as any, { id: terminalId });
-        resizeObserver.disconnect();
-        terminal.dispose();
+        try { resizeObserver.disconnect(); } catch {}
+        try { terminal.dispose(); } catch {}
       };
     })();
 
