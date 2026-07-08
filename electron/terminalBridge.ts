@@ -14,6 +14,7 @@ import { requestSummary } from './services/SummaryService';
 import { queryOrchestrator, getOrchestratorId, isOrchestrator, resetOrchestrator } from './services/OrchestratorService';
 import { generateHandoffSummary, injectHandoffIntoSession } from './services/HandoffService';
 import { OutputParser } from './pty/OutputParser';
+import { reapOrphansForSessions, logReapResult } from './services/OrphanReaper';
 import type { PtySession } from './pty/PtyManager';
 import { getProvider } from '../lib/cli';
 import type { CliType } from '../lib/types';
@@ -93,6 +94,12 @@ function createSessionEntry(id: string, name: string, cwd: string): SessionData 
 }
 
 export function setupTerminalBridge(io: SocketIOServer, ptyManager: PtyManager): void {
+  // Sessions currently mid-teardown (terminal:end fired, animation + kill
+  // pending). Shared across sockets. While a session is here, terminal:resume
+  // is refused so an accidental click during the ~8s close animation can't
+  // reconnect or (worse) respawn a fresh CLI process for a dying session.
+  const endingSessions = new Set<string>();
+
   io.on('connection', (socket) => {
 
     // Track this socket's PTY output subscriptions so wiring is idempotent:
@@ -139,7 +146,7 @@ export function setupTerminalBridge(io: SocketIOServer, ptyManager: PtyManager):
         ptyManager.spawnNew(sessionUuid, {
           cwd: opts.cwd,
           sessionUuid,
-          name: opts.name,
+          name,
           permissionMode: opts.permissionMode,
           model: opts.model,
           effort: opts.effort,
@@ -232,6 +239,14 @@ export function setupTerminalBridge(io: SocketIOServer, ptyManager: PtyManager):
     // Resume a past session by ID
     socket.on('terminal:resume', ({ sessionId }: { sessionId: string }) => {
       try {
+        // Refuse to resume a session that's mid-teardown. Without this, a
+        // click on the sprite during the close animation reconnects (warm
+        // path) or reaps+respawns a new CLI process (cold path), resurrecting
+        // a session the user just quit.
+        if (endingSessions.has(sessionId)) {
+          console.log(`[terminal:resume] ignored — ${sessionId.slice(0, 12)} is ending`);
+          return;
+        }
         console.log(`[terminal:resume] sessionId=${sessionId.slice(0, 12)} hasPty=${ptyManager.hasPty(sessionId)}`);
         if (ptyManager.hasPty(sessionId)) {
           const existingPty = ptyManager.getSession(sessionId);
@@ -298,6 +313,16 @@ export function setupTerminalBridge(io: SocketIOServer, ptyManager: PtyManager):
         active.push({ id: sessionId, name, cwd, cliType: existing?.cliType });
         saveActiveSessions(active);
 
+        // Guard against running an already-running session. Copilot does NOT
+        // refuse a second concurrent resume of the same UUID — it spawns a
+        // PHANTOM session instead (verified). So before spawning, reap any
+        // live process still holding THIS session id (and clean its stale
+        // Copilot inuse.<PID>.lock). Targeted to this id only, so unrelated
+        // sessions the user is running elsewhere are left alone. Our own live
+        // PTY is already handled by the hasPty() warm path above.
+        const reaped = reapOrphansForSessions([sessionId]);
+        if (reaped.killed > 0) logReapResult(`resume ${name}`, reaped);
+
         ptyManager.spawnResume(sessionId, { cwd, resumeId: sessionId, cliType: existing?.cliType });
 
         subscribeOutput(sessionId);
@@ -320,17 +345,23 @@ export function setupTerminalBridge(io: SocketIOServer, ptyManager: PtyManager):
     // End a session — fire animation, then /exit, then cleanup
     socket.on('terminal:end', ({ sessionId }: { sessionId: string }) => {
       try {
+        // Mark as ending so terminal:resume refuses to reconnect/respawn it
+        // during the close animation window (guards the click-while-closing
+        // race).
+        endingSessions.add(sessionId);
+
         // Remove from auto-resume list
         saveActiveSessions(getActiveSessions().filter(s => s.id !== sessionId));
 
         // Trigger fired animation FIRST
         io.emit('session:fired', { sessionId });
 
-        // Send /exit to PTY after a small delay (let animation start)
+        // Send the provider-specific clean-exit keystrokes after a small
+        // delay (let the fired animation start). Claude: /exit; Copilot:
+        // Ctrl-C x2. The kill below is the backstop if the CLI ignores them.
         setTimeout(() => {
           if (ptyManager.hasPty(sessionId)) {
-            const ptySession = ptyManager.getSession(sessionId);
-            if (ptySession) ptySession.pty.write('/exit\r');
+            void ptyManager.sendExitSequence(sessionId);
           }
         }, 500);
 
@@ -339,9 +370,11 @@ export function setupTerminalBridge(io: SocketIOServer, ptyManager: PtyManager):
           ptyManager.kill(sessionId);
           removeSession(sessionId);
           io.emit(SOCKET_EVENTS.SESSION_END, { sessionId });
+          endingSessions.delete(sessionId);
         }, 8000); // shocked(1s) + packing(1.5s) + walk to exit(~4s) + buffer
       } catch (err) {
         console.error('[terminal:end]', err);
+        endingSessions.delete(sessionId);
       }
     });
 

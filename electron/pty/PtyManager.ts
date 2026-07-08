@@ -258,6 +258,7 @@ export class PtyManager {
     const args = provider.buildSpawnArgs({
       cwd: opts.cwd,
       sessionId: opts.sessionUuid,
+      name: opts.name,
       permissionMode: opts.permissionMode,
       model: opts.model,
       effort: opts.effort,
@@ -368,9 +369,25 @@ export class PtyManager {
   dispose(): void { for (const [id] of this.sessions) this.kill(id); }
 
   /**
-   * Cleanly close all active sessions by sending /exit, allowing the CLI
-   * to fire its SessionEnd hook and flush its transcript. Force-kills any
-   * session that doesn't exit within `timeoutMs`.
+   * Write the provider-specific clean-exit keystroke sequence to a session
+   * (Claude: `/exit`; Copilot: Ctrl-C x2). Steps are written with their
+   * inter-step delays. Safe to call on a missing/closed session (no-op).
+   * Resolves once the sequence has been written (not when the process exits).
+   */
+  async sendExitSequence(sessionId: string): Promise<void> {
+    const session = this.sessions.get(sessionId);
+    if (!session || session.status === 'closed') return;
+    const steps = this.getProviderForType(session.cliType).getExitSequence();
+    for (const step of steps) {
+      try { session.pty.write(step.data); } catch { return; }
+      if (step.delayMs > 0) await new Promise(r => setTimeout(r, step.delayMs));
+    }
+  }
+
+  /**
+   * Cleanly close all active sessions by sending each CLI's provider-specific
+   * exit sequence, allowing it to fire its SessionEnd hook and flush its
+   * transcript. Force-kills any session that doesn't exit within `timeoutMs`.
    *
    * Resolves once all sessions have closed (or been force-killed).
    */
@@ -390,11 +407,9 @@ export class PtyManager {
         session.pty.onExit(() => done());
       } catch { done(); return; }
 
-      // Send /exit — works for Claude CLI, Copilot CLI, and raw shells.
-      // Send it twice separated: text + Enter, same pattern as PromptInjector.
-      try {
-        session.pty.write('/exit\r');
-      } catch { done(); }
+      // Provider-specific clean-exit keystrokes (Claude: /exit; Copilot:
+      // Ctrl-C x2). Fire-and-forget — the onExit above resolves this promise.
+      this.sendExitSequence(session.id).catch(() => done());
     }));
 
     // Race all exits against a timeout. Anything still alive gets force-killed.

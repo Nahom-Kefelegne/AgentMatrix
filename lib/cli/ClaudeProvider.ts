@@ -211,6 +211,11 @@ export class ClaudeProvider implements CliProvider {
     return `claude ${args.join(' ')}`;
   }
 
+  getExitSequence(): Array<{ data: string; delayMs: number }> {
+    // Claude's TUI exits on the `/exit` slash-command + Enter.
+    return [{ data: '/exit\r', delayMs: 0 }];
+  }
+
   detectPromptReady(text: string): boolean {
     const clean = stripAnsi(text).trim();
     return /[>❯]\s*$/.test(clean);
@@ -323,6 +328,16 @@ export class ClaudeProvider implements CliProvider {
 
     const decoded = decodeClaudeProjectDirName(projectDirName.replace(/^-/, ''));
     return decoded || undefined;
+  }
+
+  /**
+   * No-op at the disk level. Claude renames happen in-TUI via the `/rename`
+   * command (injected into the PTY by the client); the name is recorded in the
+   * transcript and picked up by the scanner. There's no separate metadata file
+   * to write, so we return false to signal "not handled here".
+   */
+  renameSession(_sessionId: string, _newName: string): boolean {
+    return false;
   }
 
   /**

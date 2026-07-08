@@ -11,6 +11,8 @@ export interface CliHealth {
 export interface SpawnOptions {
   cwd: string;
   sessionId?: string;
+  /** Human-readable session name. Copilot persists this via `-n`. */
+  name?: string;
   permissionMode?: string;
   model?: string;
   effort?: string;
@@ -87,6 +89,18 @@ export interface CliProvider {
    */
   buildResumeShellCommand(opts: ResumeOptions): string;
 
+  /**
+   * The keystroke sequence that cleanly exits an interactive session (fires
+   * the CLI's SessionEnd hook, flushes the transcript, releases locks).
+   * Returned as ordered steps because some CLIs need multiple presses with a
+   * gap between them. Callers write each `data` then wait `delayMs` before the
+   * next. Verified per-CLI:
+   *   - Claude: `/exit` + Enter.
+   *   - Copilot: Ctrl-C twice (its TUI ignores `/exit`; two SIGINT keystrokes
+   *     trigger graceful shutdown and remove the inuse lock).
+   */
+  getExitSequence(): Array<{ data: string; delayMs: number }>;
+
   // ─── TUI parsing ─────────────────────────────────────────────────
   detectPromptReady(text: string): boolean;
   parseContextUsage(text: string): number | null;
@@ -111,6 +125,17 @@ export interface CliProvider {
   discoverSessions(): DiscoveredSession[];
   /** Look up the original working directory for a given session ID. */
   findSessionCwd(sessionId: string): string | undefined;
+
+  /**
+   * Persist a new display name for a session at the CLI's own storage layer,
+   * so the rename survives resume/discovery. Returns true if the provider
+   * handled the rename on disk.
+   *
+   * - Copilot: writes `name`/`user_named` into the session's workspace.yaml.
+   * - Claude: no-op (renaming is done in-TUI via the `/rename` command, which
+   *   the client injects into the PTY; the name lives in the transcript).
+   */
+  renameSession(sessionId: string, newName: string): boolean;
 
   // ─── Process detection ───────────────────────────────────────────
   /**

@@ -1062,19 +1062,23 @@ function SettingsTab({ session, socketRef }: {
     const newName = renameValue.trim();
     if (!newName || newName === session.name) return;
     setRenameStatus('saving');
-    // Send /rename to PTY if managed
+    // Claude renames in-TUI via the `/rename` slash command, so inject it into
+    // the PTY. Copilot has no working rename slash command — it's renamed on
+    // disk by the API (workspace.yaml write), so we must NOT inject anything
+    // (it would just be typed as a stray chat message).
     const socket = socketRef.current;
-    if (socket) {
+    if (socket && (session.cliType || 'claude') !== 'copilot') {
       socket.emit('terminal:input' as any, {
         sessionId: session.id,
         data: `/rename ${newName}\r`,
       });
     }
-    // Update cache
+    // Persist: cache + store for both CLIs, plus provider-owned disk rename
+    // (workspace.yaml for Copilot).
     await fetch('/api/sessions/rename', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ sessionId: session.id, name: newName }),
+      body: JSON.stringify({ sessionId: session.id, name: newName, cliType: session.cliType }),
     });
     setRenameStatus('saved');
     setTimeout(() => setRenameStatus(''), 2000);

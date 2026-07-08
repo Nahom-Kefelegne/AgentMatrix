@@ -7,6 +7,7 @@ import { useThemeContext } from './ThemeProvider';
 import { FolderPicker } from './ui/FolderPicker';
 import { buildResumeShellCommand } from '@/lib/cli/uiMetadata';
 import type { CliType } from '@/lib/types';
+import CliIcon from './CliIcon';
 
 interface SessionInfo {
   id: string;
@@ -48,7 +49,10 @@ function SessionRow({ s, globalSearch, onResumeInApp, onClose }: {
       borderRadius: 12, padding: 16, marginBottom: 10,
     }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
-        <span style={{ fontSize: 16, fontWeight: 700, color: dark ? '#fafafa' : '#0a0a0a' }}>{s.name}</span>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <CliIcon cliType={s.cliType} />
+          <span style={{ fontSize: 16, fontWeight: 700, color: dark ? '#fafafa' : '#0a0a0a' }}>{s.name}</span>
+        </div>
         <span style={{ fontSize: 12, color: dark ? '#52525b' : '#a1a1aa' }}>{formatTimeAgo(s.lastModified)}</span>
       </div>
       {s.projectDir && globalSearch && (
@@ -84,6 +88,7 @@ export default function ResumeModal({ isOpen, onClose, onResumeInApp }: ResumeMo
   const [loading, setLoading] = useState(false);
   const [search, setSearch] = useState('');
   const [mode, setMode] = useState<SearchMode>('all');
+  const [cliFilter, setCliFilter] = useState<'all' | CliType>('all');
   const [directId, setDirectId] = useState('');
   const [directIdError, setDirectIdError] = useState('');
   const [resolving, setResolving] = useState(false);
@@ -186,10 +191,17 @@ export default function ResumeModal({ isOpen, onClose, onResumeInApp }: ResumeMo
   }, [deepQuery, queryOrchestrator]);
 
   const filtered = sessions.filter(s => !s.active &&
+    (cliFilter === 'all' || (s.cliType || 'claude') === cliFilter) &&
     (!search || s.name.toLowerCase().includes(search.toLowerCase()) ||
      s.slug?.toLowerCase().includes(search.toLowerCase()) ||
      s.id.toLowerCase().includes(search.toLowerCase()))
   );
+
+  const cliFilterButtons: { key: 'all' | CliType; label: string }[] = [
+    { key: 'all', label: 'All' },
+    { key: 'claude', label: 'Claude' },
+    { key: 'copilot', label: 'Copilot' },
+  ];
 
   const modeButtons: { key: SearchMode; label: string }[] = [
     { key: 'project', label: 'By Project' },
@@ -262,6 +274,11 @@ export default function ResumeModal({ isOpen, onClose, onResumeInApp }: ResumeMo
       ) : (
         <>
           <TextInput value={search} onChange={setSearch} placeholder="Search by name or ID..." />
+          <div style={{ display: 'flex', gap: 6, marginTop: 10 }}>
+            {cliFilterButtons.map(f => (
+              <OptionButton key={f.key} selected={cliFilter === f.key} onClick={() => setCliFilter(f.key)}>{f.label}</OptionButton>
+            ))}
+          </div>
           <div style={{ marginTop: 16 }}>
             {loading ? (
               <div style={{ color: muted, fontSize: 14, textAlign: 'center', padding: '24px 0' }}>Loading sessions...</div>

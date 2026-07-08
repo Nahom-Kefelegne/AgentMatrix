@@ -110,14 +110,62 @@ Validation: `npx tsc --noEmit` + `npm run build` pass. Still to do: dev-build ma
 test (modal open/close mid-run, fullscreen toggle, resume-after-restart, long-output
 PgUp/PgDn + wheel, trust auto-accept) and Windows/RDP Canvas verification.
 
-### Track B — Identity & naming (makes resume/discovery correct)
-- **B1.** `CopilotProvider.buildSpawnArgs` emits `--session-id=<uuid>` (+ optional
-  `-n <name>`); fix the stale "doesn't accept --session-id" comment.
-- **B2.** Copilot discovery → `~/.copilot/session-store.db` (`sessions.summary`) with
-  `workspace.yaml` fallback.
-- **B3.** Drop `nameCache` for Copilot (names stable once app-id == UUID and since
-  Copilot isn't forked on resume); keep it for Claude. Gate on one probe: does `-n`
-  persist across resume?
+### Track B — Identity, naming & lifecycle (empirically probed 2026-07-07)
+
+Probed against Copilot CLI 1.0.67/1.0.69 with a PTY harness on throwaway sessions.
+**Findings:**
+- `--session-id=<uuid>` **sets the UUID for a NEW session** (creates
+  `~/.copilot/session-state/<uuid>/`). App-id can == Copilot-id. ✅
+- `-n <name>` persists in `workspace.yaml` as `name:` + `user_named: true` and
+  **survives resume**. `session-store.db` stores `summary` (first prompt), not name.
+- `--resume=<id>` **preserves the same UUID — no fork**; name persists. **Agency does
+  NOT fork Copilot** on resume (unlike Claude). So Copilot naming is *structurally
+  stable*, unlike Claude's transcript-embedded, fork-losing names.
+- **Copilot does NOT prevent double-running** a session: a 2nd `--resume` of an
+  already-running/locked UUID succeeds and can spawn **phantom new sessions**. The app
+  must guard.
+- **`/exit` does NOT exit Copilot's TUI** (leaves a stale `inuse.<PID>.lock`). Clean
+  exit = **Ctrl-C (`\x03`) ×2** with a short delay → graceful shutdown + lock removed.
+  Stale locks are **self-healed by Copilot on the next resume** and don't block it.
+
+**Status (2026-07-07):** B1, B4, B5 implemented + validated (tsc/build green; B1/B4
+verified live against Copilot). B3 satisfied by B1. B2 deferred.
+- **B1.** ✅ `CopilotProvider.buildSpawnArgs` emits `--session-id=<uuid>` + `-n <name>`;
+  `SpawnOptions.name` added; `spawnNew` passes the resolved name; stale
+  `detectActiveSessionIds` comment fixed. Verified: dir created at exact UUID,
+  `workspace.yaml` gets `name` + `user_named: true`. Claude untouched (already passed
+  `--session-id`, ignores `name`).
+- **B2.** ⏸ DEFERRED — reading `session-store.db` needs a native SQLite dep
+  (`better-sqlite3`/node-gyp), risky with the expired mirror token + node 20.11 (no
+  built-in `node:sqlite`). Pure optimization; the existing `workspace.yaml` discovery
+  already yields names. Revisit as an optional PR (or via a pure-WASM reader).
+- **B3.** ✅ SATISFIED by B1 — Copilot names are now durable in `workspace.yaml` and
+  `discoverSessions()` already reads `meta.name`. **`nameCache` kept intact** (Claude +
+  shared routes depend on it); nothing deleted.
+- **B4.** ✅ Provider-owned exit: `CliProvider.getExitSequence()` — Claude `/exit`;
+  Copilot **Ctrl-C ×2** (400ms gap). Wired into `PtyManager.sendExitSequence` (used by
+  `gracefulShutdown` + `terminal:end`). Verified: Ctrl-C ×2 releases the lock (clean
+  shutdown); `/exit` did not. Claude behavior identical.
+- **B5.** ✅ Running-session guard: cold-path `terminal:resume` now calls
+  `reapOrphansForSessions([id])` (kills a live foreign process for that id + cleans its
+  Copilot lock) before spawning, so a resume can't spawn a phantom duplicate. Targeted
+  to the one id; warm path still guarded by `hasPty`.
+- **B6.** ✅ Provider-owned **rename**: `CliProvider.renameSession()`. Copilot has no
+  working rename slash command (`/rename` `/name` `/title` are no-ops — verified), so it
+  writes `name:`+`user_named: true` into `workspace.yaml` (safe while running, survives
+  resume — verified e2e). Claude keeps the in-TUI `/rename` PTY injection (now gated to
+  Claude only in `SessionDialog`). `/api/sessions/rename` calls the provider + keeps
+  `nameCache`/`sessionStore` in sync.
+
+### Session UX fixes (2026-07-07)
+- **Resume Modal**: All/Claude/Copilot filter + shared `CliIcon` (real brand marks;
+  extracted to `app/components/CliIcon.tsx`, dashboard uses it too).
+- **Empty-session hide**: `CopilotProvider.discoverSessions` skips sessions with no name
+  AND no conversation (`events.jsonl` has a real user/assistant message). Copilot-only.
+- **Block-scalar name parse fix**: `parseFlatYaml` now folds `name: |-` multi-line values
+  (recovers auto-generated names); discovery caps to 60 chars.
+- **Close-while-clicking race**: shared `endingSessions` guard in `terminalBridge`;
+  `terminal:resume` refuses a session mid-teardown (covers dashboard + modal paths).
 
 ### Track C — Infra replacement (later PRs)
 - **C1.** ACP runner lib (`lib/cli/acp/`) replacing `PromptInjector` for

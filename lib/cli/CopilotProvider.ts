@@ -1,5 +1,5 @@
 import { execSync } from 'child_process';
-import { existsSync, readdirSync, statSync, openSync, readSync, closeSync } from 'fs';
+import { existsSync, readdirSync, statSync, openSync, readSync, closeSync, readFileSync, writeFileSync } from 'fs';
 import { join } from 'path';
 import { homedir } from 'os';
 import type {
@@ -65,20 +65,41 @@ function readFirstBytes(path: string, bytes = 4000): string {
 /**
  * Minimal flat-YAML parser tailored to Copilot's workspace.yaml. Reads
  * `key: value` pairs at the top level; ignores comments, lists, nested
- * keys. Strips surrounding quotes from values.
+ * keys. Strips surrounding quotes from values. Also handles block scalars
+ * (`key: |` / `|-` / `>` / `>-`) by joining the following indented lines —
+ * Copilot writes multi-line auto-generated session names this way.
  *
  * NOT a general YAML parser — we don't want to pull in `js-yaml` for
  * a 7-line file format.
  */
 function parseFlatYaml(text: string): Record<string, string> {
   const out: Record<string, string> = {};
-  for (const raw of text.split('\n')) {
-    const line = raw.trimEnd();
+  const lines = text.split('\n');
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i].trimEnd();
     if (!line || line.startsWith('#') || line.startsWith(' ')) continue;
     const colon = line.indexOf(':');
     if (colon < 0) continue;
     const key = line.slice(0, colon).trim();
     let value = line.slice(colon + 1).trim();
+
+    // Block scalar (| , |- , > , >-): the value is on the following
+    // indented lines. Collect them until dedent, then fold to one line.
+    if (/^[|>][-+]?$/.test(value)) {
+      const collected: string[] = [];
+      let j = i + 1;
+      for (; j < lines.length; j++) {
+        const next = lines[j];
+        if (next.trim() === '') { collected.push(''); continue; }
+        if (!/^\s/.test(next)) break; // dedent → end of block
+        collected.push(next.replace(/^\s+/, ''));
+      }
+      i = j - 1;
+      value = collected.join(' ').replace(/\s+/g, ' ').trim();
+      out[key] = value;
+      continue;
+    }
+
     if (
       (value.startsWith('"') && value.endsWith('"')) ||
       (value.startsWith("'") && value.endsWith("'"))
@@ -88,6 +109,24 @@ function parseFlatYaml(text: string): Record<string, string> {
     out[key] = value;
   }
   return out;
+}
+
+/**
+ * Whether a Copilot session has real conversation activity. Empty/aborted
+ * sessions leave behind a dir with only a `workspace.yaml` and either no
+ * `events.jsonl` or one containing just a `session.start` event. We treat a
+ * session as having activity if events.jsonl exists and contains at least one
+ * user/assistant message. Reads only the first chunk (messages appear early).
+ */
+function copilotSessionHasActivity(sessionDir: string): boolean {
+  const eventsFile = join(sessionDir, 'events.jsonl');
+  if (!existsSync(eventsFile)) return false;
+  try {
+    const head = readFirstBytes(eventsFile, 16000);
+    return /"type"\s*:\s*"(user\.message|assistant\.message)"/.test(head);
+  } catch {
+    return false;
+  }
 }
 
 export class CopilotProvider implements CliProvider {
@@ -176,6 +215,16 @@ export class CopilotProvider implements CliProvider {
 
   buildSpawnArgs(opts: SpawnOptions): string[] {
     const args: string[] = [];
+    // Pin the session UUID so the app's tracking id equals Copilot's real
+    // on-disk session id (~/.copilot/session-state/<id>/). Copilot's help:
+    // "--session-id <id>: ... or set the UUID for a new session". Verified
+    // (CLI 1.0.67+): a new session is created at exactly this UUID, so
+    // --resume <id>, findSessionCwd, and workspace.yaml lookups all resolve.
+    if (opts.sessionId) args.push('--session-id', opts.sessionId);
+    // Persist a durable, user-named session name. Verified: -n writes
+    // `name:`/`user_named: true` into workspace.yaml and survives resume, so
+    // names don't rely on the app-side nameCache workaround (as Claude does).
+    if (opts.name) args.push('-n', opts.name);
     // YOLO / bypass-permissions in current Copilot CLI is --allow-all
     // (equivalent to --allow-all-tools --allow-all-paths --allow-all-urls).
     // Older versions used --yolo; that flag was renamed/removed in 1.0.3x.
@@ -204,6 +253,17 @@ export class CopilotProvider implements CliProvider {
 
   buildResumeShellCommand(opts: ResumeOptions): string {
     return `copilot ${this.buildResumeArgs(opts).join(' ')}`;
+  }
+
+  getExitSequence(): Array<{ data: string; delayMs: number }> {
+    // Copilot's TUI ignores `/exit`. Verified (CLI 1.0.67+): two Ctrl-C
+    // keystrokes (0x03) with a short gap trigger graceful shutdown — the
+    // session's inuse.<PID>.lock is removed and the process exits. A single
+    // Ctrl-C only interrupts the current turn.
+    return [
+      { data: '\x03', delayMs: 400 },
+      { data: '\x03', delayMs: 0 },
+    ];
   }
 
   detectPromptReady(text: string): boolean {
@@ -259,9 +319,18 @@ export class CopilotProvider implements CliProvider {
         if (existsSync(workspaceFile)) {
           const meta = parseFlatYaml(readFirstBytes(workspaceFile, 2000));
           if (meta.cwd) cwd = meta.cwd;
-          if (meta.name) name = meta.name;
+          // Copilot auto-names (block scalars) can be a whole sentence; cap
+          // to a tidy label for the session list.
+          if (meta.name) {
+            name = meta.name.length > 60 ? `${meta.name.slice(0, 57)}...` : meta.name;
+          }
         }
       } catch { /* ignore — return partial data */ }
+
+      // Hide empty/aborted sessions (no name AND no conversation) — they're
+      // just leftover dirs with nothing to resume and clutter the list. A
+      // named session is always kept (the name is meaningful even if short).
+      if (!name && !copilotSessionHasActivity(sessionDir)) continue;
 
       results.push({ id: entry, cwd, name, lastModified });
     }
@@ -285,14 +354,73 @@ export class CopilotProvider implements CliProvider {
   }
 
   /**
+   * Rename a Copilot session by writing `name`/`user_named: true` into its
+   * workspace.yaml. Verified (CLI 1.0.67+): Copilot respects this on disk and
+   * preserves it across resume without clobbering — even while the session is
+   * running — so no PTY interaction is needed. Only the top-level `name:` and
+   * `user_named:` lines are touched; every other line is preserved verbatim so
+   * we don't disturb Copilot's own fields.
+   */
+  renameSession(sessionId: string, newName: string): boolean {
+    if (!UUID_RE.test(sessionId)) return false;
+    const workspaceFile = join(COPILOT_SESSION_STATE_DIR, sessionId, 'workspace.yaml');
+    if (!existsSync(workspaceFile)) return false;
+    const name = newName.trim();
+    if (!name) return false;
+    // Quote to keep the value on one line regardless of its characters and to
+    // overwrite any prior block-scalar (`name: |-`) form.
+    const nameLine = `name: ${JSON.stringify(name)}`;
+    try {
+      const original = readFileSync(workspaceFile, 'utf-8');
+      const lines = original.split('\n');
+      const out: string[] = [];
+      let sawName = false;
+      let sawUserNamed = false;
+      let skipBlock = false;
+      for (const line of lines) {
+        // Drop the continuation lines of a previous block-scalar name value.
+        if (skipBlock) {
+          if (line.trim() === '' || /^\s/.test(line)) continue;
+          skipBlock = false;
+        }
+        if (/^name:/.test(line)) {
+          out.push(nameLine);
+          sawName = true;
+          if (/^name:\s*[|>][-+]?\s*$/.test(line)) skipBlock = true;
+          continue;
+        }
+        if (/^user_named:/.test(line)) {
+          out.push('user_named: true');
+          sawUserNamed = true;
+          continue;
+        }
+        out.push(line);
+      }
+      if (!sawName) out.splice(1, 0, nameLine);
+      if (!sawUserNamed) {
+        // Keep a trailing newline tidy.
+        if (out.length && out[out.length - 1] === '') out.splice(out.length - 1, 0, 'user_named: true');
+        else out.push('user_named: true');
+      }
+      writeFileSync(workspaceFile, out.join('\n'));
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  /**
    * COST: spawns one `ps`/`wmic` subprocess. Cross-checks against the
    * on-disk `inuse.*.lock` files so we can map PID → sessionId reliably.
    */
   detectActiveSessionIds(): ActiveProcessInfo[] {
-    // Copilot doesn't accept --session-id on spawn, so the command-line
-    // doesn't carry the session UUID. Instead, each active session
-    // creates a file `~/.copilot/session-state/<UUID>/inuse.<PID>.lock`.
-    // We enumerate those lock files and verify the PID is alive.
+    // New sessions are now spawned with `--session-id <UUID>` (so the app id
+    // equals Copilot's on-disk id), but we still detect active sessions via
+    // the on-disk `~/.copilot/session-state/<UUID>/inuse.<PID>.lock` files
+    // rather than parsing process args: the lock reliably maps a live PID to
+    // its session UUID even for sessions started outside the app (or resumed,
+    // where the UUID isn't on the command line). We enumerate locks and verify
+    // the PID is alive.
     if (!existsSync(COPILOT_SESSION_STATE_DIR)) return [];
 
     const livePids = collectLiveCopilotPids();
