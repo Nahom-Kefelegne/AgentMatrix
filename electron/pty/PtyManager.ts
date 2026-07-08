@@ -238,7 +238,12 @@ export class PtyManager {
       });
     }
     const shell = process.env.SHELL || '/bin/bash';
-    const fullCmd = `${spawnBinary} ${spawnArgs.join(' ')}`;
+    // Shell-quote every token so args containing spaces or shell metacharacters
+    // (e.g. a Copilot `-n "My (test)"` session name) can't break or inject into
+    // the `sh -c` command. Single-quote wrapping with '\'' escaping is the
+    // POSIX-safe form. This replaces per-provider ad-hoc quoting.
+    const shQuote = (s: string) => `'${String(s).replace(/'/g, `'\\''`)}'`;
+    const fullCmd = [spawnBinary, ...spawnArgs].map(shQuote).join(' ');
     return pty.spawn(shell, ['-c', `cd "${safeCwd}" && ${fullCmd}`], {
       cwd: safeCwd, cols: 80, rows: 24, env,
     });
@@ -301,11 +306,11 @@ export class PtyManager {
       fork: opts.fork,
     });
 
-    // For Claude, append system prompt on resume if provided
+    // For Claude, append system prompt on resume if provided. Shell-quoting is
+    // applied uniformly at spawn, so just collapse to one line here.
     if (cliType === 'claude' && opts.systemPrompt) {
       const oneLine = opts.systemPrompt.replace(/\n/g, ' ').replace(/\s+/g, ' ').trim();
-      const escaped = oneLine.replace(/'/g, "'\\''");
-      args.push('--append-system-prompt', `'${escaped}'`);
+      args.push('--append-system-prompt', oneLine);
     }
 
     return this.createPtySession(id, this.spawnPty(cwd, args, cliType), cliType);

@@ -193,9 +193,9 @@ export class ClaudeProvider implements CliProvider {
     if (opts.effort) args.push('--effort', opts.effort);
     if (opts.allowedTools) args.push('--allowedTools', opts.allowedTools);
     if (opts.systemPrompt) {
+      // Collapse to a single line; shell-quoting happens uniformly at spawn.
       const oneLine = opts.systemPrompt.replace(/\n/g, ' ').replace(/\s+/g, ' ').trim();
-      const escaped = oneLine.replace(/'/g, "'\\''");
-      args.push('--append-system-prompt', `'${escaped}'`);
+      args.push('--append-system-prompt', oneLine);
     }
     return args;
   }
