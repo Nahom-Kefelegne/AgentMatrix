@@ -168,13 +168,63 @@ echo -e "${BLUE}Installing dependencies...${NC}"
 npm install
 echo ""
 
-# Rebuild node-pty for Electron
-echo -e "${BLUE}Rebuilding native modules for Electron...${NC}"
-npx electron-rebuild -m . -o node-pty 2>/dev/null || {
-    echo -e "  ${WARN} electron-rebuild failed, trying npm rebuild..."
-    npm rebuild node-pty
+# ── Native modules (node-pty) ─────────────────────────────────────────────
+# node-pty ships a compiled addon (pty.node) + a helper binary (spawn-helper),
+# both specific to this machine's CPU arch AND Electron's ABI. Copying
+# node_modules between Macs (or Intel/Apple-Silicon) breaks them, and the copy
+# usually strips spawn-helper's executable bit — surfacing at runtime as the
+# cryptic "posix_spawnp failed". Restore the +x bit, verify node-pty can spawn
+# under Electron, and only compile from source when we must (that build is what
+# tends to hang, so we skip it whenever the binaries already work).
+echo -e "${BLUE}Setting up native modules (node-pty)...${NC}"
+
+HELPER="node_modules/node-pty/build/Release/spawn-helper"
+ELECTRON_BIN="node_modules/.bin/electron"
+
+# Cheap fix first: restore the helper's executable bit.
+[ -f "$HELPER" ] && chmod +x "$HELPER" 2>/dev/null || true
+
+# Verify node-pty can spawn under Electron's runtime (ELECTRON_RUN_AS_NODE uses
+# Electron's ABI, exactly like the app), so we skip a needless — and sometimes
+# hanging — rebuild when it already works.
+pty_works() {
+    [ -x "$ELECTRON_BIN" ] || return 1
+    ELECTRON_RUN_AS_NODE=1 "$ELECTRON_BIN" -e \
+      "const p=require('node-pty');const t=p.spawn(process.env.SHELL||'/bin/bash',['-c','exit 0'],{});t.kill();" \
+      >/dev/null 2>&1
 }
-echo -e "  ${CHECK} Native modules rebuilt"
+
+if pty_works; then
+    echo -e "  ${CHECK} node-pty works — no rebuild needed"
+else
+    echo -e "  ${WARN} node-pty can't spawn — rebuilding for Electron..."
+
+    # Missing Xcode Command Line Tools is the #1 cause of a build that hangs.
+    if ! xcode-select -p &>/dev/null; then
+        echo -e "  ${WARN} Xcode Command Line Tools missing — launching installer (accept the prompt),"
+        echo -e "     then re-run this script once it finishes."
+        xcode-select --install 2>/dev/null || true
+    fi
+
+    # Visible output (not silenced, so a stall is diagnosable). Fall back through
+    # the public npm registry — a private/ADO mirror with an expired token stalls
+    # header/prebuild downloads — then a plain npm rebuild.
+    if npx electron-rebuild -f -w node-pty \
+        || npm_config_registry=https://registry.npmjs.org/ npx electron-rebuild -f -w node-pty \
+        || npm rebuild node-pty; then
+        [ -f "$HELPER" ] && chmod +x "$HELPER" 2>/dev/null || true
+    fi
+
+    if pty_works; then
+        echo -e "  ${CHECK} Native modules rebuilt"
+    else
+        echo -e "  ${CROSS} node-pty still can't spawn. Fix manually:"
+        echo -e "       chmod +x $HELPER      # if the file exists"
+        echo -e "       npm run rebuild:native"
+        echo -e "     If the rebuild hangs, install Xcode CLT (xcode-select --install)"
+        echo -e "     and check your npm registry (npm config get registry)."
+    fi
+fi
 echo ""
 
 echo -e "${GREEN}╔══════════════════════════════════╗${NC}"
