@@ -113,10 +113,16 @@ export function spawnOrchestrator(ptyManager: PtyManager): void {
   try {
     const cachedId = readCachedId();
 
-    if (cachedId) {
+    // Only resume the cached orchestrator if it actually exists as a Copilot
+    // session on disk. A cached id from before the Claude→Copilot migration
+    // points at a Claude session with no Copilot session-state dir, so
+    // `copilot --resume` would just exit; spawn a fresh Copilot orchestrator
+    // instead of leaving a dead PTY to be reaped later.
+    const cachedCwd = cachedId ? ptyManager.findSessionCwd(cachedId, 'copilot') : undefined;
+
+    if (cachedId && cachedCwd) {
       try {
-        const cwd = ptyManager.findSessionCwd(cachedId, 'copilot') || process.cwd();
-        ptyManager.spawnResume(cachedId, { cwd, resumeId: cachedId, cliType: 'copilot' });
+        ptyManager.spawnResume(cachedId, { cwd: cachedCwd, resumeId: cachedId, cliType: 'copilot' });
         orchestratorId = cachedId;
         orchestratorSession = ptyManager.getSession(cachedId) || null;
         console.log(`[orchestrator] resumed id=${cachedId.slice(0, 12)}`);
@@ -125,6 +131,7 @@ export function spawnOrchestrator(ptyManager: PtyManager): void {
         spawnFresh(ptyManager);
       }
     } else {
+      if (cachedId) console.log(`[orchestrator] cached id is not a Copilot session, spawning fresh`);
       spawnFresh(ptyManager);
     }
 
