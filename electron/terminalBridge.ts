@@ -68,7 +68,7 @@ function getNextDeskIndex(): number {
   return sessions.length;
 }
 
-function createSessionEntry(id: string, name: string, cwd: string): SessionData {
+function createSessionEntry(id: string, name: string, cwd: string, cliType?: CliType): SessionData {
   const deskIndex = getNextDeskIndex();
   const isDesk = deskIndex < DESK_POSITIONS.length;
   const deskPosition = isDesk
@@ -90,6 +90,7 @@ function createSessionEntry(id: string, name: string, cwd: string): SessionData 
     agents: [],
     cwd,
     createdAt: Date.now(),
+    cliType,
   };
 }
 
@@ -137,8 +138,7 @@ export function setupTerminalBridge(io: SocketIOServer, ptyManager: PtyManager):
       try {
         console.log(`[terminal:new] cli=${cliType} name=${name} uuid=${sessionUuid.slice(0, 8)} cwd=${opts.cwd}`);
 
-        const sessionData = createSessionEntry(sessionUuid, name, opts.cwd);
-        sessionData.cliType = cliType;
+        const sessionData = createSessionEntry(sessionUuid, name, opts.cwd, cliType);
         addSession(sessionData);
         setCachedName(sessionUuid, name);
         io.emit(SOCKET_EVENTS.SESSION_START, sessionData);
@@ -198,7 +198,7 @@ export function setupTerminalBridge(io: SocketIOServer, ptyManager: PtyManager):
         console.log(`[terminal:fork] source=${opts.sourceSessionId.slice(0, 12)} newId=${sessionUuid.slice(0, 8)} cwd=${cwd}`);
 
         // Create session entry so sprite appears (same pattern as terminal:new)
-        const sessionData = createSessionEntry(sessionUuid, name, cwd);
+        const sessionData = createSessionEntry(sessionUuid, name, cwd, sourceSession?.cliType);
         addSession(sessionData);
         setCachedName(sessionUuid, name);
         io.emit(SOCKET_EVENTS.SESSION_START, sessionData);
@@ -311,7 +311,7 @@ export function setupTerminalBridge(io: SocketIOServer, ptyManager: PtyManager):
 
         // Create session entry so sprite appears
         if (!existing) {
-          const sessionData = createSessionEntry(sessionId, name, cwd);
+          const sessionData = createSessionEntry(sessionId, name, cwd, resolvedCliType);
           addSession(sessionData);
           io.emit(SOCKET_EVENTS.SESSION_START, sessionData);
         }
