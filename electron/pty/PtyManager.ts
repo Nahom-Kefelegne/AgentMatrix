@@ -196,6 +196,12 @@ export class PtyManager {
     const env = { ...process.env };
     delete env.CLAUDECODE;
 
+    // Copilot only delivers hooks to http://localhost when this is set; without
+    // it every localhost HTTP hook silently no-fires, so AgentMatrix's dashboard
+    // hooks (session/tool/agent activity) never arrive. Harmless for Claude, but
+    // scope it to Copilot to be explicit. See docs/design/copilot-hooks-reference.md.
+    if (provider.type === 'copilot') env.COPILOT_HOOK_ALLOW_LOCALHOST = '1';
+
     // Check if Agency mode is enabled
     const { getSettings } = require('../../lib/state/appSettings');
     const useAgency = getSettings().useAgency === true;

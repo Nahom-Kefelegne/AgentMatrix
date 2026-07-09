@@ -197,6 +197,30 @@ config format, per-event payloads, discovery locations).
   `errorOccurred`, `postToolUseFailure`, `preCompact`, `userPromptSubmitted`,
   `notification`, `permissionRequest` — to enrich session state (errors, compaction,
   live prompts, background-agent notifications, permission surfacing).
+
+**Status (DONE + validated e2e 2026-07-09):**
+- ✅ **C-hooks-1:** `PtyManager.spawnPty` sets `COPILOT_HOOK_ALLOW_LOCALHOST=1` for
+  Copilot (`electron/pty/PtyManager.ts`). Verified: hooks now POST to the app.
+- ✅ **C-hooks-2:** `electron/services/copilotHooksConfig.ts` writes
+  `~/.copilot/hooks/agentmatrix.json` at Electron startup (`main.ts`, idempotent —
+  only rewrites on change). App is now authoritative; setup.sh's copy is a superseded
+  fallback (harmless — app overwrites on launch).
+- ✅ **C-hooks-3:** wired 5 new events via new routes — `UserPromptSubmit`
+  (`prompt-submit` → instant "working"), `ErrorOccurred` (`error` → attention + reason,
+  unrecoverable only), `PostToolUseFailure` (`tool-failed` → failed action + clears
+  tool), `PreCompact` (`pre-compact` → "Compacting context…"), `Notification`
+  (`notification` → attention for permission_prompt/elicitation_dialog only). All reuse
+  existing card UI (status/statusReason/lastToolSummary/recentActions) — no frontend
+  changes needed.
+- **Handler strategy (verified):** http hooks for the 11 fire-and-forget events (need
+  the localhost flag); **`PreToolUse` uses a `command`/curl hook** because Copilot
+  rejects http://localhost for it even with the flag (its response can grant perms).
+  E2e probe (real Copilot TUI): `session-start`, `prompt-submit`, `tool-use`
+  (PreToolUse cmd), `tool-complete`, `stop`, `session-end` all POST 200.
+- **Deferred:** `permissionRequest` (CLI-only, needs a decision response / https or
+  command hook) — left for a follow-up; monitoring events cover the dashboard needs.
+
+### Track C — Hooks + ACP (investigated 2026-07-07; reframed per user) [ACP portion]
 - **C-acp (ACP runner):** build `lib/cli/acp/` (`copilot --acp`) to replace the
   Claude-era `PromptInjector` for Summary/Handoff/Orchestrator (bypass Agency; PTY
   fallback). ACP verified working: `initialize` → `session/load{sessionId,cwd,

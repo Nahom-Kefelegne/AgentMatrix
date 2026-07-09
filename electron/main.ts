@@ -14,6 +14,7 @@ import { setupTerminalBridge, requestSummary } from './terminalBridge';
 import { spawnOrchestrator, killOrchestrator, isOrchestrator } from './services/OrchestratorService';
 import { reapOrphansOnStartup, logReapResult } from './services/OrphanReaper';
 import { migrateStateStorage } from '../lib/state/migrateStateStorage';
+import { ensureCopilotHooksConfig } from './services/copilotHooksConfig';
 import { getProvider } from '../lib/cli';
 
 // Dev vs prod is determined by whether Electron is running from a packaged
@@ -334,6 +335,10 @@ app.whenReady().then(async () => {
   // ~/.agentmatrix/*. Idempotent and fast (~6 stat calls in the no-op
   // case). Runs before any state module touches disk.
   migrateStateStorage();
+
+  // Write the Copilot hook config so live sessions report activity to the
+  // dashboard without depending on setup.sh having been run. Idempotent.
+  ensureCopilotHooksConfig(port);
 
   createWindow();
   createTray();
