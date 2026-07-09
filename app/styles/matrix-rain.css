@@ -38,7 +38,7 @@
   box-shadow: 0 24px 48px rgba(52, 211, 153, 0.12);
 }
 .matrix-card--attention {
-  border-color: rgba(245, 158, 11, 0.3);
+  border-color: rgba(239, 68, 68, 0.3);
 }
 .matrix-card--done {
   border-color: rgba(59, 130, 246, 0.25);
@@ -102,19 +102,19 @@
   color: rgba(52, 211, 153, 0.35);
 }
 
-/* Attention rain — amber */
+/* Attention rain — red */
 .matrix-card--attention .matrix-rain-char,
 .session-card--attention .matrix-rain-char {
-  color: rgba(245, 158, 11, 0.2);
+  color: rgba(239, 68, 68, 0.2);
 }
 .matrix-card--attention .matrix-rain-char:first-child,
 .session-card--attention .matrix-rain-char:first-child {
-  color: rgba(245, 158, 11, 0.6);
-  text-shadow: 0 0 8px rgba(245, 158, 11, 0.4);
+  color: rgba(239, 68, 68, 0.6);
+  text-shadow: 0 0 8px rgba(239, 68, 68, 0.4);
 }
 .matrix-card--attention .matrix-rain-char:nth-child(2),
 .session-card--attention .matrix-rain-char:nth-child(2) {
-  color: rgba(245, 158, 11, 0.4);
+  color: rgba(239, 68, 68, 0.4);
 }
 
 /* Light mode — much more subtle */
@@ -198,11 +198,11 @@
   white-space: nowrap;
 }
 .matrix-card-reason--attention {
-  background: rgba(245, 158, 11, 0.08);
-  color: #b45309;
+  background: rgba(239, 68, 68, 0.08);
+  color: #b91c1c;
 }
 .dark .matrix-card-reason--attention {
-  color: #fbbf24;
+  color: #f87171;
 }
 .matrix-card-reason--done {
   background: rgba(59, 130, 246, 0.08);

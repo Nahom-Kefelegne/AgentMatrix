@@ -45,6 +45,8 @@ const OfficeCanvas = forwardRef<OfficeCanvasHandle, OfficeCanvasProps>(function 
           engine.spawnCharacter(session);
           if (session.status === 'idle') {
             engine.showEmoji(session.id, '💤', true);
+          } else if (session.status === 'attention') {
+            engine.showEmoji(session.id, '✋', true);
           }
         });
         break;
@@ -54,6 +56,8 @@ const OfficeCanvas = forwardRef<OfficeCanvasHandle, OfficeCanvasProps>(function 
         engine.spawnCharacter(session);
         if (session.status === 'idle') {
           engine.showEmoji(session.id, '💤', true);
+        } else if (session.status === 'attention') {
+          engine.showEmoji(session.id, '✋', true);
         }
         break;
       }
@@ -87,6 +91,8 @@ const OfficeCanvas = forwardRef<OfficeCanvasHandle, OfficeCanvasProps>(function 
             engine.showEmoji(data.sessionId, '💤', true);
           } else if (data.changes.status === 'working') {
             engine.clearEmoji(data.sessionId);
+          } else if (data.changes.status === 'attention') {
+            engine.showEmoji(data.sessionId, '✋', true);
           }
         }
         break;

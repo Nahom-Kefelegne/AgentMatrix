@@ -161,7 +161,7 @@ function SessionCard({ s, i, contextUsage, onClick, socketRef, isDragging, onDra
   }, [socketRef, s.id]);
 
   const statusColor = working ? '#34d399' : s.status === 'meeting' ? '#a78bfa'
-    : s.status === 'attention' ? '#f59e0b' : s.status === 'done' ? '#3b82f6' : undefined;
+    : s.status === 'attention' ? '#ef4444' : s.status === 'done' ? '#3b82f6' : undefined;
 
   return (
     <motion.div
