@@ -165,7 +165,33 @@ fi
 
 # Install dependencies
 echo -e "${BLUE}Installing dependencies...${NC}"
-npm install
+# package-lock.json pins tarball URLs on registry.npmjs.org. On networks where
+# the public npm registry is blocked (e.g. corporate/Microsoft), npm honors
+# those lockfile URLs and hangs. Fail fast (bounded fetch timeout/retries), then
+# fall back to re-resolving every dependency through the registry configured in
+# ~/.npmrc (e.g. an Azure Artifacts mirror) by dropping the lockfile.
+npm_install_resilient() {
+    npm install --fetch-timeout=60000 --fetch-retry-maxtimeout=60000 --fetch-retries=1 && return 0
+    echo -e "  ${WARN} npm install failed — the registry in package-lock.json"
+    echo -e "     (registry.npmjs.org) may be blocked on this network."
+    local reg; reg=$(npm config get registry 2>/dev/null)
+    echo -e "     Re-resolving dependencies through your configured registry:"
+    echo -e "     ${reg}"
+    rm -f package-lock.json
+    npm install --fetch-timeout=120000 --fetch-retry-maxtimeout=120000 --fetch-retries=2 && return 0
+    return 1
+}
+if ! npm_install_resilient; then
+    reg=$(npm config get registry 2>/dev/null)
+    echo -e "  ${CROSS} Could not install dependencies."
+    echo -e "     Public npm appears blocked and your mirror isn't usable. Fix the mirror auth:"
+    echo -e "       • Registry: ${reg}"
+    echo -e "       • Azure Artifacts (macOS/Linux): create a PAT with Packaging (Read),"
+    echo -e "         then run:  npx ado-npm-auth --config ~/.npmrc   (or add the token to ~/.npmrc)"
+    echo -e "       • Windows:   npx vsts-npm-auth -config .npmrc -F"
+    echo -e "     Then re-run this script."
+    exit 1
+fi
 echo ""
 
 # ── Native modules (node-pty) ─────────────────────────────────────────────

@@ -44,7 +44,21 @@ echo ""
 
 # Install dependencies (in case they changed)
 echo -e "${BLUE}Installing dependencies...${NC}"
-npm install
+# See setup.sh: fail fast if the public npm registry is blocked, then re-resolve
+# through the registry configured in ~/.npmrc (e.g. a corporate mirror).
+if ! npm install --fetch-timeout=60000 --fetch-retry-maxtimeout=60000 --fetch-retries=1; then
+    reg=$(npm config get registry 2>/dev/null)
+    echo -e "  ${WARN} npm install failed (registry.npmjs.org may be blocked)."
+    echo -e "     Re-resolving through your configured registry: ${reg}"
+    rm -f package-lock.json
+    if ! npm install --fetch-timeout=120000 --fetch-retry-maxtimeout=120000 --fetch-retries=2; then
+        echo -e "  ${CROSS} Could not install dependencies. If public npm is blocked,"
+        echo -e "     authenticate your mirror (${reg}) — e.g. macOS/Linux:"
+        echo -e "       npx ado-npm-auth --config ~/.npmrc   (or add a Packaging-read PAT to ~/.npmrc)"
+        echo -e "     then re-run this script."
+        exit 1
+    fi
+fi
 echo -e "  ${CHECK} Dependencies installed"
 echo ""
 
