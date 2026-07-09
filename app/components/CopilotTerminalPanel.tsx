@@ -13,6 +13,14 @@ const PAGE_DOWN = '\x1b[6~';
 // Roughly one physical wheel notch (~120px) per page.
 const WHEEL_PAGE_STEP = 120;
 
+// Shift+Enter → insert a newline in the prompt instead of submitting. xterm.js
+// doesn't implement modifyOtherKeys/kitty, so left alone it sends a bare CR for
+// Shift+Enter (i.e. submits, same as Enter). Copilot negotiates modifyOtherKeys
+// mode 2 on startup (CSI > 4 ; 2 m), whose canonical Shift+Enter encoding is
+// `CSI 27 ; 2 ; 13 ~`. Verified empirically against the live Copilot TUI: this
+// inserts a newline without submitting.
+const SHIFT_ENTER = '\x1b[27;2;13~';
+
 interface CopilotTerminalPanelProps {
   sessionId: string;
   sessionName: string;
@@ -56,6 +64,11 @@ export default function CopilotTerminalPanel({ sessionId, sessionName, cwd, visi
   // Copy/paste conventions match the legacy panel; every other key (including
   // Copilot's scroll/timeline shortcuts) flows straight through to the PTY.
   const customKeyHandler = useCallback((e: KeyboardEvent, term: any) => {
+    // Shift+Enter — insert a newline in the prompt rather than submit.
+    if (e.key === 'Enter' && e.shiftKey) {
+      if (e.type === 'keydown') writeInput(SHIFT_ENTER);
+      return false;
+    }
     if (e.type === 'keydown' && e.code === 'KeyC' && e.shiftKey && e.ctrlKey) {
       const sel = term.getSelection();
       if (sel) navigator.clipboard.writeText(sel);
