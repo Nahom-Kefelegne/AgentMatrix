@@ -3,6 +3,7 @@ import type { ToolCompletePayload } from '@/lib/types';
 import { SOCKET_EVENTS } from '@/lib/types';
 import { addAction, updateSession, getSession, getAgentName } from '@/lib/state/sessionStore';
 import { emitToClients } from '@/lib/state/socketEmitter';
+import { ASK_USER_TOOLS } from '@/lib/constants/askUserTools';
 
 export async function POST(request: Request) {
   try {
@@ -25,9 +26,15 @@ export async function POST(request: Request) {
     // event is itself from a subagent — those keep the parent at 'working'
     // until SubagentStop arrives. Claude also flips back via its
     // prompt-ready PTY signal, but Copilot does not — fixes that gap.
+    // Also skip when THIS completing tool is an ask-user tool: Copilot fires
+    // PostToolUse immediately after presenting the question (before the user
+    // answers), so idling here would wipe the "needs you" state that tool-use
+    // just set. (Permission prompts differ — the completing tool there is the
+    // real tool, so those still idle normally once approved.)
     const hasActiveAgents = !!(session && session.agents.length > 0);
     const isAgentEvent = !!payload.agent_id;
-    const shouldIdle = !hasActiveAgents && !isAgentEvent;
+    const isAskUserComplete = ASK_USER_TOOLS.has(payload.tool_name || payload.toolName || '');
+    const shouldIdle = !hasActiveAgents && !isAgentEvent && !isAskUserComplete;
 
     updateSession(payload.session_id, {
       currentTool: undefined,

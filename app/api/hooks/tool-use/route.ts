@@ -4,6 +4,7 @@ import { getSession, updateSession, getAgentName } from '@/lib/state/sessionStor
 import { emitToClients } from '@/lib/state/socketEmitter';
 import { checkForRename } from '@/lib/state/sessionName';
 import { setCachedName } from '@/lib/state/nameCache';
+import { ASK_USER_TOOLS, extractQuestion } from '@/lib/constants/askUserTools';
 
 function buildToolSummary(toolName: string, toolInput?: Record<string, unknown>): string {
   if (!toolInput) return toolName;
@@ -48,6 +49,26 @@ export async function POST(request: Request) {
 
     const lastToolSummary = buildToolSummary(payload.tool_name, payload.tool_input);
     const lastActivity = Date.now();
+
+    // Copilot's ask-user tools (e.g. AskUserQuestion) block waiting for the
+    // user's answer but never fire a notification, and PostToolUse doesn't
+    // arrive until the user responds — so without special-casing them the
+    // session is stuck showing "working" while it's really waiting on the user.
+    // Treat them as "attention" (needs you); it clears automatically when the
+    // answer arrives (PostToolUse → tool-complete → idle).
+    const toolName: string = payload.tool_name || payload.toolName || '';
+    if (ASK_USER_TOOLS.has(toolName)) {
+      const question = extractQuestion(payload.tool_input || payload.toolArgs);
+      const changes = {
+        status: 'attention' as const,
+        statusReason: question,
+        currentTool: toolName,
+        lastActivity,
+      };
+      updateSession(payload.session_id, changes);
+      emitToClients(SOCKET_EVENTS.SESSION_UPDATE, { sessionId: payload.session_id, changes });
+      return NextResponse.json({ ok: true });
+    }
 
     // Track files modified by Write/Edit tools
     const fileModTools = ['Write', 'Edit'];

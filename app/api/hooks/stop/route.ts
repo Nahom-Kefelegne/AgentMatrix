@@ -1,12 +1,22 @@
 import { NextResponse } from 'next/server';
 import type { StopPayload } from '@/lib/types';
 import { SOCKET_EVENTS } from '@/lib/types';
-import { updateSession } from '@/lib/state/sessionStore';
+import { getSession, updateSession } from '@/lib/state/sessionStore';
 import { emitToClients } from '@/lib/state/socketEmitter';
 
 export async function POST(request: Request) {
   try {
     const payload: StopPayload = await request.json();
+
+    // Don't clear a pending "needs you" state on turn-end. When Copilot asks a
+    // question (AskUserQuestion) or calls request_attention, PostToolUse + Stop
+    // fire immediately while it waits for the user. Downgrading to idle here
+    // would hide that the session needs the user. Attention clears when the
+    // user acts (their next prompt flips the session back to 'working').
+    const session = getSession(payload.session_id);
+    if (session?.status === 'attention') {
+      return NextResponse.json({ ok: true });
+    }
 
     updateSession(payload.session_id, {
       status: 'idle',
