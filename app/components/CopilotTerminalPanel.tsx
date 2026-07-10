@@ -10,8 +10,15 @@ import { TERMINAL_THEME } from '@/lib/terminalTheme';
 // paging keys for natural scrolling.
 const PAGE_UP = '\x1b[5~';
 const PAGE_DOWN = '\x1b[6~';
-// Roughly one physical wheel notch (~120px) per page.
-const WHEEL_PAGE_STEP = 120;
+// Empirical pty probe against Copilot v1.0.70: PgUp/PgDn scroll the timeline by
+// one viewport page (~23 content lines at 30 rows). Shift/Ctrl/plain arrows and
+// SGR wheel mouse sequences did not provide line-level timeline scrolling, so
+// wheel input still has to be translated to pages. Keep the threshold lower than
+// the old one-notch-per-page mapping so trackpads don't feel inert, but clamp
+// per-event output so a fast flick cannot enqueue a long burst of page jumps.
+const WHEEL_PAGE_STEP_PX = 80;
+const WHEEL_LINE_DELTA_PX = 16;
+const MAX_WHEEL_PAGES_PER_EVENT = 1;
 
 // Shift+Enter → insert a newline in the prompt instead of submitting. xterm.js
 // doesn't implement modifyOtherKeys/kitty, so left alone it sends a bare CR for
@@ -158,10 +165,26 @@ export default function CopilotTerminalPanel({ sessionId, sessionName, cwd, visi
     const onWheel = (e: WheelEvent) => {
       e.preventDefault();
       e.stopPropagation();
-      accum += e.deltaY;
-      while (Math.abs(accum) >= WHEEL_PAGE_STEP) {
-        writeInput(accum > 0 ? PAGE_DOWN : PAGE_UP);
-        accum += accum > 0 ? -WHEEL_PAGE_STEP : WHEEL_PAGE_STEP;
+
+      const deltaY =
+        e.deltaMode === WheelEvent.DOM_DELTA_LINE ? e.deltaY * WHEEL_LINE_DELTA_PX :
+        e.deltaMode === WheelEvent.DOM_DELTA_PAGE ? e.deltaY * WHEEL_PAGE_STEP_PX :
+        e.deltaY;
+      accum += deltaY;
+
+      const direction = Math.sign(accum);
+      const pageCount = Math.min(
+        MAX_WHEEL_PAGES_PER_EVENT,
+        Math.floor(Math.abs(accum) / WHEEL_PAGE_STEP_PX),
+      );
+      if (direction !== 0 && pageCount > 0) {
+        for (let i = 0; i < pageCount; i += 1) {
+          writeInput(direction > 0 ? PAGE_DOWN : PAGE_UP);
+        }
+        accum -= direction * WHEEL_PAGE_STEP_PX * pageCount;
+        // Drop excessive residual from high-resolution flicks instead of
+        // replaying it as delayed page jumps on later tiny wheel events.
+        accum = Math.max(-WHEEL_PAGE_STEP_PX + 1, Math.min(WHEEL_PAGE_STEP_PX - 1, accum));
       }
     };
     container.addEventListener('wheel', onWheel, { passive: false, capture: true });
