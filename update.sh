@@ -63,23 +63,22 @@ echo -e "  ${CHECK} Dependencies installed"
 echo ""
 
 # ── Native modules (node-pty) ─────────────────────────────────────────────
-# npm install can re-fetch node-pty with a plain-Node build; make sure its
-# native binaries match this machine's CPU arch AND Electron's ABI. Copying
-# node_modules between Macs also strips spawn-helper's executable bit, which
-# surfaces as the cryptic "posix_spawnp failed". Restore the +x bit, verify
-# node-pty can spawn under Electron, and only compile from source when we must
-# (that build is what tends to hang, so we skip it when the binaries work).
+# node-pty ships N-API prebuilt binaries (prebuilds/<platform>-<arch>/) that work
+# under both Node and Electron, so NO electron-rebuild is needed — which matters
+# because that rebuild downloads Electron headers from the internet and HANGS on
+# networks that block public downloads (e.g. corporate/Microsoft). The prebuilt
+# `spawn-helper` just ships without its execute bit (npm/git drop it), which
+# surfaces as "posix_spawnp failed"; chmod +x fixes it. See setup.sh for detail.
 echo -e "${BLUE}Setting up native modules (node-pty)...${NC}"
 
-HELPER="node_modules/node-pty/build/Release/spawn-helper"
 ELECTRON_BIN="node_modules/.bin/electron"
 
-# Cheap fix first: restore the helper's executable bit.
-[ -f "$HELPER" ] && chmod +x "$HELPER" 2>/dev/null || true
+# Restore the execute bit on every shipped/compiled spawn-helper.
+find node_modules/node-pty/prebuilds -name spawn-helper -exec chmod +x {} \; 2>/dev/null || true
+[ -f node_modules/node-pty/build/Release/spawn-helper ] && \
+    chmod +x node_modules/node-pty/build/Release/spawn-helper 2>/dev/null || true
 
-# Verify node-pty can spawn under Electron's runtime (ELECTRON_RUN_AS_NODE uses
-# Electron's ABI, exactly like the app), so we skip a needless — and sometimes
-# hanging — rebuild when it already works.
+# Verify node-pty can spawn under Electron's ABI; skip the hang-prone rebuild if so.
 pty_works() {
     [ -x "$ELECTRON_BIN" ] || return 1
     ELECTRON_RUN_AS_NODE=1 "$ELECTRON_BIN" -e \
@@ -87,35 +86,41 @@ pty_works() {
       >/dev/null 2>&1
 }
 
-if pty_works; then
-    echo -e "  ${CHECK} node-pty works — no rebuild needed"
-else
-    echo -e "  ${WARN} node-pty can't spawn — rebuilding for Electron..."
+# Hard-timeout wrapper so a blocked download can't hang the script (macOS has no `timeout`).
+run_bounded() {
+    local secs="$1"; shift
+    "$@" &
+    local cmd_pid=$!
+    ( sleep "$secs"; kill "$cmd_pid" 2>/dev/null ) &
+    local killer_pid=$!
+    disown "$killer_pid" 2>/dev/null
+    wait "$cmd_pid" 2>/dev/null
+    local rc=$?
+    kill "$killer_pid" 2>/dev/null
+    return $rc
+}
 
-    # Missing Xcode Command Line Tools is the #1 cause of a build that hangs.
+if pty_works; then
+    echo -e "  ${CHECK} node-pty prebuilt binary works under Electron — no rebuild needed"
+else
+    echo -e "  ${WARN} Prebuilt node-pty can't spawn — attempting a bounded rebuild..."
     if ! xcode-select -p &>/dev/null; then
-        echo -e "  ${WARN} Xcode Command Line Tools missing — launching installer (accept the prompt),"
-        echo -e "     then re-run this script once it finishes."
+        echo -e "  ${WARN} Xcode Command Line Tools missing — launching installer, then re-run."
         xcode-select --install 2>/dev/null || true
     fi
-
-    # Visible output (not silenced, so a stall is diagnosable). Fall back through
-    # the public npm registry — a private/ADO mirror with an expired token stalls
-    # header/prebuild downloads — then a plain npm rebuild.
-    if npx electron-rebuild -f -w node-pty \
-        || npm_config_registry=https://registry.npmjs.org/ npx electron-rebuild -f -w node-pty \
-        || npm rebuild node-pty; then
-        [ -f "$HELPER" ] && chmod +x "$HELPER" 2>/dev/null || true
-    fi
+    run_bounded 180 npx electron-rebuild -f -w node-pty || \
+        run_bounded 180 npm rebuild node-pty || true
+    find node_modules/node-pty/prebuilds -name spawn-helper -exec chmod +x {} \; 2>/dev/null || true
+    [ -f node_modules/node-pty/build/Release/spawn-helper ] && \
+        chmod +x node_modules/node-pty/build/Release/spawn-helper 2>/dev/null || true
 
     if pty_works; then
-        echo -e "  ${CHECK} Native modules rebuilt"
+        echo -e "  ${CHECK} Native modules ready"
     else
-        echo -e "  ${CROSS} node-pty still can't spawn. Fix manually:"
-        echo -e "       chmod +x $HELPER      # if the file exists"
-        echo -e "       npm run rebuild:native"
-        echo -e "     If the rebuild hangs, install Xcode CLT (xcode-select --install)"
-        echo -e "     and check your npm registry (npm config get registry)."
+        echo -e "  ${CROSS} node-pty still can't spawn. Try:"
+        echo -e "       chmod +x node_modules/node-pty/prebuilds/*/spawn-helper"
+        echo -e "     Don't run electron-rebuild on a download-blocked network — the"
+        echo -e "     prebuilt N-API binary is enough once spawn-helper is executable."
     fi
 fi
 echo ""
