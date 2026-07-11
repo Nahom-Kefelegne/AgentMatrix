@@ -143,6 +143,8 @@ export interface ServerToClientEvents {
   'session:start': (session: SessionData) => void;
   'session:end': (data: { sessionId: string }) => void;
   'session:update': (data: { sessionId: string; changes: Partial<SessionData> }) => void;
+  /** A file-mutating tool completed — the changes viewer should re-fetch. */
+  'session:files-changed': (data: { sessionId: string }) => void;
   'tool:start': (data: { sessionId: string; toolName: string; toolInput?: string }) => void;
   'tool:complete': (data: { sessionId: string; toolName: string; summary: string }) => void;
   'agent:start': (data: { sessionId: string; agent: AgentData }) => void;

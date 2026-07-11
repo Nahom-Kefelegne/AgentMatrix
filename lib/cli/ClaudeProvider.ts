@@ -339,6 +339,26 @@ export class ClaudeProvider implements CliProvider {
   }
 
   /**
+   * Claude stores each session transcript at projects/<project>/<id>.jsonl.
+   * The project dir isn't known from the id alone, so scan for the file.
+   * COST: O(N) project-dir scans; cheap existsSync per dir.
+   */
+  getTranscriptPath(sessionId: string): string | undefined {
+    if (!existsSync(CLAUDE_PROJECTS_DIR)) return undefined;
+    let dirs: string[];
+    try {
+      dirs = readdirSync(CLAUDE_PROJECTS_DIR);
+    } catch {
+      return undefined;
+    }
+    for (const dir of dirs) {
+      const candidate = join(CLAUDE_PROJECTS_DIR, dir, `${sessionId}.jsonl`);
+      if (existsSync(candidate)) return candidate;
+    }
+    return undefined;
+  }
+
+  /**
    * No-op at the disk level. Claude renames happen in-TUI via the `/rename`
    * command (injected into the PTY by the client); the name is recorded in the
    * transcript and picked up by the scanner. There's no separate metadata file

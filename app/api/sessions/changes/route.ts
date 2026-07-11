@@ -1,16 +1,23 @@
-// File changes tracking — git diff integration for session file modifications
+// File-changes tracking — native, transcript-based diffs for a session.
+//
+// Instead of `git diff HEAD` over a hook-collected file list, this reads the
+// session's own CLI transcript (Copilot events.jsonl / Claude <id>.jsonl), the
+// authoritative record of the agent's edits, and reconstructs per-session diffs
+// from it — git-free and correctly isolated to this session's work.
+// See docs/design/native-diff-tracking.md.
 import { NextResponse } from 'next/server';
 import { getSession, updateSession } from '@/lib/state/sessionStore';
-import { execSync } from 'child_process';
-import { readFileSync, existsSync } from 'fs';
-import { dirname } from 'path';
+import { getProvider } from '@/lib/cli';
+import type { CliType } from '@/lib/types';
+import { getSessionFileChanges, getSessionFileDiff } from '@/lib/cli/transcript';
+import { writeFileSync, unlinkSync, existsSync, readFileSync } from 'fs';
 
 /**
  * GET /api/sessions/changes?sessionId=<id>
- * Returns list of files modified by the session with their diffs.
+ *   -> { sessionId, sessionName, files: [{ path, status, additions, deletions }], totalFiles }
  *
  * GET /api/sessions/changes?sessionId=<id>&file=<path>
- * Returns diff for a specific file (original vs current).
+ *   -> { file, original, current, isNew }
  */
 export async function GET(request: Request) {
   try {
@@ -27,90 +34,46 @@ export async function GET(request: Request) {
       return NextResponse.json({ error: 'Session not found' }, { status: 404 });
     }
 
-    const files = session.filesModified || [];
+    const cliType: CliType = session.cliType || 'claude';
+    const transcriptPath = getProvider(cliType).getTranscriptPath(sessionId);
 
-    // Single file diff
+    // Single-file diff.
     if (filePath) {
-      if (!existsSync(filePath)) {
-        return NextResponse.json({ error: 'File not found' }, { status: 404 });
+      const diff = transcriptPath
+        ? getSessionFileDiff(transcriptPath, cliType, filePath)
+        : null;
+      if (!diff) {
+        // Fall back to current on-disk content with an empty baseline so the
+        // viewer still renders something for files we can't reconstruct.
+        const current = existsSync(filePath) ? safeRead(filePath) : '';
+        return NextResponse.json({ file: filePath, original: '', current, isNew: current !== '' });
       }
-
-      const current = readFileSync(filePath, 'utf-8');
-      let original = '';
-
-      // Get the git HEAD version of the file
-      try {
-        const dir = dirname(filePath);
-        // Find repo root
-        const repoRoot = execSync('git rev-parse --show-toplevel', { cwd: dir, encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'] }).trim();
-        const relativePath = filePath.replace(repoRoot + '/', '').replace(repoRoot + '\\', '');
-        original = execSync(`git show HEAD:${relativePath}`, { cwd: repoRoot, encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'] });
-      } catch {
-        // File might be new (not in git) — original is empty
-        original = '';
-      }
-
-      return NextResponse.json({
-        file: filePath,
-        original,
-        current,
-        isNew: original === '',
-      });
+      return NextResponse.json(diff);
     }
 
-    // List all modified files with summary
-    const fileChanges = files.map(f => {
-      const exists = existsSync(f);
-      let status = 'modified';
-      let additions = 0;
-      let deletions = 0;
-
-      if (exists) {
-        try {
-          const dir = dirname(f);
-          const repoRoot = execSync('git rev-parse --show-toplevel', { cwd: dir, encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'] }).trim();
-          const relativePath = f.replace(repoRoot + '/', '').replace(repoRoot + '\\', '');
-          const diff = execSync(`git diff HEAD -- "${relativePath}"`, { cwd: repoRoot, encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'] });
-          if (!diff) {
-            // No diff means file matches HEAD — might have been reverted
-            status = 'unchanged';
-          } else {
-            additions = (diff.match(/^\+[^+]/gm) || []).length;
-            deletions = (diff.match(/^-[^-]/gm) || []).length;
-          }
-          // Check if file is new (not tracked)
-          try {
-            execSync(`git show HEAD:${relativePath}`, { cwd: repoRoot, stdio: 'pipe' });
-          } catch {
-            status = 'new';
-          }
-        } catch {
-          status = 'untracked';
-        }
-      } else {
-        status = 'deleted';
-      }
-
-      return { path: f, status, additions, deletions };
-    }).filter(f => f.status !== 'unchanged');
-
+    // Full change list.
+    const files = transcriptPath ? getSessionFileChanges(transcriptPath, cliType) : [];
     return NextResponse.json({
       sessionId,
       sessionName: session.name,
-      files: fileChanges,
-      totalFiles: fileChanges.length,
+      files,
+      totalFiles: files.length,
     });
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error('[sessions/changes]', error);
-    return NextResponse.json({ error: error.message }, { status: 500 });
+    const message = error instanceof Error ? error.message : 'Internal error';
+    return NextResponse.json({ error: message }, { status: 500 });
   }
 }
 
 /**
- * POST /api/sessions/changes — Revert changes
- * Body: { sessionId, action: 'revert-file', file } — revert single file to HEAD
- * Body: { sessionId, action: 'revert-all' } — revert all tracked files
- * Body: { sessionId, action: 'clear-tracking' } — just clear the tracking list
+ * POST /api/sessions/changes — revert changes to their pre-session state.
+ * Body: { sessionId, action: 'revert-file', file } — revert one file
+ * Body: { sessionId, action: 'revert-all' }        — revert every changed file
+ * Body: { sessionId, action: 'clear-tracking' }    — clear the tracked list
+ *
+ * Revert is native (git-free): a modified/deleted file is rewritten with its
+ * reconstructed baseline; a file the session created is removed.
  */
 export async function POST(request: Request) {
   try {
@@ -130,41 +93,56 @@ export async function POST(request: Request) {
       return NextResponse.json({ ok: true, message: 'Tracking cleared' });
     }
 
+    const cliType: CliType = session.cliType || 'claude';
+    const transcriptPath = getProvider(cliType).getTranscriptPath(sessionId);
+    if (!transcriptPath) {
+      return NextResponse.json({ error: 'No transcript for this session' }, { status: 404 });
+    }
+
     if (action === 'revert-file' && file) {
-      try {
-        const dir = dirname(file);
-        const repoRoot = execSync('git rev-parse --show-toplevel', { cwd: dir, encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'] }).trim();
-        const relativePath = file.replace(repoRoot + '/', '').replace(repoRoot + '\\', '');
-        execSync(`git checkout HEAD -- "${relativePath}"`, { cwd: repoRoot, stdio: ['pipe', 'pipe', 'pipe'] });
-        // Remove from tracking
-        const updated = (session.filesModified || []).filter((f: string) => f !== file);
-        updateSession(sessionId, { filesModified: updated });
-        return NextResponse.json({ ok: true, message: `Reverted ${relativePath}` });
-      } catch (err: any) {
-        return NextResponse.json({ error: `Revert failed: ${err.message}` }, { status: 500 });
-      }
+      const res = revertOne(transcriptPath, cliType, file);
+      return res.ok
+        ? NextResponse.json({ ok: true, message: res.message })
+        : NextResponse.json({ error: res.message }, { status: 500 });
     }
 
     if (action === 'revert-all') {
-      const files = session.filesModified || [];
+      const changes = getSessionFileChanges(transcriptPath, cliType);
       const results: string[] = [];
-      for (const f of files) {
-        try {
-          const dir = dirname(f);
-          const repoRoot = execSync('git rev-parse --show-toplevel', { cwd: dir, encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'] }).trim();
-          const relativePath = f.replace(repoRoot + '/', '').replace(repoRoot + '\\', '');
-          execSync(`git checkout HEAD -- "${relativePath}"`, { cwd: repoRoot, stdio: ['pipe', 'pipe', 'pipe'] });
-          results.push(`Reverted ${relativePath}`);
-        } catch {
-          results.push(`Failed to revert ${f}`);
-        }
+      for (const c of changes) {
+        results.push(revertOne(transcriptPath, cliType, c.path).message);
       }
-      updateSession(sessionId, { filesModified: [] });
       return NextResponse.json({ ok: true, results });
     }
 
     return NextResponse.json({ error: 'Unknown action' }, { status: 400 });
-  } catch (error: any) {
-    return NextResponse.json({ error: error.message }, { status: 500 });
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : 'Internal error';
+    return NextResponse.json({ error: message }, { status: 500 });
+  }
+}
+
+function safeRead(path: string): string {
+  try {
+    return readFileSync(path, 'utf-8');
+  } catch {
+    return '';
+  }
+}
+
+function revertOne(transcriptPath: string, cliType: CliType, file: string): { ok: boolean; message: string } {
+  const diff = getSessionFileDiff(transcriptPath, cliType, file);
+  if (!diff) return { ok: false, message: `No change record for ${file}` };
+  try {
+    if (diff.isNew) {
+      // The session created this file -> reverting removes it.
+      if (existsSync(file)) unlinkSync(file);
+      return { ok: true, message: `Removed ${file}` };
+    }
+    writeFileSync(file, diff.original);
+    return { ok: true, message: `Reverted ${file}` };
+  } catch (err: unknown) {
+    const m = err instanceof Error ? err.message : String(err);
+    return { ok: false, message: `Failed to revert ${file}: ${m}` };
   }
 }

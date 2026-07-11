@@ -227,6 +227,7 @@ export default function ChangesViewer({ sessionId, sessionName, cwd, onClose, so
   const [reverting, setReverting] = useState(false);
   const [diffMode, setDiffMode] = useState<'inline' | 'split'>('inline');
   const [loadingDiff, setLoadingDiff] = useState(false);
+  const [refreshTick, setRefreshTick] = useState(0);
 
   // === Browse mode state ===
   const [repoRoot, setRepoRoot] = useState<string | null>(null);
@@ -286,6 +287,20 @@ export default function ChangesViewer({ sessionId, sessionName, cwd, onClose, so
   useEffect(() => {
     loadFiles();
   }, [loadFiles]);
+
+  // Live refresh: re-fetch the change list + current diff whenever the agent
+  // finishes a file-mutating tool (emitted by the tool-complete hook).
+  useEffect(() => {
+    const socket = socketRef.current;
+    if (!socket) return;
+    const handler = (data: { sessionId: string }) => {
+      if (data.sessionId !== sessionId) return;
+      loadFiles();
+      setRefreshTick(t => t + 1);
+    };
+    socket.on('session:files-changed' as any, handler);
+    return () => { socket.off('session:files-changed' as any, handler); };
+  }, [socketRef, sessionId, loadFiles]);
 
   // === Load comments ===
   const loadComments = useCallback(() => {
@@ -381,7 +396,7 @@ export default function ChangesViewer({ sessionId, sessionName, cwd, onClose, so
       .then(r => r.json())
       .then(data => { setDiff(data); setLoadingDiff(false); })
       .catch(() => { setDiff(null); setLoadingDiff(false); });
-  }, [selectedFile, sessionId, viewMode]);
+  }, [selectedFile, sessionId, viewMode, refreshTick]);
 
   // === Load file content for browse mode ===
   useEffect(() => {

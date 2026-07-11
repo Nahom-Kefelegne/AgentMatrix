@@ -140,6 +140,15 @@ export interface CliProvider {
   findSessionCwd(sessionId: string): string | undefined;
 
   /**
+   * Absolute path to the session's on-disk transcript / event log, or undefined
+   * if it can't be located. This is the CLI's authoritative record of the
+   * agent's actions (used by the native change detector to derive per-session
+   * diffs). Copilot: `session-state/<id>/events.jsonl`. Claude:
+   * `projects/<project>/<id>.jsonl`.
+   */
+  getTranscriptPath(sessionId: string): string | undefined;
+
+  /**
    * Persist a new display name for a session at the CLI's own storage layer,
    * so the rename survives resume/discovery. Returns true if the provider
    * handled the rename on disk.

@@ -1,0 +1,159 @@
+import { readFileSync, existsSync } from 'fs';
+import { dirname } from 'path';
+import { execSync } from 'child_process';
+import type { CliType } from '../CliProvider';
+import type { FileOp, FileChange, FileDiff } from './types';
+import { parseCopilotTranscript } from './parseCopilot';
+import { parseClaudeTranscript } from './parseClaude';
+import { countLineDiff } from './diff';
+
+/**
+ * Native, transcript-based change detection. Reads a session's own on-disk
+ * transcript (the authoritative record of the agent's file edits) and derives
+ * per-session diffs — with NO dependency on git and correctly isolated to just
+ * this session's work. See docs/design/native-diff-tracking.md.
+ */
+
+function parseTranscript(transcriptPath: string, cliType: CliType): FileOp[] {
+  return cliType === 'copilot'
+    ? parseCopilotTranscript(transcriptPath)
+    : parseClaudeTranscript(transcriptPath);
+}
+
+/** Ops grouped by absolute path, preserving transcript order within each file. */
+function groupByPath(ops: FileOp[]): Map<string, FileOp[]> {
+  const map = new Map<string, FileOp[]>();
+  for (const op of ops) {
+    const list = map.get(op.path);
+    if (list) list.push(op);
+    else map.set(op.path, [op]);
+  }
+  return map;
+}
+
+/**
+ * Undo a single edit: turn the post-edit text back into the pre-edit text by
+ * replacing `newStr` with `oldStr`. Best-effort (mirrors the CLI's own
+ * first-occurrence replace semantics).
+ */
+function undoEdit(content: string, oldStr: string, newStr: string, replaceAll?: boolean): string {
+  if (newStr === '' || !content.includes(newStr)) return content;
+  if (replaceAll) return content.split(newStr).join(oldStr);
+  const idx = content.indexOf(newStr);
+  return content.slice(0, idx) + oldStr + content.slice(idx + newStr.length);
+}
+
+/**
+ * Reconstruct the file's pre-session content by reverse-applying the session's
+ * ops to the current on-disk content (newest → oldest).
+ *
+ * - Pure edit history (file existed before) → perfectly recovers the baseline.
+ * - Create-then-edits → collapses to '' at the create (the file was new).
+ * - A full overwrite of a pre-existing file is inherently lossy (the prior
+ *   content isn't in the transcript); callers fall back to git HEAD for that.
+ */
+function reverseApply(current: string, ops: FileOp[]): string {
+  let content = current;
+  for (let i = ops.length - 1; i >= 0; i--) {
+    const op = ops[i];
+    if (op.kind === 'edit') {
+      content = undoEdit(content, op.oldStr ?? '', op.newStr ?? '', op.replaceAll);
+    } else if (op.kind === 'create') {
+      content = ''; // before a create, the file did not exist (session's view)
+    }
+    // 'delete' is terminal and handled at the status level, not here.
+  }
+  return content;
+}
+
+/** Best-effort `git show HEAD:<path>` for the lossy-baseline fallback. Null on any failure. */
+function gitHead(filePath: string): string | null {
+  try {
+    const dir = dirname(filePath);
+    const root = execSync('git rev-parse --show-toplevel', {
+      cwd: dir, encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'],
+    }).trim();
+    const rel = filePath.replace(root + '/', '').replace(root + '\\', '');
+    return execSync(`git show HEAD:"${rel}"`, {
+      cwd: root, encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'],
+    });
+  } catch {
+    return null;
+  }
+}
+
+/** Resolve { original, current, isNew, status } for one file from its ops. */
+function resolveFile(path: string, ops: FileOp[]): {
+  original: string;
+  current: string;
+  isNew: boolean;
+  status: FileChange['status'];
+} {
+  const onDisk = existsSync(path);
+  const earliestIsCreate = ops[0]?.kind === 'create';
+  const lastIsDelete = ops[ops.length - 1]?.kind === 'delete';
+
+  // Deleted this session (or gone from disk): before = git HEAD or best-effort empty.
+  if (lastIsDelete || !onDisk) {
+    const original = gitHead(path) ?? '';
+    return { original, current: '', isNew: false, status: 'deleted' };
+  }
+
+  let current = '';
+  try {
+    current = readFileSync(path, 'utf-8');
+  } catch {
+    current = '';
+  }
+
+  if (earliestIsCreate) {
+    return { original: '', current, isNew: true, status: 'new' };
+  }
+
+  // Pre-existing file edited this session → reverse-apply to recover the baseline.
+  let original = reverseApply(current, ops);
+  // If reverse-apply couldn't change anything (edits didn't match, or a lossy
+  // full overwrite), prefer git HEAD when it's available.
+  if (original === current) {
+    original = gitHead(path) ?? original;
+  }
+  return { original, current, isNew: false, status: 'modified' };
+}
+
+/** List of changed files for a session (summary rows for the changes list). */
+export function getSessionFileChanges(transcriptPath: string, cliType: CliType): FileChange[] {
+  const ops = parseTranscript(transcriptPath, cliType);
+  if (ops.length === 0) return [];
+
+  const grouped = groupByPath(ops);
+  const changes: FileChange[] = [];
+  for (const [path, fileOps] of grouped) {
+    const { original, current, status } = resolveFile(path, fileOps);
+    if (status !== 'deleted' && original === current) continue; // net no-op (e.g. edited then reverted)
+    const { additions, deletions } = status === 'deleted'
+      ? { additions: 0, deletions: countLineDiff(original, '').deletions }
+      : countLineDiff(original, current);
+    changes.push({ path, status, additions, deletions });
+  }
+  return changes;
+}
+
+/** Before/after content for a single file (feeds Monaco's DiffEditor). */
+export function getSessionFileDiff(
+  transcriptPath: string,
+  cliType: CliType,
+  filePath: string,
+): FileDiff | null {
+  const ops = parseTranscript(transcriptPath, cliType);
+  const fileOps = ops.filter(o => o.path === filePath);
+  if (fileOps.length === 0) return null;
+
+  const { original, current, isNew } = resolveFile(filePath, fileOps);
+  return { file: filePath, original, current, isNew };
+}
+
+/** All absolute paths this session touched (successful file ops only). */
+export function getSessionTouchedPaths(transcriptPath: string, cliType: CliType): string[] {
+  const ops = parseTranscript(transcriptPath, cliType);
+  return [...new Set(ops.map(o => o.path))];
+}

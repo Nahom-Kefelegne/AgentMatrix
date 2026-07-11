@@ -70,9 +70,10 @@ export async function POST(request: Request) {
       return NextResponse.json({ ok: true });
     }
 
-    // Track files modified by Write/Edit tools
-    const fileModTools = ['Write', 'Edit'];
-    const filePath = payload.tool_input?.file_path as string | undefined;
+    // Track files modified by file-writing tools. Claude uses tool_input.file_path;
+    // Copilot uses tool_input.path (verified against live payloads). Accept both.
+    const fileModTools = ['Write', 'Edit', 'MultiEdit', 'create', 'edit'];
+    const filePath = (payload.tool_input?.file_path ?? payload.tool_input?.path) as string | undefined;
     let filesModified: string[] | undefined;
     if (fileModTools.includes(payload.tool_name) && filePath) {
       const existing = session?.filesModified || [];

@@ -404,6 +404,13 @@ export class CopilotProvider implements CliProvider {
     }
   }
 
+  /** Copilot stores each session's event log at session-state/<id>/events.jsonl. */
+  getTranscriptPath(sessionId: string): string | undefined {
+    if (!UUID_RE.test(sessionId)) return undefined;
+    const eventsFile = join(COPILOT_SESSION_STATE_DIR, sessionId, 'events.jsonl');
+    return existsSync(eventsFile) ? eventsFile : undefined;
+  }
+
   /**
    * Rename a Copilot session by writing `name`/`user_named: true` into its
    * workspace.yaml. Verified (CLI 1.0.67+): Copilot respects this on disk and
