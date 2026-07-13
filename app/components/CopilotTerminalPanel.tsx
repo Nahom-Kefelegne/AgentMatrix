@@ -11,14 +11,17 @@ import { TERMINAL_THEME } from '@/lib/terminalTheme';
 const PAGE_UP = '\x1b[5~';
 const PAGE_DOWN = '\x1b[6~';
 // Empirical pty probe against Copilot v1.0.70: PgUp/PgDn scroll the timeline by
-// one viewport page (~23 content lines at 30 rows). Shift/Ctrl/plain arrows and
-// SGR wheel mouse sequences did not provide line-level timeline scrolling, so
-// wheel input still has to be translated to pages. Keep the threshold lower than
-// the old one-notch-per-page mapping so trackpads don't feel inert, but clamp
-// per-event output so a fast flick cannot enqueue a long burst of page jumps.
-const WHEEL_PAGE_STEP_PX = 80;
-const WHEEL_LINE_DELTA_PX = 16;
-const MAX_WHEEL_PAGES_PER_EVENT = 1;
+// one viewport page (~23 content lines). There is NO finer-grained scroll —
+// Ctrl+E/U/B, plain/Alt/Ctrl arrows and SGR wheel sequences do not line-scroll
+// (Ctrl+Y only nudges ~2 lines the wrong way), so the wheel must be translated
+// to whole pages. Because page jumps are inherently coarse, the goal is to make
+// them PREDICTABLE rather than smooth: reset the accumulator on direction change
+// so reversing scroll responds immediately, and rate-limit page emits so
+// trackpad inertia / a fast flick can't blast through many pages at once. Those
+// two accumulator bugs were the source of the "scroll jumps around" feel.
+const WHEEL_PAGE_STEP_PX = 100; // accumulated wheel delta (px) needed per page
+const WHEEL_LINE_DELTA_PX = 16; // px-per-line when a device reports line deltas
+const WHEEL_FIRE_COOLDOWN_MS = 90; // min gap between page emits (~11 pages/s cap)
 
 // Shift+Enter → insert a newline in the prompt instead of submitting. xterm.js
 // doesn't implement modifyOtherKeys/kitty, so left alone it sends a bare CR for
@@ -203,31 +206,39 @@ export default function CopilotTerminalPanel({ sessionId, sessionName, cwd, visi
   useEffect(() => {
     const container = containerRef.current;
     if (!container || readOnly) return;
-    let accum = 0;
+    let accum = 0; // pending same-direction scroll magnitude (px)
+    let lastDir = 0; // +1 = down (PgDn), -1 = up (PgUp)
+    let lastFire = 0; // timestamp (ms) of the last page emit
     const onWheel = (e: WheelEvent) => {
       e.preventDefault();
       e.stopPropagation();
 
-      const deltaY =
+      const px =
         e.deltaMode === WheelEvent.DOM_DELTA_LINE ? e.deltaY * WHEEL_LINE_DELTA_PX :
         e.deltaMode === WheelEvent.DOM_DELTA_PAGE ? e.deltaY * WHEEL_PAGE_STEP_PX :
         e.deltaY;
-      accum += deltaY;
+      const dir = Math.sign(px);
+      if (dir === 0) return;
 
-      const direction = Math.sign(accum);
-      const pageCount = Math.min(
-        MAX_WHEEL_PAGES_PER_EVENT,
-        Math.floor(Math.abs(accum) / WHEEL_PAGE_STEP_PX),
-      );
-      if (direction !== 0 && pageCount > 0) {
-        for (let i = 0; i < pageCount; i += 1) {
-          writeInput(direction > 0 ? PAGE_DOWN : PAGE_UP);
-        }
-        accum -= direction * WHEEL_PAGE_STEP_PX * pageCount;
-        // Drop excessive residual from high-resolution flicks instead of
-        // replaying it as delayed page jumps on later tiny wheel events.
-        accum = Math.max(-WHEEL_PAGE_STEP_PX + 1, Math.min(WHEEL_PAGE_STEP_PX - 1, accum));
+      // Reversing direction starts fresh so the opposite scroll fires at once
+      // instead of first having to burn down leftover momentum in the old
+      // direction — the main cause of the laggy/jumpy reversal feel.
+      if (dir !== lastDir) {
+        accum = 0;
+        lastDir = dir;
       }
+      accum += Math.abs(px);
+      if (accum < WHEEL_PAGE_STEP_PX) return;
+
+      // Armed, but rate-limit emits so trackpad inertia / a fast flick can't
+      // blast many pages. Stay charged and wait; a later event past the
+      // cooldown fires the page.
+      const now = e.timeStamp || performance.now();
+      if (now - lastFire < WHEEL_FIRE_COOLDOWN_MS) return;
+
+      writeInput(dir > 0 ? PAGE_DOWN : PAGE_UP);
+      lastFire = now;
+      accum = 0; // consume fully — never bank residual into later inertia events
     };
     container.addEventListener('wheel', onWheel, { passive: false, capture: true });
     return () => container.removeEventListener('wheel', onWheel, { capture: true } as any);
