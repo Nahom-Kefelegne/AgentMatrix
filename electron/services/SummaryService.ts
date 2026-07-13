@@ -26,7 +26,7 @@ export async function requestSummary(
   const ptySession = ptyManager.getSession(sessionId);
   if (!ptySession || ptySession.status === 'closed') return [];
 
-  const result = await captureQuery(ptyManager, ptySession, SUMMARY_INSTRUCTION, opts);
+  const result = await captureQuery(ptyManager, ptySession, SUMMARY_INSTRUCTION, opts, { label: 'Summary' });
   const bullets = parseBullets(result.lines);
 
   if (bullets.length > 0) {

@@ -3,6 +3,13 @@ import { injectPrompt, type InjectionResult, type InjectOptions } from '../../..
 import { getProvider } from '../index';
 import { AcpClient } from './AcpClient';
 import type { CliType } from '../CliProvider';
+import { emitToClients } from '../../state/socketEmitter';
+
+/** Optional transparency descriptor: echo this query into the session console. */
+export interface CaptureActivity {
+  /** Short human label, e.g. "Summary", "Handoff", "Deep search". */
+  label: string;
+}
 
 /**
  * Run an out-of-band instruction against a session and capture its text output.
@@ -16,15 +23,36 @@ import type { CliType } from '../CliProvider';
  *
  * Returns the same `{ success, content, lines }` shape as PromptInjector so
  * callers (Summary/Handoff/Orchestrator) don't need to branch.
+ *
+ * When `activity` is given, emits `session:acp-activity` (running → done/failed)
+ * so the console can show the otherwise-invisible query + its response.
  */
 export async function captureQuery(
   ptyManager: PtyManager,
   ptySession: PtySession,
   instruction: string,
   opts: InjectOptions = {},
+  activity?: CaptureActivity,
 ): Promise<InjectionResult> {
   const empty: InjectionResult = { success: false, content: '', lines: [] };
   if (!ptySession || ptySession.status === 'closed') return empty;
+
+  const activityId = activity ? `${ptySession.id}-${Date.now()}` : '';
+  if (activity) {
+    emitToClients('session:acp-activity', {
+      sessionId: ptySession.id, id: activityId, label: activity.label,
+      prompt: instruction, status: 'running', ts: Date.now(),
+    });
+  }
+  const finish = (result: InjectionResult) => {
+    if (activity) {
+      emitToClients('session:acp-activity', {
+        sessionId: ptySession.id, id: activityId, label: activity.label,
+        response: result.content, status: result.success ? 'done' : 'failed', ts: Date.now(),
+      });
+    }
+    return result;
+  };
 
   const cliType: CliType = ptySession.cliType || 'claude';
   const provider = getProvider(cliType);
@@ -33,11 +61,11 @@ export async function captureQuery(
     const acpResult = await runViaAcp(ptyManager, ptySession, instruction, opts);
     // Fall through to the PTY injector if ACP couldn't produce output, so a
     // transient ACP failure never leaves the feature dead.
-    if (acpResult.success) return acpResult;
+    if (acpResult.success) return finish(acpResult);
     console.warn(`[acp] query failed for ${ptySession.id.slice(0, 8)}, falling back to PromptInjector`);
   }
 
-  return injectPrompt(ptySession, instruction, opts);
+  return finish(await injectPrompt(ptySession, instruction, opts));
 }
 
 async function runViaAcp(

@@ -145,6 +145,21 @@ export interface ServerToClientEvents {
   'session:update': (data: { sessionId: string; changes: Partial<SessionData> }) => void;
   /** A file-mutating tool completed — the changes viewer should re-fetch. */
   'session:files-changed': (data: { sessionId: string }) => void;
+  /**
+   * An out-of-band (ACP / injector) query the app ran against a session —
+   * summary generation, handoff, deep search. Echoed to the console so these
+   * otherwise-invisible interactions are transparent. Emitted twice per query:
+   * once `running` (with the prompt), once `done`/`failed` (with the response).
+   */
+  'session:acp-activity': (data: {
+    sessionId: string;
+    id: string;
+    label: string;
+    prompt?: string;
+    response?: string;
+    status: 'running' | 'done' | 'failed';
+    ts: number;
+  }) => void;
   'tool:start': (data: { sessionId: string; toolName: string; toolInput?: string }) => void;
   'tool:complete': (data: { sessionId: string; toolName: string; summary: string }) => void;
   'agent:start': (data: { sessionId: string; agent: AgentData }) => void;

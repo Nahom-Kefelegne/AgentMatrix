@@ -36,7 +36,7 @@ export async function generateHandoffSummary(
 
   // Capture the summary out-of-band (ACP for Copilot, PTY injector for Claude)
   // and persist it to the handoff file ourselves.
-  const result = await captureQuery(ptyManager, sourcePty, instruction, { timeoutMs: 90000 });
+  const result = await captureQuery(ptyManager, sourcePty, instruction, { timeoutMs: 90000 }, { label: 'Handoff' });
 
   // The Claude PTY-injector path may have written to the per-session output
   // file OR returned content; the ACP path returns content directly. In all
