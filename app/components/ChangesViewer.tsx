@@ -143,7 +143,7 @@ function FileTreeNode({ node, depth, selected, expanded, onSelect, onToggle, com
             background: 'transparent',
             userSelect: 'none',
           }}
-          onMouseEnter={e => e.currentTarget.style.background = '#1a1a2e'}
+          onMouseEnter={e => e.currentTarget.style.background = '#1e1e26'}
           onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
         >
           <span style={{ fontSize: 10, color: '#666', width: 12, textAlign: 'center', flexShrink: 0 }}>
@@ -177,7 +177,7 @@ function FileTreeNode({ node, depth, selected, expanded, onSelect, onToggle, com
         cursor: 'pointer',
         display: 'flex', alignItems: 'center', gap: 6,
         fontSize: 13, color: isSelected ? '#eee' : '#aaa',
-        background: isSelected ? '#1a1a2e' : 'transparent',
+        background: isSelected ? '#1e1e26' : 'transparent',
         userSelect: 'none',
       }}
       onMouseEnter={e => { if (!isSelected) e.currentTarget.style.background = '#14141e'; }}
@@ -267,7 +267,7 @@ export default function ChangesViewer({ sessionId, sessionName, cwd, onClose, so
   const searchInputRef = useRef<HTMLInputElement>(null);
 
   const statusColors: Record<string, string> = {
-    modified: '#ffd43b', new: '#51cf66', deleted: '#ff6b6b', untracked: '#cc5de8',
+    modified: '#f59e0b', new: '#51cf66', deleted: '#ff6b6b', untracked: '#a78bfa',
   };
 
   // === Mouse tracking ===
@@ -702,13 +702,13 @@ export default function ChangesViewer({ sessionId, sessionName, cwd, onClose, so
 
   const loadingSpinner = (
     <div style={{ height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', flexDirection: 'column', gap: 10 }}>
-      <div style={{ width: 24, height: 24, border: '3px solid #222', borderTopColor: '#4a9eff', borderRadius: '50%', animation: 'spin 1s linear infinite' }} />
+      <div style={{ width: 24, height: 24, border: '3px solid #222', borderTopColor: '#6366f1', borderRadius: '50%', animation: 'spin 1s linear infinite' }} />
       <span style={{ fontSize: 13, color: '#555' }}>Loading...</span>
     </div>
   );
 
   const editorLoading = (
-    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', color: '#888', fontSize: 14, background: '#0e0e1a' }}>
+    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', color: '#888', fontSize: 14, background: '#0f0f13' }}>
       Loading editor...
     </div>
   );
@@ -754,84 +754,101 @@ export default function ChangesViewer({ sessionId, sessionName, cwd, onClose, so
           from { opacity: 0; transform: scale(0.92) translateY(4px); }
           to { opacity: 1; transform: scale(1) translateY(0); }
         }
+        @keyframes cv-modal-in {
+          from { opacity: 0; transform: scale(0.98) translateY(6px); }
+          to { opacity: 1; transform: scale(1) translateY(0); }
+        }
+        /* Segmented toggle (Changes/Browse, Inline/Split) — matches app pill toggles */
+        .cv-seg {
+          padding: 5px 13px; font-size: 11px; font-weight: 600; border-radius: 6px;
+          border: none; background: transparent; color: #71717a; cursor: pointer;
+          font-family: inherit; transition: color 0.15s, background 0.15s;
+        }
+        .cv-seg:hover { color: #a1a1aa; }
+        .cv-seg--active { background: #6366f1; color: #fff; box-shadow: 0 1px 4px rgba(99,102,241,0.4); }
+        .cv-seg--active:hover { color: #fff; }
+        /* Outline button (Change Root, Clear Tracked, Cancel) */
+        .cv-btn-outline {
+          padding: 5px 12px; border-radius: 7px; border: 1px solid #33333c;
+          background: transparent; color: #a1a1aa; font-size: 12px; cursor: pointer;
+          font-family: inherit; transition: all 0.15s;
+        }
+        .cv-btn-outline:hover { border-color: #4a4a56; background: #1c1c22; color: #e4e4e7; }
+        /* Icon/close button */
+        .cv-icon-btn {
+          width: 30px; height: 30px; border-radius: 8px; border: 1px solid #2a2a30;
+          background: #1c1c22; color: #a1a1aa; font-size: 16px; line-height: 1;
+          display: flex; align-items: center; justify-content: center; cursor: pointer;
+          transition: all 0.15s;
+        }
+        .cv-icon-btn:hover { background: #26262e; color: #fafafa; border-color: #3a3a44; }
+        /* File row in the changes/browse sidebar */
+        .cv-row { transition: background 0.12s; }
+        .cv-row:hover { background: #17171d; }
       `}</style>
 
-      <div onClick={onClose} style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', zIndex: 200 }} />
+      <div onClick={onClose} style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', backdropFilter: 'blur(4px)', WebkitBackdropFilter: 'blur(4px)', zIndex: 200 }} />
       <div ref={modalRef} style={{
         position: 'fixed', top: '5%', left: '5%', right: '5%', bottom: '5%',
-        background: '#0c0c18', border: '1px solid #222235', borderRadius: 14,
+        background: '#131316', border: '1px solid #2a2a30', borderRadius: 16,
         zIndex: 201, display: 'flex', flexDirection: 'column', overflow: 'hidden',
-        boxShadow: '0 20px 60px rgba(0,0,0,0.5)',
+        boxShadow: '0 24px 80px rgba(0,0,0,0.55)',
+        animation: 'cv-modal-in 0.2s ease',
       }}>
         {/* Header */}
         <div style={{
-          padding: '12px 20px', borderBottom: '1px solid #1e1e30',
+          padding: '12px 20px', borderBottom: '1px solid #26262e',
           display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexShrink: 0,
         }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
             {/* Mode toggle */}
             <div style={{
-              display: 'flex', background: '#1a1a2a', border: '1px solid #2a2a3e',
-              borderRadius: 6, padding: 2,
+              display: 'flex', background: '#1c1c22', border: '1px solid #33333c',
+              borderRadius: 8, padding: 2, gap: 2,
             }}>
               {(['changes', 'browse'] as const).map(m => (
-                <button key={m} onClick={() => setViewMode(m)} style={{
-                  padding: '4px 12px', fontSize: 11, fontWeight: 600, borderRadius: 4,
-                  border: 'none',
-                  background: viewMode === m ? '#4a9eff' : 'transparent',
-                  color: viewMode === m ? '#fff' : '#666',
-                  cursor: 'pointer', fontFamily: 'inherit',
-                }}>{m === 'changes' ? 'Changes' : 'Browse'}</button>
+                <button key={m} onClick={() => setViewMode(m)}
+                  className={`cv-seg ${viewMode === m ? 'cv-seg--active' : ''}`}>
+                  {m === 'changes' ? 'Changes' : 'Browse'}
+                </button>
               ))}
             </div>
-            <span style={{ fontSize: 15, fontWeight: 700, color: '#eee' }}>
+            <span style={{ fontSize: 15, fontWeight: 700, color: '#fafafa' }}>
               {viewMode === 'changes' ? sessionName : (repoRoot?.split('/').pop() || 'Project')}
             </span>
             {viewMode === 'changes' && files.length > 0 && (
-              <span style={{ fontSize: 12, color: '#666', fontWeight: 400 }}>({files.length} files)</span>
+              <span style={{ fontSize: 12, color: '#71717a', fontWeight: 400 }}>({files.length} files)</span>
             )}
             {viewMode === 'browse' && allFiles.length > 0 && (
-              <span style={{ fontSize: 12, color: '#666', fontWeight: 400 }}>({allFiles.length} files)</span>
+              <span style={{ fontSize: 12, color: '#71717a', fontWeight: 400 }}>({allFiles.length} files)</span>
             )}
           </div>
 
           <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
             {viewMode === 'changes' && (
-              <div style={{ display: 'flex', background: '#1a1a2a', border: '1px solid #2a2a3e', borderRadius: 6, padding: 2 }}>
+              <div style={{ display: 'flex', background: '#1c1c22', border: '1px solid #33333c', borderRadius: 8, padding: 2, gap: 2 }}>
                 {(['inline', 'split'] as const).map(mode => (
-                  <button key={mode} onClick={() => setDiffMode(mode)} style={{
-                    padding: '4px 10px', fontSize: 11, fontWeight: 600, borderRadius: 4, border: 'none',
-                    background: diffMode === mode ? '#4a9eff' : 'transparent',
-                    color: diffMode === mode ? '#fff' : '#666',
-                    cursor: 'pointer', fontFamily: 'inherit',
-                  }}>{mode === 'inline' ? 'Inline' : 'Split'}</button>
+                  <button key={mode} onClick={() => setDiffMode(mode)}
+                    className={`cv-seg ${diffMode === mode ? 'cv-seg--active' : ''}`}>
+                    {mode === 'inline' ? 'Inline' : 'Split'}
+                  </button>
                 ))}
               </div>
             )}
             {viewMode === 'browse' && (
-              <button onClick={() => { setShowPathPicker(!showPathPicker); setPickedPath(''); }} style={{
-                padding: '5px 12px', borderRadius: 6, border: '1px solid #3a3a4e',
-                background: 'transparent', color: '#888', fontSize: 12, cursor: 'pointer', fontFamily: 'inherit',
-              }}>Change Root</button>
+              <button onClick={() => { setShowPathPicker(!showPathPicker); setPickedPath(''); }} className="cv-btn-outline">Change Root</button>
             )}
             {viewMode === 'changes' && files.length > 0 && (
-              <button onClick={handleClearTracking} style={{
-                padding: '5px 12px', borderRadius: 6, border: '1px solid #3a3a4e',
-                background: 'transparent', color: '#888', fontSize: 12, cursor: 'pointer', fontFamily: 'inherit',
-              }}>Clear Tracked</button>
+              <button onClick={handleClearTracking} className="cv-btn-outline">Clear Tracked</button>
             )}
-            <button onClick={onClose} style={{
-              width: 28, height: 28, borderRadius: 6, border: '1px solid #2a2a3e',
-              background: '#1a1a2a', color: '#888', fontSize: 14,
-              display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer',
-            }}>x</button>
+            <button onClick={onClose} className="cv-icon-btn" title="Close">&times;</button>
           </div>
         </div>
 
         {/* Path picker dropdown */}
         {showPathPicker && (
           <div style={{
-            padding: '8px 20px', borderBottom: '1px solid #1e1e30', background: '#0a0a16',
+            padding: '8px 20px', borderBottom: '1px solid #26262e', background: '#0f0f13',
             display: 'flex', gap: 8, alignItems: 'center',
           }}>
             <span style={{ fontSize: 12, color: '#888', whiteSpace: 'nowrap' }}>Root:</span>
@@ -843,10 +860,10 @@ export default function ChangesViewer({ sessionId, sessionName, cwd, onClose, so
               setShowPathPicker(false);
             }} style={{
               padding: '5px 14px', borderRadius: 6, border: 'none',
-              background: '#4a9eff', color: '#fff', fontSize: 12, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit',
+              background: '#6366f1', color: '#fff', fontSize: 12, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit',
             }}>Set</button>
             <button onClick={() => { setShowPathPicker(false); setPickedPath(''); }} style={{
-              padding: '5px 10px', borderRadius: 6, border: '1px solid #3a3a4e',
+              padding: '5px 10px', borderRadius: 6, border: '1px solid #3a3a44',
               background: 'transparent', color: '#888', fontSize: 12, cursor: 'pointer', fontFamily: 'inherit',
             }}>Cancel</button>
           </div>
@@ -854,10 +871,10 @@ export default function ChangesViewer({ sessionId, sessionName, cwd, onClose, so
 
         <div style={{ flex: 1, display: 'flex', minHeight: 0 }}>
           {/* ==================== SIDEBAR ==================== */}
-          <div style={{ width: 280, borderRight: '1px solid #1e1e30', display: 'flex', flexDirection: 'column', flexShrink: 0 }}>
+          <div style={{ width: 280, borderRight: '1px solid #26262e', display: 'flex', flexDirection: 'column', flexShrink: 0 }}>
             {/* Browse: search bar + current root */}
             {viewMode === 'browse' && (
-              <div style={{ borderBottom: '1px solid #1a1a28', flexShrink: 0 }}>
+              <div style={{ borderBottom: '1px solid #24242c', flexShrink: 0 }}>
                 <div style={{ padding: '8px 10px 4px' }}>
                   <input
                     ref={searchInputRef}
@@ -866,7 +883,7 @@ export default function ChangesViewer({ sessionId, sessionName, cwd, onClose, so
                     placeholder="Search files..."
                     style={{
                       width: '100%', padding: '6px 10px', borderRadius: 6,
-                      border: '1px solid #2a2a3e', background: '#12121e',
+                      border: '1px solid #33333c', background: '#1a1a20',
                       color: '#eee', fontSize: 13, fontFamily: 'inherit', outline: 'none',
                     }}
                   />
@@ -889,7 +906,7 @@ export default function ChangesViewer({ sessionId, sessionName, cwd, onClose, so
                 // Changes file list
                 loading ? (
                   <div style={{ padding: 30, display: 'flex', alignItems: 'center', justifyContent: 'center', flexDirection: 'column', gap: 8 }}>
-                    <div style={{ width: 20, height: 20, border: '2px solid #222', borderTopColor: '#4a9eff', borderRadius: '50%', animation: 'spin 1s linear infinite' }} />
+                    <div style={{ width: 20, height: 20, border: '2px solid #222', borderTopColor: '#6366f1', borderRadius: '50%', animation: 'spin 1s linear infinite' }} />
                     <span style={{ fontSize: 12, color: '#555' }}>Loading files...</span>
                   </div>
                 ) : files.length === 0 ? (
@@ -901,23 +918,30 @@ export default function ChangesViewer({ sessionId, sessionName, cwd, onClose, so
                     const isSelected = selectedFile === f.path;
                     const commentCount = comments.filter(c => c.filePath === f.path).length;
                     return (
-                      <div key={f.path} onClick={() => setSelectedFile(f.path)} style={{
+                      <div key={f.path} onClick={() => setSelectedFile(f.path)}
+                        className={isSelected ? '' : 'cv-row'}
+                        style={{
                         padding: '10px 14px', cursor: 'pointer',
-                        background: isSelected ? '#1a1a2e' : 'transparent',
-                        borderBottom: '1px solid #1a1a28',
-                        borderLeft: `3px solid ${statusColors[f.status] || '#888'}`,
+                        background: isSelected ? '#1e1e26' : 'transparent',
+                        borderBottom: '1px solid #24242c',
+                        borderLeft: `3px solid ${isSelected ? (statusColors[f.status] || '#888') : 'transparent'}`,
                       }}>
                         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                          <div style={{ fontSize: 13, fontWeight: 600, color: isSelected ? '#eee' : '#ccc' }}>{name}</div>
+                          <div style={{ fontSize: 13, fontWeight: 600, color: isSelected ? '#fafafa' : '#c8c8d0' }}>{name}</div>
                           {commentCount > 0 && (
                             <span style={{ fontSize: 10, padding: '1px 6px', borderRadius: 8, background: '#fbbf2420', color: '#fbbf24', fontWeight: 700 }}>{commentCount}</span>
                           )}
                         </div>
-                        <div style={{ fontSize: 11, color: '#999', fontFamily: "'Courier New', monospace", marginTop: 2 }}>{dir}</div>
-                        <div style={{ display: 'flex', gap: 8, marginTop: 4, fontSize: 11, alignItems: 'center' }}>
-                          <span style={{ color: statusColors[f.status] || '#888', fontWeight: 700 }}>{f.status}</span>
-                          {f.additions > 0 && <span style={{ color: '#51cf66' }}>+{f.additions}</span>}
-                          {f.deletions > 0 && <span style={{ color: '#ff6b6b' }}>-{f.deletions}</span>}
+                        <div style={{ fontSize: 11, color: '#71717a', fontFamily: "'Courier New', monospace", marginTop: 2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{dir}</div>
+                        <div style={{ display: 'flex', gap: 8, marginTop: 5, fontSize: 11, alignItems: 'center' }}>
+                          <span style={{
+                            color: statusColors[f.status] || '#888', fontWeight: 700,
+                            fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.03em',
+                            padding: '1px 7px', borderRadius: 5,
+                            background: `${statusColors[f.status] || '#888'}1a`,
+                          }}>{f.status}</span>
+                          {f.additions > 0 && <span style={{ color: '#51cf66', fontWeight: 600 }}>+{f.additions}</span>}
+                          {f.deletions > 0 && <span style={{ color: '#ff6b6b', fontWeight: 600 }}>-{f.deletions}</span>}
                         </div>
                       </div>
                     );
@@ -927,7 +951,7 @@ export default function ChangesViewer({ sessionId, sessionName, cwd, onClose, so
                 // Browse: tree or search results
                 loadingBrowse && allFiles.length === 0 ? (
                   <div style={{ padding: 30, display: 'flex', alignItems: 'center', justifyContent: 'center', flexDirection: 'column', gap: 8 }}>
-                    <div style={{ width: 20, height: 20, border: '2px solid #222', borderTopColor: '#4a9eff', borderRadius: '50%', animation: 'spin 1s linear infinite' }} />
+                    <div style={{ width: 20, height: 20, border: '2px solid #222', borderTopColor: '#6366f1', borderRadius: '50%', animation: 'spin 1s linear infinite' }} />
                     <span style={{ fontSize: 12, color: '#555' }}>Indexing files...</span>
                   </div>
                 ) : isSearching ? (
@@ -943,8 +967,8 @@ export default function ChangesViewer({ sessionId, sessionName, cwd, onClose, so
                       return (
                         <div key={f} onClick={() => setBrowseFile(f)} style={{
                           padding: '5px 14px', cursor: 'pointer',
-                          background: isSelected ? '#1a1a2e' : 'transparent',
-                          borderBottom: '1px solid #1a1a28',
+                          background: isSelected ? '#1e1e26' : 'transparent',
+                          borderBottom: '1px solid #24242c',
                         }}>
                           <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                             <FileIcon name={name} />
@@ -1028,7 +1052,7 @@ export default function ChangesViewer({ sessionId, sessionName, cwd, onClose, so
             {currentFile && (viewMode === 'changes' ? diff : browseContent !== null) && (
               <div style={{
                 height: fileComments.length > 0 ? 120 : 36,
-                borderTop: '1px solid #1e1e30', background: '#0a0a16',
+                borderTop: '1px solid #26262e', background: '#0f0f13',
                 display: 'flex', flexDirection: 'column', flexShrink: 0,
                 transition: 'height 0.2s ease',
               }}>
@@ -1052,7 +1076,7 @@ export default function ChangesViewer({ sessionId, sessionName, cwd, onClose, so
                         padding: '2px 6px', borderRadius: 4, border: '1px solid #ff6b6b30',
                         background: 'transparent', color: '#ff6b6b', fontSize: 10, cursor: 'pointer',
                         fontFamily: 'inherit', fontWeight: 600,
-                      }}>x</button>
+                      }}>&times;</button>
                     </div>
                   ))}
                 </div>
@@ -1063,7 +1087,7 @@ export default function ChangesViewer({ sessionId, sessionName, cwd, onClose, so
 
         {/* Footer */}
         <div style={{
-          padding: '10px 16px', borderTop: '1px solid #1e1e30',
+          padding: '10px 16px', borderTop: '1px solid #26262e',
           display: 'flex', gap: 8, alignItems: 'center', flexShrink: 0,
         }}>
           {viewMode === 'changes' && files.length > 0 && (
@@ -1127,7 +1151,7 @@ export default function ChangesViewer({ sessionId, sessionName, cwd, onClose, so
           <div onClick={dismissPopover} style={{ position: 'fixed', inset: 0, zIndex: 300 }} />
           <div onClick={e => e.stopPropagation()} style={{
             position: 'fixed', left: popover.x, top: popover.y, zIndex: 301, width: 340,
-            background: 'rgba(12, 12, 24, 0.82)', backdropFilter: 'blur(24px)', WebkitBackdropFilter: 'blur(24px)',
+            background: 'rgba(19, 19, 22, 0.85)', backdropFilter: 'blur(24px)', WebkitBackdropFilter: 'blur(24px)',
             border: '1px solid rgba(255, 255, 255, 0.1)', borderRadius: 12,
             boxShadow: '0 16px 48px rgba(0, 0, 0, 0.5), 0 0 0 1px rgba(255, 255, 255, 0.04) inset',
             animation: 'glass-in 0.15s ease', overflow: 'hidden',
@@ -1147,7 +1171,7 @@ export default function ChangesViewer({ sessionId, sessionName, cwd, onClose, so
               }}
                 onMouseEnter={e => { e.currentTarget.style.background = 'rgba(255,255,255,0.1)'; e.currentTarget.style.color = '#ccc'; }}
                 onMouseLeave={e => { e.currentTarget.style.background = 'rgba(255,255,255,0.04)'; e.currentTarget.style.color = '#888'; }}
-              >x</button>
+              >&times;</button>
             </div>
 
             {popover.mode === 'view' && popover.comment && (
