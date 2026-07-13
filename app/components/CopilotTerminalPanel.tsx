@@ -19,9 +19,9 @@ const PAGE_DOWN = '\x1b[6~';
 // so reversing scroll responds immediately, and rate-limit page emits so
 // trackpad inertia / a fast flick can't blast through many pages at once. Those
 // two accumulator bugs were the source of the "scroll jumps around" feel.
-const WHEEL_PAGE_STEP_PX = 100; // accumulated wheel delta (px) needed per page
+const WHEEL_PAGE_STEP_PX = 130; // accumulated wheel delta (px) needed per page
 const WHEEL_LINE_DELTA_PX = 16; // px-per-line when a device reports line deltas
-const WHEEL_FIRE_COOLDOWN_MS = 90; // min gap between page emits (~11 pages/s cap)
+const WHEEL_FIRE_COOLDOWN_MS = 170; // min gap between page emits (~6 pages/s cap)
 
 // Shift+Enter → insert a newline in the prompt instead of submitting. xterm.js
 // doesn't implement modifyOtherKeys/kitty, so left alone it sends a bare CR for
