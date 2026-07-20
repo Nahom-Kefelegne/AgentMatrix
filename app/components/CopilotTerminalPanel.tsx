@@ -5,23 +5,51 @@ import { useSocketContext } from './SocketProvider';
 import { useXterm } from '@/lib/hooks/useXterm';
 import { TERMINAL_THEME } from '@/lib/terminalTheme';
 
-// Copilot scrolls its own timeline with PageUp/PageDown and enables no mouse
-// tracking, so the wheel is inert by default. Translate wheel deltas into
-// paging keys for natural scrolling.
+// Copilot's timeline scrolling has two regimes, depending on the Copilot version:
+//
+//   • Copilot 1.0.70+ enables SGR mouse tracking (DECSET 1000/1002/1003 + 1006)
+//     inside its alt-screen TUI and scrolls its timeline LINE-BY-LINE under the
+//     mouse wheel itself. This is why a normal terminal (e.g. Windows Terminal)
+//     scrolls Copilot smoothly line-by-line. When mouse tracking is on we must
+//     let xterm forward the wheel as native mouse events and NOT intercept it.
+//     (Verified: 1.0.72 explicitly disables mouse tracking on teardown.)
+//
+//   • Older builds (≤1.0.69, verified by pty probe) enable NO mouse tracking, so
+//     the wheel is inert. The ONLY timeline scroll primitive is PgUp/PgDn, one
+//     viewport page (~23 lines) each — there is no finer-grained scroll (arrows,
+//     Ctrl+E/U/B, SGR wheel all do nothing; Ctrl+O jumps to the latest output).
+//     For these we translate the wheel into PgUp/PgDn pages.
+//
+// So the wheel handler is adaptive: pass through when mouse tracking is on, and
+// fall back to page translation when it's off.
 const PAGE_UP = '\x1b[5~';
 const PAGE_DOWN = '\x1b[6~';
-// Empirical pty probe against Copilot v1.0.70: PgUp/PgDn scroll the timeline by
-// one viewport page (~23 content lines). There is NO finer-grained scroll —
-// Ctrl+E/U/B, plain/Alt/Ctrl arrows and SGR wheel sequences do not line-scroll
-// (Ctrl+Y only nudges ~2 lines the wrong way), so the wheel must be translated
-// to whole pages. Because page jumps are inherently coarse, the goal is to make
-// them PREDICTABLE rather than smooth: reset the accumulator on direction change
-// so reversing scroll responds immediately, and rate-limit page emits so
-// trackpad inertia / a fast flick can't blast through many pages at once. Those
-// two accumulator bugs were the source of the "scroll jumps around" feel.
+// Mouse-tracking DECSET modes that make Copilot handle the wheel itself. 1006
+// (SGR encoding) rides alongside these but isn't a tracking mode on its own.
+const MOUSE_TRACKING_MODES = new Set(['1000', '1002', '1003']);
+// Page-translation tuning for the mouse-tracking-off fallback. Because page
+// jumps are inherently coarse, the goal is PREDICTABLE rather than smooth:
+// reset the accumulator on direction change so reversing responds immediately,
+// and rate-limit emits so trackpad inertia / a fast flick can't blast pages.
 const WHEEL_PAGE_STEP_PX = 130; // accumulated wheel delta (px) needed per page
 const WHEEL_LINE_DELTA_PX = 16; // px-per-line when a device reports line deltas
 const WHEEL_FIRE_COOLDOWN_MS = 170; // min gap between page emits (~6 pages/s cap)
+
+// Scan a raw PTY chunk for mouse-tracking DECSET (…h) / DECRST (…l) toggles and
+// return the resulting state, or null if the chunk toggles none. Copilot may
+// group modes (e.g. CSI ? 1002 ; 1006 h), so split each parameter list.
+function scanMouseTracking(chunk: string): boolean | null {
+  let state: boolean | null = null;
+  const re = /\x1b\[\?([0-9;]+)([hl])/g;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(chunk)) !== null) {
+    const enable = m[2] === 'h';
+    for (const p of m[1].split(';')) {
+      if (MOUSE_TRACKING_MODES.has(p)) state = enable;
+    }
+  }
+  return state;
+}
 
 // Shift+Enter → insert a newline in the prompt instead of submitting. xterm.js
 // doesn't implement modifyOtherKeys/kitty, so left alone it sends a bare CR for
@@ -61,6 +89,12 @@ export default function CopilotTerminalPanel({ sessionId, sessionName, cwd, visi
   const statusRef = useRef(status);
   statusRef.current = status;
   const [initializing, setInitializing] = useState(false);
+
+  // Whether Copilot currently has SGR mouse tracking enabled (1.0.70+). When
+  // true, the wheel is left to xterm to forward as native mouse events; when
+  // false we translate the wheel to PgUp/PgDn pages. Updated live by scanning
+  // the PTY stream for mouse-tracking DECSET/DECRST toggles.
+  const mouseTrackingRef = useRef(false);
 
   // Out-of-band (ACP) query activity echoed into the console for transparency.
   const [acpLog, setAcpLog] = useState<AcpActivity[]>([]);
@@ -184,6 +218,10 @@ export default function CopilotTerminalPanel({ sessionId, sessionName, cwd, visi
 
     const handleData = (msg: { sessionId: string; data: string }) => {
       if (msg.sessionId !== sessionId) return;
+      // Track Copilot's mouse-tracking state so the wheel handler can pass
+      // through (native line scroll) vs. translate to pages.
+      const ms = scanMouseTracking(msg.data);
+      if (ms !== null) mouseTrackingRef.current = ms;
       write(msg.data);
       if (statusRef.current !== 'connected') setStatus('connected');
     };
@@ -201,8 +239,13 @@ export default function CopilotTerminalPanel({ sessionId, sessionName, cwd, visi
     };
   }, [sessionId, socketRef, write]);
 
-  // Mouse-wheel → PgUp/PgDn. Capture phase + preventDefault overrides xterm's
-  // default alt-buffer arrow-key translation.
+  // Mouse-wheel handling. When Copilot has mouse tracking on (1.0.70+), let the
+  // event fall through to xterm, which forwards it as native SGR mouse events so
+  // Copilot scrolls its timeline line-by-line (matching a normal terminal). When
+  // it's off (≤1.0.69, or before the TUI arms), intercept in the capture phase
+  // and translate to PgUp/PgDn pages — the only scroll primitive those builds
+  // expose. Capture + preventDefault is required for the fallback to override
+  // xterm's default alt-buffer wheel→arrow-key translation.
   useEffect(() => {
     const container = containerRef.current;
     if (!container || readOnly) return;
@@ -210,6 +253,10 @@ export default function CopilotTerminalPanel({ sessionId, sessionName, cwd, visi
     let lastDir = 0; // +1 = down (PgDn), -1 = up (PgUp)
     let lastFire = 0; // timestamp (ms) of the last page emit
     const onWheel = (e: WheelEvent) => {
+      // Native path: Copilot owns the wheel. Don't touch the event — xterm's
+      // own handler will encode it as an SGR mouse report and send it to the PTY.
+      if (mouseTrackingRef.current) return;
+
       e.preventDefault();
       e.stopPropagation();
 
