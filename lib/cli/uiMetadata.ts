@@ -46,13 +46,33 @@ export const CLAUDE_PERMISSION_MODES: PermissionMode[] = [
 
 // ── Copilot ───────────────────────────────────────────────────────
 
+// Mirrors Copilot CLI's own /model picker (captured from the live 1.0.72 TUI).
+// IMPORTANT: Copilot's --model flag expects DOTTED ids (e.g. `gpt-5.4`,
+// `claude-sonnet-4.5`) — the previous dashed ids (`gpt-5`, `claude-sonnet-4-5`)
+// were rejected by the CLI as "not available". All ids below were verified
+// accepted by `copilot --model <id>`.
 export const COPILOT_MODELS: ModelOption[] = [
   { value: '', label: 'Default' },
-  { value: 'claude-sonnet-4-5', label: 'Claude Sonnet 4.5' },
-  { value: 'gpt-5', label: 'GPT-5' },
-  { value: 'claude-opus-4-6', label: 'Claude Opus 4.6' },
-  { value: 'claude-sonnet-4-6', label: 'Claude Sonnet 4.6' },
-  { value: 'gemini-3-pro', label: 'Gemini 3 Pro' },
+  { value: 'auto', label: 'Auto' },
+  { value: 'claude-sonnet-5', label: 'Claude Sonnet 5' },
+  { value: 'claude-sonnet-4.6', label: 'Claude Sonnet 4.6' },
+  { value: 'claude-sonnet-4.5', label: 'Claude Sonnet 4.5' },
+  { value: 'claude-haiku-4.5', label: 'Claude Haiku 4.5' },
+  { value: 'claude-opus-4.8', label: 'Claude Opus 4.8' },
+  { value: 'claude-opus-4.7', label: 'Claude Opus 4.7' },
+  { value: 'claude-opus-4.6', label: 'Claude Opus 4.6' },
+  { value: 'claude-opus-4.5', label: 'Claude Opus 4.5' },
+  { value: 'gpt-5.6-sol', label: 'GPT-5.6 Sol' },
+  { value: 'gpt-5.6-terra', label: 'GPT-5.6 Terra' },
+  { value: 'gpt-5.6-luna', label: 'GPT-5.6 Luna' },
+  { value: 'gpt-5.5', label: 'GPT-5.5' },
+  { value: 'gpt-5.4', label: 'GPT-5.4' },
+  { value: 'gpt-5.3-codex', label: 'GPT-5.3-Codex' },
+  { value: 'gpt-5.4-mini', label: 'GPT-5.4 mini' },
+  { value: 'gpt-5-mini', label: 'GPT-5 mini' },
+  { value: 'gemini-3.1-pro-preview', label: 'Gemini 3.1 Pro (Preview)' },
+  { value: 'gemini-3.5-flash', label: 'Gemini 3.5 Flash' },
+  { value: 'mai-code-1-flash-picker', label: 'MAI-Code-1-Flash' },
 ];
 
 export const COPILOT_PERMISSION_MODES: PermissionMode[] = [
