@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import type { CharacterData } from '@/lib/types';
 import { STATUS_COLORS } from '@/lib/constants';
+import { cachedGetJson, invalidateCache } from '@/lib/clientCache';
 
 function formatTimeAgo(timestamp?: number): string {
   if (!timestamp) return '';
@@ -245,12 +246,10 @@ function McpSection() {
 
   const loadData = useCallback(async () => {
     try {
-      const [mcpRes, regRes] = await Promise.all([
-        fetch('/api/sessions/mcp'),
-        fetch('/api/sessions/mcp/registry'),
+      const [mcpData, regData] = await Promise.all([
+        cachedGetJson<{ servers?: Record<string, unknown> }>('/api/sessions/mcp'),
+        cachedGetJson<{ servers?: McpRegistryItem[] }>('/api/sessions/mcp/registry'),
       ]);
-      const mcpData = await mcpRes.json();
-      const regData = await regRes.json();
       setInstalled(mcpData.servers || {});
       setRegistry(regData.servers || []);
     } catch {}
@@ -275,6 +274,7 @@ function McpSection() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ servers: updated }),
       });
+      invalidateCache('/api/sessions/mcp');
       setInstalled(updated);
     } catch {}
     setInstalling(null);
@@ -289,6 +289,7 @@ function McpSection() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ servers: updated }),
       });
+      invalidateCache('/api/sessions/mcp');
       setInstalled(updated);
     } catch {}
   };

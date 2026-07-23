@@ -10,6 +10,7 @@ import { useSocketContext } from './SocketProvider';
 import { useSessionContext } from '@/lib/hooks/useSessionContext';
 import ChangesViewer from './ChangesViewer';
 import { buildResumeShellCommand } from '@/lib/cli/uiMetadata';
+import { cachedGetJson, invalidateCache } from '@/lib/clientCache';
 
 /** CLI icon metadata */
 const CLI_BADGE_META: Record<string, { svg: string; color: string; name: string }> = {
@@ -208,12 +209,10 @@ function McpSection() {
 
   const loadData = useCallback(async () => {
     try {
-      const [mcpRes, regRes] = await Promise.all([
-        fetch('/api/sessions/mcp'),
-        fetch('/api/sessions/mcp/registry'),
+      const [mcpData, regData] = await Promise.all([
+        cachedGetJson<{ servers?: Record<string, unknown> }>('/api/sessions/mcp'),
+        cachedGetJson<{ servers?: McpRegistryItem[] }>('/api/sessions/mcp/registry'),
       ]);
-      const mcpData = await mcpRes.json();
-      const regData = await regRes.json();
       setInstalled(mcpData.servers || {});
       setRegistry(regData.servers || []);
     } catch {}
@@ -234,6 +233,7 @@ function McpSection() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ servers: updated }),
       });
+      invalidateCache('/api/sessions/mcp');
       setInstalled(updated);
     } catch {}
     setInstalling(null);
@@ -248,6 +248,7 @@ function McpSection() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ servers: updated }),
       });
+      invalidateCache('/api/sessions/mcp');
       setInstalled(updated);
     } catch {}
   };
@@ -376,6 +377,14 @@ export default function SessionDialog({
   const [fullscreen, setFullscreen] = useState(false);
   const [terminalFullscreen, setTerminalFullscreen] = useState(false);
   const isConsole = activeTab === 'console';
+  // Lazy-mount non-console tab bodies: only render a tab after it's first been
+  // activated (then keep it mounted to preserve state). This keeps the tab
+  // components' on-mount fetches (memory / mcp / mcp-registry / app-tasks) OFF
+  // the console-open critical path — opening a session no longer fires them.
+  const [visitedTabs, setVisitedTabs] = useState<Set<string>>(() => new Set(['console']));
+  useEffect(() => {
+    setVisitedTabs(prev => (prev.has(activeTab) ? prev : new Set(prev).add(activeTab)));
+  }, [activeTab]);
   const [, setTick] = useState(0);
   // Live timestamps
   useEffect(() => {
@@ -386,6 +395,7 @@ export default function SessionDialog({
   useEffect(() => {
     setActiveTab('console');
     setShowHandoff(false);
+    setVisitedTabs(new Set(['console']));
   }, [sessionId]);
   // If console tab was active but session is no longer managed, switch to info
 
@@ -536,21 +546,27 @@ export default function SessionDialog({
             overflowY: 'auto',
             display: activeTab === 'tasks' ? 'block' : 'none',
           }}>
-            <TasksTab sessionId={session.id} socketRef={socketRef} onOpenTask={onOpenTask} onSwitchToConsole={() => setActiveTab('console')} />
+            {visitedTabs.has('tasks') && (
+              <TasksTab sessionId={session.id} socketRef={socketRef} onOpenTask={onOpenTask} onSwitchToConsole={() => setActiveTab('console')} />
+            )}
           </div>
           <div style={{
             position: 'absolute', inset: 0, padding: '20px 24px',
             overflowY: 'auto',
             display: activeTab === 'info' ? 'block' : 'none',
           }}>
-            <InfoTab session={session} cliCmd={cliCmd} contextUsage={sessionId ? contextMap[sessionId] ?? null : null} socketRef={socketRef} onSelectSession={onSelectSession} />
+            {visitedTabs.has('info') && (
+              <InfoTab session={session} cliCmd={cliCmd} contextUsage={sessionId ? contextMap[sessionId] ?? null : null} socketRef={socketRef} onSelectSession={onSelectSession} />
+            )}
           </div>
           <div style={{
             position: 'absolute', inset: 0, padding: '20px 24px',
             overflowY: 'auto',
             display: activeTab === 'settings' ? 'block' : 'none',
           }}>
-            <SettingsTab session={session} socketRef={socketRef} />
+            {visitedTabs.has('settings') && (
+              <SettingsTab session={session} socketRef={socketRef} />
+            )}
           </div>
         </div>
 
