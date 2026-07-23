@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback, useRef, useMemo, memo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import type { SessionData } from '@/lib/types';
 import { useSocketContext } from './SocketProvider';
+import { perfRender } from '@/lib/perf';
 import ContextBar from './ContextBar';
 import AmbientOrbs from './AmbientOrbs';
 import MatrixRain from './MatrixRain';
@@ -26,6 +27,7 @@ interface Props {
 }
 
 export default function DashboardView({ sessions, contextMap, onSelectSession }: Props) {
+  perfRender('DashboardView');
   const { socketRef } = useSocketContext();
   const all = Array.from(sessions.values());
   const [filter, setFilter] = useState('all');
@@ -147,6 +149,7 @@ const SessionCard = memo(function SessionCard({ s, contextUsage, onSelect, socke
   onDragOverCard?: (e: React.DragEvent, id: string) => void;
   onDragEnd?: () => void;
 }) {
+  perfRender('SessionCard');
   const meta = STATUS[s.status] || STATUS.idle;
   const working = s.status === 'working';
   const isActive = working || s.status === 'meeting' || s.status === 'attention';

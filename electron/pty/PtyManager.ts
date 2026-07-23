@@ -15,6 +15,28 @@ if (DEBUG_PTY) {
   console.log(`[pty:debug] raw stream tee enabled → ${DEBUG_DIR}/<sessionId>.bin`);
 }
 
+// Opt-in PTY-path perf telemetry — set AM_PERF=1. Aggregates the per-chunk
+// processing cost (subscriber fan-out + context parse + prompt detection) in
+// the electron main process and logs a summary every few seconds. Useful for
+// spotting whether fast-streaming terminal output is starving the main thread
+// (a common Windows sluggishness cause). No-op unless AM_PERF=1.
+const PERF = process.env.AM_PERF === '1';
+const PERF_FLUSH_MS = 3000;
+let perfChunks = 0;
+let perfBytes = 0;
+let perfProcMs = 0;
+let perfWorstMs = 0;
+if (PERF) {
+  console.log('[pty:perf] enabled — per-chunk processing summaries every 3s (set AM_PERF=0 to disable)');
+  setInterval(() => {
+    if (perfChunks === 0) return;
+    const kb = (perfBytes / 1024).toFixed(0);
+    const rate = (perfChunks / (PERF_FLUSH_MS / 1000)).toFixed(0);
+    console.log(`[pty:perf] chunks=${perfChunks} (${rate}/s) bytes=${kb}KB proc=${perfProcMs.toFixed(0)}ms worst=${perfWorstMs.toFixed(1)}ms`);
+    perfChunks = 0; perfBytes = 0; perfProcMs = 0; perfWorstMs = 0;
+  }, PERF_FLUSH_MS).unref?.();
+}
+
 export interface PtySession {
   id: string;
   pty: IPty;
@@ -119,6 +141,7 @@ export class PtyManager {
     };
 
     ptyProcess.onData((data: string) => {
+      const perfT0 = PERF ? performance.now() : 0;
       session.outputBuffer.push(data);
       if (session.outputBuffer.length > 500) session.outputBuffer = session.outputBuffer.slice(-300);
       // Fan out to every live subscriber (socket emit, trust/context monitors,
@@ -174,6 +197,14 @@ export class PtyManager {
         session.currentState = 'busy';
         session.status = 'busy';
         if (session.onStateChange) session.onStateChange({ state: 'busy' });
+      }
+
+      if (PERF) {
+        const dt = performance.now() - perfT0;
+        perfChunks += 1;
+        perfBytes += data.length;
+        perfProcMs += dt;
+        if (dt > perfWorstMs) perfWorstMs = dt;
       }
     });
 

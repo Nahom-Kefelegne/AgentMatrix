@@ -19,6 +19,8 @@ import SpawnModal from './components/SpawnModal';
 import AppSettingsModal from './components/AppSettingsModal';
 import SplashScreen from './components/SplashScreen';
 
+import { initPerfMonitor } from '@/lib/perf';
+
 const EditorView = dynamic(() => import('./components/editor/EditorView'), { ssr: false });
 
 function OfficeView() {
@@ -196,6 +198,7 @@ function OfficeView() {
 }
 
 export default function Home() {
+  useEffect(() => { initPerfMonitor(); }, []);
   return (
     <ThemeProvider>
       <SocketProvider>

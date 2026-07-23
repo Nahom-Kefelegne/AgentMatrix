@@ -5,6 +5,7 @@ import { io, Socket } from 'socket.io-client';
 import type { SessionData, ServerToClientEvents, ClientToServerEvents } from '@/lib/types';
 import { SOCKET_EVENTS } from '@/lib/types';
 import { SOCKET_PATH } from '@/lib/constants';
+import { perfEvent } from '@/lib/perf';
 
 export type SocketEventHandler = {
   event: string;
@@ -26,6 +27,7 @@ export function useSocket() {
   }, []);
 
   const emitEvent = useCallback((event: string, data: unknown) => {
+    perfEvent(`sock:${event}`);
     eventCallbacksRef.current.forEach(cb => cb({ event, data }));
   }, []);
 

@@ -11,6 +11,7 @@ import { useSessionContext } from '@/lib/hooks/useSessionContext';
 import ChangesViewer from './ChangesViewer';
 import { buildResumeShellCommand } from '@/lib/cli/uiMetadata';
 import { cachedGetJson, invalidateCache } from '@/lib/clientCache';
+import { perfRender } from '@/lib/perf';
 
 /** CLI icon metadata */
 const CLI_BADGE_META: Record<string, { svg: string; color: string; name: string }> = {
@@ -366,6 +367,7 @@ export default function SessionDialog({
   sessionId, sessions, onClose, noBackdrop,
   onPrev, onNext, sessionIndex, sessionTotal, readOnly, onSelectSession, onOpenTask,
 }: SessionDialogProps) {
+  perfRender('SessionDialog');
   const { socketRef, connected } = useSocketContext();
   const contextMap = useSessionContext(socketRef, connected);
   const [activeTab, setActiveTab] = useState<'console' | 'tasks' | 'info' | 'settings'>('console');

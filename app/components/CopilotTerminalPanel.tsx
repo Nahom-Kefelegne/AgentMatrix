@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { useSocketContext } from './SocketProvider';
 import { useXterm } from '@/lib/hooks/useXterm';
 import { TERMINAL_THEME } from '@/lib/terminalTheme';
+import { perfEvent } from '@/lib/perf';
 
 // Copilot's timeline scrolling has two regimes:
 //
@@ -234,6 +235,7 @@ export default function CopilotTerminalPanel({ sessionId, sessionName, cwd, visi
 
     const handleData = (msg: { sessionId: string; data: string }) => {
       if (msg.sessionId !== sessionId) return;
+      perfEvent('terminal:data', msg.data.length);
       // Track Copilot's mouse-tracking state (prepend the previous chunk's tail
       // so a DECSET split across chunks is still caught) to pick the wheel path.
       const ms = scanMouseTracking(mouseScanTailRef.current + msg.data);
