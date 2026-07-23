@@ -1089,7 +1089,7 @@
 }
 
 .session-dialog-header {
-  padding: 20px 24px 16px;
+  padding: 12px 20px 12px;
   flex-shrink: 0;
   border-bottom: 1px solid #f0f0f0;
 }
@@ -1098,7 +1098,7 @@
 }
 
 .session-dialog-name {
-  font-size: 22px;
+  font-size: 18px;
   font-weight: 700;
   color: #0a0a0a;
 }
@@ -1113,8 +1113,22 @@
 }
 .dark .session-dialog-path { color: #a1a1aa; }
 
+/* Inline variant: cwd shown in the tab bar's empty right side instead of on its
+   own row, so it costs no extra vertical space. Truncates when narrow. */
+.session-dialog-path--inline {
+  margin: 0;
+  align-self: center;
+  max-width: 46%;
+  padding-left: 16px;
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .session-dialog-tab-bar {
   display: flex;
+  align-items: center;
   flex-shrink: 0;
   padding: 0 24px;
   border-bottom: 1px solid #f0f0f0;
@@ -1124,7 +1138,7 @@
 }
 
 .session-dialog-tab {
-  padding: 12px 20px;
+  padding: 9px 18px;
   font-size: 15px;
   font-weight: 600;
   cursor: pointer;

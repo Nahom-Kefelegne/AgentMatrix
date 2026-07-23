@@ -441,7 +441,7 @@ export default function SessionDialog({
         className={`session-dialog ${fullscreen ? 'session-dialog--fullscreen' : ''}`}
         style={{
           width: fullscreen ? undefined : isConsole ? 1100 : 900,
-          height: fullscreen ? undefined : '85vh',
+          height: fullscreen ? undefined : '90vh',
           transition: 'width 0.2s ease, height 0.2s ease',
         }}
       >
@@ -486,13 +486,12 @@ export default function SessionDialog({
             </div>
           </div>
 
-          {/* Quick info row under name */}
-          {session.cwd && (
-            <div className="session-dialog-path">{session.cwd}</div>
-          )}
+          {/* Quick info row under name removed — the cwd now lives inline in
+              the tab bar's otherwise-empty right side to save vertical space
+              for the console. */}
         </div>
 
-        {/* Tabs */}
+        {/* Tabs (+ inline cwd path on the right, reclaiming empty header space) */}
         <div className="session-dialog-tab-bar" style={{ justifyContent: 'space-between' }}>
           <div style={{ display: 'flex' }}>
             {(['console', 'tasks', 'info', 'settings'] as const).map(tab => {
@@ -505,6 +504,9 @@ export default function SessionDialog({
               );
             })}
           </div>
+          {session.cwd && (
+            <div className="session-dialog-path session-dialog-path--inline" title={session.cwd}>{session.cwd}</div>
+          )}
         </div>
 
         {/* Content — all tabs stay mounted to preserve state */}
@@ -512,7 +514,7 @@ export default function SessionDialog({
           flex: 1, minHeight: 0, position: 'relative',
         }}>
           <div style={{
-            position: 'absolute', inset: 0, padding: '12px 16px',
+            position: 'absolute', inset: 0, padding: '8px 12px',
             display: activeTab === 'console' ? 'flex' : 'none',
             flexDirection: 'column',
             willChange: 'transform',
