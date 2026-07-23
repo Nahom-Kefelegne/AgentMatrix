@@ -133,20 +133,26 @@ function OfficeView() {
         editorUnlocked={editorUnlocked}
       />
 
-      {/* Office view — keep mounted to preserve canvas engine */}
-      <div style={{ display: viewMode === 'office' ? 'contents' : 'none' }}>
-        <OfficeCanvas
-          ref={canvasRef}
-          sessions={sessions}
-          onEvent={onEvent}
-          onHover={handleHover}
-          onClick={handleClick}
-          scrollToId={selectedSessionId}
-          socketRef={socketRef}
-          connected={connected}
-        />
-        <HoverCard character={hoveredChar} x={hoverPos.x} y={hoverPos.y} />
-      </div>
+      {/* Office view — TEST: unmount when not active so its 60fps canvas
+          render loop (requestAnimationFrame) stops instead of running hidden
+          behind the dashboard. Previously kept mounted (display:none) to
+          preserve the engine, but that left the loop burning CPU on other
+          views. */}
+      {viewMode === 'office' && (
+        <div style={{ display: 'contents' }}>
+          <OfficeCanvas
+            ref={canvasRef}
+            sessions={sessions}
+            onEvent={onEvent}
+            onHover={handleHover}
+            onClick={handleClick}
+            scrollToId={selectedSessionId}
+            socketRef={socketRef}
+            connected={connected}
+          />
+          <HoverCard character={hoveredChar} x={hoverPos.x} y={hoverPos.y} />
+        </div>
+      )}
 
       {viewMode === 'dashboard' && (
         <div style={{ display: selectedSessionId ? 'none' : 'contents' }}>
