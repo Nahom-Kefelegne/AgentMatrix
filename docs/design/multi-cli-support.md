@@ -1,39 +1,37 @@
 # Agent Matrix — Multi-CLI Support Design Document
 
-> **Note:** Claude Agent SDK is not available to users. All Claude integration must use the CLI binary directly (PTY or `--output-format stream-json` flags). Copilot integration can use the built-in ACP protocol (`copilot --acp --stdio`).
+> **Note:** Claude Agent SDK is not available to users. All Claude integration must use the CLI binary directly (PTY or `--output-format stream-json` flags). Copilot integration uses the built-in ACP protocol (`copilot --acp`) for out-of-band capture.
+>
+> **Implementation status:** Multi-CLI support has landed. This document is the original design, with the concrete Copilot flags and hooks corrected to match the current provider implementation.
 
 ## Overview
 
-Agent Matrix currently only supports Claude Code CLI. This design adds support for **GitHub Copilot CLI** while keeping Claude Code as the primary provider. The architecture abstracts all CLI-specific behavior behind a `CliProvider` interface, making it straightforward to add future CLI agents.
+Agent Matrix supports both **GitHub Copilot CLI** and Claude Code CLI. The architecture abstracts all CLI-specific behavior behind a `CliProvider` interface, making it straightforward to add future CLI agents.
 
 ## Research Findings
 
-### Claude Code — Programmatic APIs Available
+### Claude Code — CLI-Based Integration
 
-The `@anthropic-ai/claude-agent-sdk` (v0.2.109) provides a full programmatic interface:
+Claude integration uses the CLI binary directly:
 
-- **`query()` function** — Spawns Claude as subprocess, communicates via NDJSON over stdin/stdout. Returns `AsyncGenerator<SDKMessage>` with typed events (assistant, tool_use, result, system).
-- **`--output-format stream-json`** — CLI flag for structured JSON output (no TUI).
-- **`--input-format stream-json`** — Accepts structured input on stdin (bidirectional).
-- **Session management** — `listSessions()`, `getSessionInfo()`, `forkSession()`, `renameSession()`.
-- **27 hook events** — Including `FileChanged`, `TaskCreated`, `TaskCompleted`, `TeammateIdle`, `WorktreeCreate`.
-- **SDK hooks** — JavaScript callbacks (not just shell commands) with bidirectional responses.
-- **MCP server creation** — `createSdkMcpServer()` for in-process tool providers.
-- **Control methods** — `interrupt()`, `setPermissionMode()`, `setModel()`, `getContextUsage()`, `rewindFiles()`.
+- **PTY mode** — Interactive sessions run in an Electron PTY and render through xterm.js.
+- **`--output-format stream-json`** — Available for structured non-TUI subprocess use.
+- **Session files** — Claude transcripts live under `~/.claude/projects/<encoded-cwd>/*.jsonl`.
+- **Hooks** — Agent Matrix injects HTTP-posting shell hooks into `~/.claude/settings.json`.
 
-**Impact:** The SDK can replace our PTY-based prompt injection for programmatic tasks (summaries, task assignment, orchestrator queries). Sessions could optionally run in SDK mode for structured communication while keeping the TUI terminal for interactive use.
+**Impact:** Programmatic Claude tasks still use provider fallbacks (prompt/file capture or stream-json subprocesses) rather than the unavailable Claude Agent SDK.
 
 ### GitHub Copilot CLI
 
 - **Binary:** `copilot` (installed via npm, Homebrew, WinGet, or install script)
-- **Sessions:** Persistent, stored in `~/.copilot/session-state/` with SQLite index
+- **Sessions:** Persistent, stored in `~/.copilot/session-state/<id>/` with `workspace.yaml`, `events.jsonl`, and a global `session-store.db` for token accounting
 - **Resume:** `copilot --resume <id>` or `copilot --continue` (most recent)
-- **Permissions:** `--allow-all-tools` / `--yolo` (equivalent to `--dangerously-skip-permissions`)
-- **Models:** Multi-model (Claude Sonnet/Opus, GPT-5, Gemini 3 Pro, etc.)
-- **Hooks:** 6 events configured in `.github/hooks/*.json` (repo-level, not user-level)
-  - `sessionStart`, `sessionEnd`, `preToolUse`, `postToolUse`, `userPromptSubmitted`, `errorOccurred`
-  - Hooks receive JSON on stdin with `session_id`, `tool_name`, `tool_input`
-- **ACP Protocol:** `copilot --acp --stdio` starts JSON-RPC server over stdin/stdout (NDJSON)
+- **Permissions:** `--allow-all` for the current "YOLO" / bypass-permissions mode
+- **Models:** Multi-model with dotted IDs in `COPILOT_MODELS` (`gpt-5.4`, `claude-sonnet-4.5`, `gpt-5.6-sol`, etc.)
+- **Hooks:** 13 documented events; Agent Matrix writes user-level `~/.copilot/hooks/agentmatrix.json` and sets `COPILOT_HOOK_ALLOW_LOCALHOST=1` for local HTTP hooks
+  - Includes `SessionStart`, `SessionEnd`, `PreToolUse`, `PostToolUse`, `PostToolUseFailure`, `UserPromptSubmit`, `ErrorOccurred`, `PreCompact`, `Notification`, `Stop`, `SubagentStart`, `SubagentStop`, and deferred `PermissionRequest`
+  - PascalCase hooks receive snake_case fields such as `session_id`, `tool_name`, `tool_input`
+- **ACP Protocol:** `copilot --acp` starts JSON-RPC over stdio (newline-delimited JSON)
 - **Multi-agent:** `/fleet` command for parallel agents, custom agent definitions
 - **Config:** `~/.copilot/config.json`, `~/.copilot/mcp-config.json`
 - **Reads `CLAUDE.md`** natively from repo root
@@ -45,19 +43,19 @@ The `@anthropic-ai/claude-agent-sdk` (v0.2.109) provides a full programmatic int
 | Binary name | `claude` | `copilot` | Yes |
 | Config dir | `~/.claude/` | `~/.copilot/` | Yes |
 | Session resume | `--resume <id>` | `--resume <id>` | Minimal |
-| Skip permissions | `--dangerously-skip-permissions` | `--yolo` | Yes |
+| Skip permissions | `--dangerously-skip-permissions` | `--allow-all` | Yes |
 | Model select | `--model <name>` | `--model <name>` | Same flag |
 | Effort | `--effort <level>` | `--reasoning-effort <level>` | Yes |
-| Hooks config | `~/.claude/settings.json` | `.github/hooks/*.json` | Yes |
-| Hook events | PascalCase (PreToolUse) | camelCase (preToolUse) | Normalize |
+| Hooks config | `~/.claude/settings.json` | `~/.copilot/hooks/*.json` (generated by the app) | Yes |
+| Hook events | PascalCase (PreToolUse) | PascalCase/snake_case config for Agent Matrix; camelCase also supported by CLI | Normalize |
 | Hook payload | `session_id`, `tool_name`, `tool_input` | Same fields | Compatible |
 | Session storage | `projects/<path>/<id>.jsonl` | `session-state/<id>/events.jsonl` | Yes |
 | Prompt indicator | `❯` or `>` | Git branch glyph | Yes |
-| Context display | `XX% remaining` | Different format | Yes |
-| Programmatic API | SDK (`query()`) + `stream-json` | ACP (`--acp --stdio`) | Abstract |
+| Context display | `XX% remaining` | `session-store.db` token accounting | Yes |
+| Programmatic API | PTY/file fallback | ACP (`--acp`) | Abstract |
 | System prompt | `--append-system-prompt` | Custom instructions file | Different |
-| Fork session | `--resume <id> --fork-session` | Unknown | Claude-only for now |
-| Subagent hooks | `SubagentStart/Stop` | No equivalent | Claude-only |
+| Fork session | `--resume <id> --fork-session` | No equivalent | Claude-only for now |
+| Subagent hooks | `SubagentStart/Stop` | `SubagentStart/Stop` | Yes |
 
 ---
 
@@ -199,17 +197,18 @@ class CopilotProvider implements CliProvider {
 
   buildSpawnArgs(opts) {
     const args = [];
-    // No --session-id equivalent (auto-assigned)
-    if (opts.permissionMode === 'bypassPermissions') args.push('--yolo');
+    if (opts.sessionId) args.push('--session-id', opts.sessionId);
+    if (opts.permissionMode === 'bypassPermissions') args.push('--allow-all');
     if (opts.model) args.push('--model', opts.model);
     if (opts.effort) args.push('--reasoning-effort', opts.effort);
+    if (opts.mode) args.push('--mode', opts.mode);
+    args.push('--mouse');
     if (opts.cwd) args.push('--cwd', opts.cwd);
     return args;
   }
 
   buildResumeArgs(opts) {
-    return ['--resume', opts.resumeId];
-    // No --yolo on resume (Copilot remembers permission state)
+    return ['--resume', opts.resumeId, '--mouse'];
     // No --fork-session equivalent
   }
 
@@ -230,8 +229,8 @@ class CopilotProvider implements CliProvider {
   }
 
   configureHooks(hookUrls) {
-    // Write to .github/hooks/agentmatrix.json in current repo
-    // Or create a global hook config
+    // Write to ~/.copilot/hooks/agentmatrix.json
+    // Set COPILOT_HOOK_ALLOW_LOCALHOST=1 in spawned env
     // Uses bash/powershell command format
   }
 
@@ -263,7 +262,7 @@ function detectInstalledCLIs(): CliType[] {
 }
 
 function getActiveProvider(): CliProvider {
-  // Read from app settings (agentmatrix-settings.json)
+  // Read from app settings (~/.agentmatrix/settings.json)
   // Fallback: first installed CLI
 }
 ```
@@ -274,9 +273,9 @@ function getActiveProvider(): CliProvider {
 
 ### 1. PtyManager (electron/pty/PtyManager.ts)
 
-**Current:** Hardcoded `claude` binary, Claude-specific flags.
+**Provider state:** PTY spawning delegates binary and flag construction to the selected `CliProvider`.
 
-**New:** Takes a `CliProvider` instance, delegates to it:
+It takes a `CliProvider` instance and delegates to it:
 
 ```typescript
 class PtyManager {
@@ -298,9 +297,9 @@ class PtyManager {
 
 ### 2. OutputParser (electron/pty/OutputParser.ts)
 
-**Current:** Hardcoded `❯` prompt detection and `XX% remaining` context parsing.
+**Provider state:** prompt detection and context parsing delegate to the selected `CliProvider`.
 
-**New:** Delegates to provider:
+The parser delegates to provider:
 
 ```typescript
 class OutputParser {
@@ -313,9 +312,9 @@ class OutputParser {
 
 ### 3. SessionScanner (lib/state/sessionScanner.ts)
 
-**Current:** Scans `~/.claude/projects/`, parses `.jsonl`, greps `ps aux` for `claude`.
+**Current:** Delegates to provider discovery. Claude scans `~/.claude/projects/`; Copilot reads session-state metadata and usage from `~/.copilot/session-state/` / `session-store.db`.
 
-**New:** Delegates to provider:
+The provider interface keeps the scanner CLI-agnostic:
 
 ```typescript
 function startSessionScanner(provider: CliProvider, callback) {
@@ -329,13 +328,13 @@ function startSessionScanner(provider: CliProvider, callback) {
 
 **No changes needed.** Both CLIs send JSON with the same essential fields (`session_id`, `tool_name`, `tool_input`). The routes are already generic.
 
-One addition: normalize event names. Copilot sends `preToolUse` (camelCase) while Claude sends `PreToolUse` (PascalCase). The setup scripts already handle this by mapping to the correct route URL.
+The routes normalize event payloads. Copilot's Agent Matrix hook config uses PascalCase event names and snake_case payload fields; the CLI's documented camelCase names are also supported.
 
 ### 5. Setup Scripts (setup.sh, setup.ps1)
 
-**Current:** Only configures Claude hooks.
+**Current:** Configures Claude hooks and writes Agent Matrix's Copilot hook config.
 
-**New:** Detect which CLIs are installed, configure hooks for each:
+Setup detects which CLIs are installed and configures hooks for each:
 
 ```bash
 # Detect CLIs
@@ -348,11 +347,9 @@ if [ $HAS_CLAUDE -eq 1 ]; then
   # existing hook configuration...
 fi
 
-# Configure Copilot hooks (in .github/hooks/agentmatrix.json per repo)
-# Note: Copilot hooks are repo-level, not global
-# We create a template that users copy to their repos
+# Configure Copilot hooks (in ~/.copilot/hooks/agentmatrix.json)
 if [ $HAS_COPILOT -eq 1 ]; then
-  write_copilot_hook_template()
+  write_copilot_hooks()
 fi
 ```
 
@@ -403,33 +400,11 @@ Our current approach for programmatic communication (summaries, task assignment,
 
 **Problems:** Timing-sensitive, fragile, blocks the terminal, user sees the injected prompt, cleanup needed.
 
-### New: SDK/ACP Structured Communication
+### New: Provider Structured Communication
 
-#### For Claude: Use the Agent SDK
+#### For Claude: Use provider fallback
 
-```typescript
-import { query } from '@anthropic-ai/claude-agent-sdk';
-
-// Programmatic query — no PTY needed
-async function askClaude(prompt: string, sessionId?: string) {
-  const result = query({
-    prompt,
-    options: {
-      sessionId,  // Continue existing session context
-      maxTurns: 1,
-      permissionMode: 'bypassPermissions',
-    }
-  });
-
-  let response = '';
-  for await (const msg of result) {
-    if (msg.type === 'assistant') {
-      response += msg.message.content.map(c => c.type === 'text' ? c.text : '').join('');
-    }
-  }
-  return response;
-}
-```
+Claude has no user-available Agent SDK integration in Agent Matrix. Programmatic tasks use provider fallbacks such as PTY prompt/file capture or non-TUI stream-json subprocesses when applicable.
 
 **Use for:** Summary generation, task assignment, orchestrator queries, context handoff summaries.
 
@@ -439,7 +414,7 @@ async function askClaude(prompt: string, sessionId?: string) {
 
 ```typescript
 // Spawn copilot in ACP mode for programmatic tasks
-const proc = spawn('copilot', ['--acp', '--stdio'], { cwd });
+const proc = spawn('copilot', ['--acp'], { cwd });
 
 // Send JSON-RPC request
 proc.stdin.write(JSON.stringify({
@@ -461,9 +436,9 @@ for await (const line of readline(proc.stdout)) {
 Each session can operate in two modes simultaneously:
 
 1. **Interactive mode** — PTY terminal (xterm.js) for user interaction
-2. **Programmatic mode** — SDK/ACP for app-driven tasks
+2. **Programmatic mode** — ACP where available, or the provider-specific fallback for app-driven tasks
 
-This eliminates prompt injection entirely. The app uses the SDK for structured tasks while the user interacts through the terminal normally. No more:
+Where ACP is available (Copilot), this avoids prompt injection for structured tasks while the user interacts through the terminal normally. Provider fallbacks may still use prompt/file capture when no structured protocol is available.
 - Waiting for prompt ready
 - Text appearing in the terminal that the user didn't type
 - File polling for output
@@ -473,24 +448,11 @@ This eliminates prompt injection entirely. The app uses the SDK for structured t
 
 ## Copilot-Specific Hook Configuration
 
-Copilot hooks are configured at the **repo level** (`.github/hooks/`) not globally. This means:
+Agent Matrix configures Copilot hooks in the user-level Copilot hooks directory:
 
-**Option A: Global hook template**
-- Setup script creates `~/.copilot/hooks/agentmatrix.json` (if Copilot supports user-level hooks)
-- Needs verification — Copilot docs primarily show repo-level hooks
-
-**Option B: Per-repo hook setup**
-- Setup script creates a template file
-- User copies it to each repo's `.github/hooks/` directory
-- Or Agent Matrix auto-creates it when spawning a session in a new CWD
-
-**Option C: ACP protocol instead of hooks**
-- Skip hooks entirely for Copilot
-- Use `copilot --acp --stdio` to get structured events
-- More reliable, no per-repo configuration needed
-- Requires running a background ACP session per active Copilot session
-
-**Recommendation:** Start with **Option C** (ACP) since it's more reliable and doesn't require per-repo setup. Fall back to **Option B** if ACP is insufficient.
+- Setup writes `~/.copilot/hooks/agentmatrix.json`
+- Spawned Copilot sessions set `COPILOT_HOOK_ALLOW_LOCALHOST=1` so those hooks can call the local Agent Matrix API
+- ACP (`copilot --acp`) is used for programmatic capture where available, but hooks remain the session/activity signal path
 
 ---
 
@@ -498,7 +460,7 @@ Copilot hooks are configured at the **repo level** (`.github/hooks/`) not global
 
 ### SessionData (lib/types.ts)
 
-Add `cliType` field:
+`SessionData` carries the selected provider:
 
 ```typescript
 interface SessionData {
@@ -507,9 +469,9 @@ interface SessionData {
 }
 ```
 
-### Settings (agentmatrix-settings.json)
+### Settings (`~/.agentmatrix/settings.json`)
 
-Add CLI preferences:
+Settings carry CLI preferences:
 
 ```typescript
 interface AppSettings {
@@ -557,12 +519,12 @@ interface AppSettings {
 ### Phase 3: CopilotProvider Implementation
 
 1. Implement `CopilotProvider.findBinary()` — detect copilot on PATH
-2. Implement `CopilotProvider.buildSpawnArgs()` — `--yolo`, `--model`, `--reasoning-effort`, `--cwd`
-3. Implement `CopilotProvider.buildResumeArgs()` — `--resume <id>`
+2. Implement `CopilotProvider.buildSpawnArgs()` — `--session-id`, `--allow-all`, `--model`, `--reasoning-effort`, `--mode`, `--mouse`, `--cwd`
+3. Implement `CopilotProvider.buildResumeArgs()` — `--resume <id> --mouse`
 4. Implement `CopilotProvider.discoverSessions()` — scan `~/.copilot/session-state/`
 5. Implement `CopilotProvider.detectPromptReady()` — identify Copilot's prompt pattern
 6. Implement `CopilotProvider.detectActiveProcesses()` — grep for copilot processes
-7. Update setup scripts — detect Copilot, configure hooks (repo-level `.github/hooks/`)
+7. Update setup scripts — detect Copilot, configure user-level `~/.copilot/hooks/agentmatrix.json`
 8. Test: spawn, interact, resume Copilot sessions end-to-end
 
 **Deliverables:** Working Copilot sessions in Agent Matrix.
@@ -570,11 +532,11 @@ interface AppSettings {
 
 ### Phase 4: Hook Normalization + Copilot Events
 
-1. Normalize hook event names (PascalCase ↔ camelCase) in a mapping layer
-2. Auto-create `.github/hooks/agentmatrix.json` in CWD when spawning Copilot session
-3. Handle Copilot's `userPromptSubmitted` + `errorOccurred` events (Claude doesn't have these)
-4. Handle missing `SubagentStart/Stop` for Copilot (degrade gracefully — no agent sprites)
-5. Explore ACP protocol as alternative to file-based hooks for Copilot
+1. Normalize hook event payloads in a mapping layer
+2. Write `~/.copilot/hooks/agentmatrix.json` during setup
+3. Handle Copilot's `UserPromptSubmit`, `ErrorOccurred`, and notification/stop events
+4. Handle Copilot `SubagentStart/Stop`
+5. Use ACP as the structured capture path where available
 
 **Deliverables:** Live tool/status updates for Copilot sessions.
 **Risk:** Medium — hook compatibility needs testing.
@@ -757,7 +719,7 @@ App starts
 
 When resuming a session, we need to know which CLI it belongs to:
 
-- **From active sessions cache:** `cliType` is stored in `agentmatrix-active-sessions.json`
+- **From active sessions cache:** `cliType` is stored in `~/.agentmatrix/active-sessions.json`
 - **From session discovery:** Claude sessions are in `~/.claude/projects/`, Copilot sessions in `~/.copilot/session-state/`
 - **From ResumeModal:** Show CLI icon next to each session in the list so user knows what they're resuming
 - **Edge case:** If session's CLI isn't installed, show disabled with "Requires {CLI name}"
@@ -782,10 +744,6 @@ These components are CLI-agnostic and need zero changes:
 
 ## Open Questions
 
-1. **Copilot user-level hooks** — Does Copilot support hooks outside of `.github/hooks/`? If not, we auto-create per-repo or use ACP.
-2. **Copilot session ID format** — Is it a UUID like Claude's? Affects session scanner and resume logic.
-3. **Copilot subagent detection** — No `SubagentStart/Stop` hooks. Graceful degradation: no agent sprites for Copilot sessions.
-4. **Cross-CLI context transfer** — Handoff file is markdown (CLI-agnostic), but the "read this file" prompt differs per CLI. Provider should have a `buildReadFilePrompt(path)` method.
-5. **Copilot prompt indicator** — Exact character/pattern for detecting prompt ready state. Needs testing with a real Copilot CLI session.
-6. **Copilot `/fleet` integration** — Can we expose Copilot's parallel agent feature through the Agent Matrix UI?
-7. **Single vs multi-CLI per workspace** — Can a user have both Claude and Copilot sessions active simultaneously? (Yes — each session carries its `cliType` and uses the right provider.)
+1. **Cross-CLI context transfer** — Handoff file is markdown (CLI-agnostic), but the "read this file" prompt differs per CLI. Provider should have a `buildReadFilePrompt(path)` method.
+2. **Copilot `/fleet` integration** — Can we expose Copilot's parallel agent feature through the Agent Matrix UI?
+3. **Single vs multi-CLI per workspace** — Can a user have both Claude and Copilot sessions active simultaneously? (Yes — each session carries its `cliType` and uses the right provider.)

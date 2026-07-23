@@ -1,6 +1,6 @@
 # Electron & PTY Management Architecture
 
-This document describes the Electron shell and PTY (pseudo-terminal) management layer of Agent Matrix. It covers the main process lifecycle, how Claude Code sessions are spawned and managed via `node-pty`, the prompt injection system for programmatic interaction, the Socket.io terminal bridge, editor terminals, session persistence, and the production build pipeline.
+This document describes the Electron shell and PTY (pseudo-terminal) management layer of Agent Matrix. It covers the main process lifecycle, how CLI agent sessions are spawned and managed via `node-pty`, the prompt injection/ACP capture system for programmatic interaction, the Socket.io terminal bridge, editor terminals, session persistence, and the production build pipeline.
 
 ---
 
@@ -27,10 +27,10 @@ This document describes the Electron shell and PTY (pseudo-terminal) management 
 
 ## Overview
 
-Agent Matrix is an Electron application that wraps a Next.js web app and manages multiple Claude Code CLI sessions through `node-pty`. The architecture has three layers:
+Agent Matrix is an Electron application that wraps a Next.js web app and manages multiple Copilot/Claude CLI sessions through `node-pty`. The architecture has three layers:
 
 1. **Electron main process** (`electron/main.ts`) -- creates the window, tray, and HTTP server
-2. **PTY layer** (`electron/pty/`) -- spawns and manages Claude Code processes
+2. **PTY layer** (`electron/pty/`) -- spawns and manages provider-backed CLI processes
 3. **Bridge layer** (`electron/terminalBridge.ts`) -- connects browser xterm.js terminals to PTY processes via Socket.io
 
 ```mermaid
@@ -221,7 +221,7 @@ On new client connections, the server sends a `STATE_SNAPSHOT` with all visible 
 
 **File:** `electron/pty/PtyManager.ts`
 
-The `PtyManager` class is the central coordinator for all Claude Code PTY processes. It maintains a `Map<string, PtySession>` of active sessions and provides methods to spawn, resume, interact with, and kill sessions.
+The `PtyManager` class is the central coordinator for all provider-backed CLI PTY processes. It maintains a `Map<string, PtySession>` of active sessions and provides methods to spawn, resume, interact with, and kill sessions.
 
 ### PtySession Interface
 
@@ -233,7 +233,7 @@ interface PtySession {
   currentState: PtyState;                 // 'busy' | 'ready'
   contextUsage: number | null;            // % used (0-100)
   outputBuffer: string[];                 // last 500 chunks (trimmed to 300)
-  onData: ((data: string) => void) | null;
+  subscribers: Set<(data: string) => void>;
   onReady: (() => void) | null;
   onStateChange: ((info: StateInfo) => void) | null;
   onContextUpdate: ((usage: number) => void) | null;
@@ -249,7 +249,7 @@ sequenceDiagram
     participant Bridge as terminalBridge
     participant PM as PtyManager
     participant PTY as node-pty
-    participant Claude as Claude CLI
+    participant CLI as CLI Binary
 
     Client->>Bridge: terminal:new { cwd, name, model, ... }
     Bridge->>Bridge: randomUUID() -> sessionId
@@ -257,11 +257,11 @@ sequenceDiagram
     Bridge->>Bridge: addSession() + setCachedName()
     Bridge->>Client: SESSION_START (sprite appears)
     Bridge->>PM: spawnNew(sessionId, opts)
-    PM->>PM: findClaudeBinary() (which/where)
-    PM->>PM: Build args: --session-id, --permission-mode, --model, etc.
-    PM->>PTY: pty.spawn(shell, ['-c', 'cd CWD && claude ARGS'])
-    PTY->>Claude: Claude CLI process starts
-    PM->>PM: createPtySession() -> wire onData/onExit
+    PM->>PM: getProvider(cliType).findBinary()
+    PM->>PM: Build provider args (--session-id, --model, --mouse, etc.)
+    PM->>PTY: pty.spawn(shell, ['-c', 'cd CWD && CLI ARGS'])
+    PTY->>CLI: CLI process starts
+    PM->>PM: createPtySession() -> wire subscribers/onExit
     PM-->>Bridge: PtySession
     Bridge->>Bridge: wire onOutput -> socket.emit('terminal:data')
     Bridge->>Bridge: wire onStateChange -> io.emit('session:state')
@@ -272,32 +272,37 @@ sequenceDiagram
 
 #### CLI Arguments
 
-The `spawnNew` method builds Claude CLI arguments from the options:
+The `spawnNew` method delegates argument construction to the session's `CliProvider`.
 
-| Option | CLI Flag |
-|--------|----------|
-| `sessionUuid` | `--session-id <uuid>` |
-| `permissionMode: 'bypassPermissions'` | `--dangerously-skip-permissions` |
-| `permissionMode: other` | `--permission-mode <mode>` |
-| `model` | `--model <model>` |
-| `effort` | `--effort <effort>` |
-| `allowedTools` | `--allowedTools <tools>` |
-| `systemPrompt` | `--append-system-prompt '<escaped>'` |
+| Option | Claude flag | Copilot flag |
+|--------|-------------|--------------|
+| `sessionUuid` | `--session-id <uuid>` | `--session-id <uuid>` |
+| `name` | (app/name cache + optional `/rename`) | `-n <name>` |
+| `permissionMode: 'bypassPermissions'` | `--dangerously-skip-permissions` | `--allow-all` |
+| `permissionMode: other` | `--permission-mode <mode>` | n/a (only default / allow-all exposed) |
+| `model` | `--model <model>` | `--model <model>` |
+| `effort` | `--effort <effort>` | `--reasoning-effort <effort>` |
+| `allowedTools` | `--allowedTools <tools>` | `--allow-tool=<tool>` per tool |
+| `systemPrompt` | `--append-system-prompt '<escaped>'` | not injected until Copilot MCP/system-prompt behavior is verified |
+| `copilotMode` | n/a | `--mode <interactive|plan|autopilot>` |
+| console mouse support | n/a | `--mouse` (spawn + resume) |
 
 #### Platform Differences
 
 On **macOS/Linux**, the PTY spawns via the user's shell:
 ```typescript
 const shell = process.env.SHELL || '/bin/bash';
-pty.spawn(shell, ['-c', `cd "${safeCwd}" && ${claudeCmd}`], { ... });
+pty.spawn(shell, ['-c', `cd "${safeCwd}" && ${providerCmd}`], { ... });
 ```
 
-On **Windows**, Claude is spawned directly (cmd.exe can't handle UNC paths):
+On **Windows**, the CLI binary is spawned directly (cmd.exe can't handle UNC paths):
 ```typescript
-pty.spawn(claudePath, claudeArgs, { cwd: safeCwd, ... });
+pty.spawn(cliPath, cliArgs, { cwd: safeCwd, ... });
 ```
 
 The `CLAUDECODE` environment variable is removed from the spawned process to avoid recursive hooks.
+For Copilot sessions, `COPILOT_HOOK_ALLOW_LOCALHOST=1` is added so the app's
+localhost HTTP hooks are delivered.
 
 Default PTY dimensions: 80 cols x 24 rows. The terminal panel resizes the PTY when it opens via `terminal:resize`.
 
@@ -307,16 +312,20 @@ Default PTY dimensions: 80 cols x 24 rows. The terminal panel resizes the PTY wh
 spawnResume(id, { cwd, resumeId, fork? })
 ```
 
-Resumes a previous Claude session using `--resume <resumeId>`. Always uses `--dangerously-skip-permissions` for resumed sessions. Optionally forks with `--fork-session`.
+Resumes a previous session using provider-specific args. Claude uses
+`--resume <resumeId> --dangerously-skip-permissions` and may add
+`--fork-session`. Copilot uses `--resume <resumeId> --mouse`; it remembers
+permission state and has no fork flag.
 
 The CWD is resolved in priority order:
-1. `findSessionCwd(resumeId)` -- reads from Claude's transcript files
+1. `findSessionCwd(resumeId)` -- provider-specific (`workspace.yaml` for Copilot,
+   transcript/project scan for Claude)
 2. `opts.cwd` -- caller-provided
 3. `homedir()` -- fallback
 
 ### Finding Session CWD
 
-The `findSessionCwd` method locates the working directory for a session by:
+For Claude, `findSessionCwd` locates the working directory for a session by:
 
 1. Scanning `~/.claude/projects/` directories for a `<sessionId>.jsonl` transcript file
 2. Reading the first line of the transcript (JSON with `cwd` field)
@@ -330,15 +339,21 @@ The directory name decoder (`decodeDirName`) handles Claude's encoding where `/`
   -> /Users/johndoe/projects/my-app (exists!) -> done
 ```
 
+For Copilot, `findSessionCwd` is O(1): it opens
+`~/.copilot/session-state/<id>/workspace.yaml` and reads the `cwd` field.
+
 ### Output Buffer & State Tracking
 
 Each `PtySession` maintains an `outputBuffer` of the last 300-500 output chunks. On every data event:
 
 1. The chunk is appended to the buffer (trimmed to 300 if exceeds 500)
-2. The `onData` callback is invoked (forwards to Socket.io)
-3. Context usage is parsed from the output (e.g., "97% remaining" -> 3% used)
+2. Every subscriber in `PtySession.subscribers` is invoked (Socket.io emitters,
+   trust/startup monitors, context monitors, etc.)
+3. Context usage is parsed from output when the provider supports TUI parsing
+   (Claude), or read asynchronously from provider-owned state on ready transitions
+   (Copilot's `session-store.db`)
 4. State transitions are detected:
-   - If `OutputParser.isPromptReady()` detects the `>` prompt -> state becomes `ready`
+   - If `provider.detectPromptReady()` detects the prompt -> state becomes `ready`
    - If a `pendingPrompt` is queued, it's sent immediately and state stays `busy`
    - If state was `ready` and new non-prompt output arrives -> state becomes `busy`
 
@@ -361,7 +376,9 @@ If the session is `ready`, the prompt is written immediately (`pty.write(prompt 
 
 **File:** `electron/pty/OutputParser.ts`
 
-A utility class for parsing Claude CLI terminal output:
+A utility class for parsing legacy Claude CLI terminal output. Current PTY state
+tracking calls provider methods (`detectPromptReady`, `parseContextUsage`, and
+async `getContextUsage`) so Copilot can use its own rules.
 
 ### `stripAnsi(text)`
 
@@ -369,7 +386,7 @@ Removes ANSI escape codes (CSI sequences, OSC sequences, mode changes, charset s
 
 ### `isPromptReady(text)`
 
-Detects Claude's prompt indicator by checking if stripped text ends with `>` or `\u276F` (the `❯` character). This signals the session is idle and ready for input.
+The legacy helper detects Claude-style prompt indicators by checking if stripped text ends with `>` or `\u276F` (the `❯` character). Current PTY state detection is provider-owned; Copilot can use its own prompt/usage rules.
 
 ### `parseContextUsage(text)`
 
@@ -387,11 +404,11 @@ Checks if terminal output is just an echo of the last prompt sent (used to filte
 
 **File:** `electron/pty/PromptInjector.ts`
 
-The Prompt Injector is a critical system that enables **programmatic interaction** with Claude sessions. It sends an instruction to a Claude session via PTY stdin and captures the structured output via a temporary file.
+The Prompt Injector is the fallback system for **programmatic interaction** when a provider does not use ACP. It sends an instruction to a PTY session via stdin and captures the structured output via a temporary file. Copilot programmatic capture uses ACP through `captureQuery()` when available.
 
 ### Why File-Based Capture?
 
-Claude CLI output goes through a TUI renderer with ANSI codes, cursor movements, and screen redraws. Parsing structured data from raw terminal output is unreliable. Instead, the injector tells Claude to write its output to a known file path, then polls for that file.
+CLI TUI output goes through ANSI codes, cursor movements, and screen redraws. Parsing structured data from raw terminal output is unreliable. Instead, the injector tells the CLI to write its output to a known file path, then polls for that file.
 
 ### Injection Flow
 
@@ -400,18 +417,18 @@ sequenceDiagram
     participant Caller as Service (Summary/Handoff/Orchestrator)
     participant PI as PromptInjector
     participant PTY as PtySession
-    participant Claude as Claude CLI
+    participant CLI as CLI
     participant FS as File System
 
     Caller->>PI: injectPrompt(ptySession, instruction, opts)
 
     Note over PI: Wait for prompt ready (poll 300ms x 10)
-    PI->>PTY: Check outputBuffer for ❯ prompt
+    PI->>PTY: Check outputBuffer for prompt indicator
 
     PI->>FS: Delete old output file (if exists)
 
     Note over PI: Build augmented prompt
-    PI->>PI: instruction + "Write ONLY the output to ~/.claude/agentmatrix-output-<sessionId>.txt using Bash tool"
+    PI->>PI: instruction + "Write ONLY the output to ~/.agentmatrix/output/<sessionId>.txt using Bash tool"
 
     PI->>PTY: pty.write(prompt)
     Note over PI: Wait 1 second
@@ -449,13 +466,13 @@ const prompt = [
 ].join(' ');
 ```
 
-**Write timing:** The prompt text is written first, then after a 1-second delay, `\r` (Enter) is sent. This delay gives Claude's TUI time to process the pasted text before submission.
+**Write timing:** The prompt text is written first, then after a 1-second delay, `\r` (Enter) is sent. This delay gives the CLI TUI time to process the pasted text before submission.
 
-**Output file path:** `~/.claude/agentmatrix-output-<sessionId>.txt` -- per-session files prevent race conditions when multiple sessions are injected simultaneously.
+**Output file path:** `~/.agentmatrix/output/<sessionId>.txt` -- per-session files prevent race conditions when multiple sessions are injected simultaneously.
 
 **Polling:** Every 2 seconds, up to 45 seconds (both configurable via `InjectOptions`).
 
-**Prompt readiness check:** Before injecting, the system checks the PTY output buffer for the `❯` prompt character (up to 10 checks at 300ms intervals, max 3 seconds).
+**Prompt readiness check:** Before injecting, the system checks the PTY output buffer for common Claude/Copilot prompt indicators (up to 10 checks at 300ms intervals, max 3 seconds).
 
 ### InjectionResult
 
@@ -495,7 +512,7 @@ graph LR
 
     subgraph PTY
         P[node-pty Process]
-        CL[Claude CLI]
+        CL[CLI Agent]
     end
 
     XT -->|"terminal:input {sessionId, data}"| S
@@ -506,7 +523,7 @@ graph LR
 
     CL -->|stdout| P
     P -->|onData| PM
-    PM -->|callback| TB
+    PM -->|subscriber callback| TB
     TB -->|"terminal:data {sessionId, data}"| S
     S -->|emit| XT
 
@@ -527,7 +544,7 @@ graph LR
 
 | Event | Payload | Description |
 |-------|---------|-------------|
-| `terminal:new` | `{ cwd, name?, permissionMode?, model?, effort?, allowedTools?, systemPrompt? }` | Spawn a new Claude session |
+| `terminal:new` | `{ cwd, name?, permissionMode?, model?, effort?, allowedTools?, systemPrompt?, cliType?, copilotMode? }` | Spawn a new CLI session |
 | `terminal:resume` | `{ sessionId }` | Resume/reconnect to an existing session |
 | `terminal:end` | `{ sessionId }` | End a session (fire animation + /exit + cleanup) |
 | `terminal:input` | `{ sessionId, data }` | Forward keystrokes to PTY |
@@ -565,7 +582,7 @@ Ending a session is a multi-step animated process:
 
 1. Remove from auto-resume list immediately
 2. Emit `session:fired` (triggers shocked + packing animation on the sprite)
-3. After 500ms: send `/exit\r` to the PTY (Claude CLI exit command)
+3. After 500ms: send the provider-specific exit sequence to the PTY (Claude `/exit`; Copilot Ctrl-C twice)
 4. After 8 seconds: `ptyManager.kill()`, `removeSession()`, emit `SESSION_END`
 
 The 8-second delay allows the walk-to-exit animation to complete (shocked: 1s + packing: 1.5s + walk: ~4s + buffer).
@@ -577,8 +594,8 @@ When a client reconnects to an existing session (`terminal:resume`):
 1. If PTY already exists in memory:
    - Replay the `outputBuffer` (all buffered chunks joined) so the terminal isn't blank
    - Re-attach the `onOutput` callback to the new socket
-2. If PTY doesn't exist (fresh resume from Claude transcript):
-   - Find CWD from transcript, create session entry, emit `SESSION_START`
+2. If PTY doesn't exist (fresh resume from provider session store):
+   - Find CWD via provider, create session entry, emit `SESSION_START`
    - Spawn via `ptyManager.spawnResume()`
    - Wire all callbacks
    - Save to auto-resume list
@@ -589,7 +606,7 @@ When a client reconnects to an existing session (`terminal:resume`):
 
 **File:** `electron/terminalBridge.ts` lines 335-436
 
-Editor terminals are raw shell processes (no Claude) used by the built-in code editor. They are managed separately from Claude sessions.
+Editor terminals are raw shell processes (no coding-agent CLI) used by the built-in code editor. They are managed separately from CLI agent sessions.
 
 ### Spawning
 
@@ -597,7 +614,7 @@ Editor terminals are raw shell processes (no Claude) used by the built-in code e
 socket.on('editor:terminal:spawn', ({ id, cwd, cols, rows }) => { ... });
 ```
 
-Unlike Claude sessions, editor terminals spawn a plain shell:
+Unlike CLI agent sessions, editor terminals spawn a plain shell:
 - **macOS:** `/usr/bin/login -fp <user>` (mimics VS Code's approach for full env setup)
 - **Linux:** `$SHELL -l -i` (login + interactive)
 - **Windows:** `cmd.exe`
@@ -630,14 +647,14 @@ Editor terminals are stored on `globalThis.__editorTerminals` (a `Map<string, { 
 
 **File:** `electron/services/OrchestratorService.ts`
 
-The orchestrator is a hidden Claude session used for app-internal tasks (e.g., deep session search). It is not visible in the main UI.
+The orchestrator is a hidden Copilot session used for app-internal tasks (e.g., deep session search). It is not visible in the main UI.
 
 ### Lifecycle
 
-1. On startup, checks `~/.claude/agentmatrix-orchestrator.json` for a cached session ID
+1. On startup, checks `~/.agentmatrix/orchestrator.json` for a cached session ID
 2. If found, attempts `spawnResume()` with the cached ID
-3. If resume fails (or no cache), spawns a fresh session with `--dangerously-skip-permissions` and a system prompt
-4. Monitors PTY output for the "trust this folder" prompt and auto-accepts it (sends Enter after 300ms)
+3. If resume fails (or no cache/stale pre-Copilot cache), spawns a fresh Copilot session with bypass permissions and a system prompt
+4. Subscribes to PTY output for provider-owned trust prompt patterns and auto-accepts them (sends Enter after 300ms)
 5. Named `agentMatrixOrchestrator(doNotUseManually)` in the name cache
 
 ### System Prompt
@@ -650,7 +667,7 @@ The orchestrator is a hidden Claude session used for app-internal tasks (e.g., d
 queryOrchestrator(instruction, opts?) -> { success, content, lines }
 ```
 
-Uses the Prompt Injector to send instructions and capture output. If the orchestrator has died, `ensureAlive()` automatically respawns it before querying.
+Uses `captureQuery()` to send instructions and capture output (ACP for Copilot, injector fallback for Claude). If the orchestrator has died, the service automatically respawns it before querying.
 
 ### Reset
 
@@ -662,7 +679,7 @@ The Settings UI provides a reset button that kills the current orchestrator, cle
 
 **File:** `electron/services/SummaryService.ts`
 
-Generates work summaries for sessions using the Prompt Injector.
+Generates work summaries for sessions using `captureQuery()` (ACP for Copilot, injector fallback for Claude).
 
 ### Instruction
 
@@ -670,7 +687,7 @@ Generates work summaries for sessions using the Prompt Injector.
 
 ### Flow
 
-1. Injects the summary instruction into the session's PTY
+1. Sends the summary instruction through `captureQuery()`
 2. Parses bullet points from the output (lines starting with `- `, 3-80 chars, max 3)
 3. Updates the session store with `summaryBullets`
 4. Broadcasts the update via Socket.io
@@ -683,7 +700,7 @@ Summaries are generated on-demand (user clicks "Generate Summary" in the UI), no
 
 **File:** `electron/services/HandoffService.ts`
 
-Transfers context from one Claude session to a newly spawned session.
+Transfers context from one CLI session to a newly spawned session.
 
 ### Three-Step Process
 
@@ -700,8 +717,8 @@ sequenceDiagram
     TB->>UI: handoff-status: 'summarizing'
     TB->>HS: generateHandoffSummary(ptyManager, sourceId, request, handoffId)
 
-    HS->>Src: injectPrompt("Create context handoff document...")
-    Note over Src: Claude writes to ~/.claude/agentmatrix-handoff-<id>.md
+    HS->>Src: captureQuery("Create context handoff document...")
+    Note over Src: ACP or injector fallback captures content
     Src-->>HS: result
 
     alt Handoff file exists
@@ -727,7 +744,7 @@ sequenceDiagram
 
 ### Handoff File
 
-Written to `~/.claude/agentmatrix-handoff-<handoffId>.md`. Contains decisions, file paths, code patterns, current state, and next steps. The new session reads, internalizes, and deletes this file.
+Written to `~/.agentmatrix/handoffs/<handoffId>.md`. Contains decisions, file paths, code patterns, current state, and next steps. The new session reads, internalizes, and deletes this file.
 
 ---
 
@@ -737,12 +754,12 @@ Written to `~/.claude/agentmatrix-handoff-<handoffId>.md`. Contains decisions, f
 
 **File:** `lib/state/activeSessionsCache.ts`
 
-Sessions are tracked in `~/.claude/agentmatrix-active-sessions.json`:
+Sessions are tracked in `~/.agentmatrix/active-sessions.json`:
 
 ```json
 [
-  { "id": "uuid-1", "name": "refactor-auth", "cwd": "/Users/dev/project" },
-  { "id": "uuid-2", "name": "fix-tests", "cwd": "/Users/dev/other" }
+  { "id": "uuid-1", "name": "refactor-auth", "cwd": "/Users/dev/project", "cliType": "copilot" },
+  { "id": "uuid-2", "name": "fix-tests", "cwd": "/Users/dev/other", "cliType": "claude" }
 ]
 ```
 
@@ -769,7 +786,7 @@ graph TD
         R4 --> R7[addSession - create session entry]
         R4 --> R8[spawnResume - spawn PTY with --resume]
         R4 --> R9[Wire callbacks]
-        R8 --> R10[Claude CLI resumes from transcript]
+        R8 --> R10[Provider CLI resumes from native session store]
         R2 -->|No| R11[Skip]
     end
 
@@ -778,9 +795,10 @@ graph TD
 
 ### What Survives Restarts
 
-- **Session ID** -- the Claude session UUID (used with `--resume`)
+- **Session ID** -- the CLI session UUID (used with provider `--resume`)
 - **Session name** -- from the name cache
 - **CWD** -- working directory
+- **CLI type** -- selected provider for resume
 
 ### What Does NOT Survive
 
@@ -795,7 +813,7 @@ graph TD
 
 **File:** `lib/state/nameCache.ts`
 
-Session names are stored in `~/.claude/agentmatrix-names.json`:
+Session names are stored in `~/.agentmatrix/names.json`:
 
 ```json
 {
@@ -856,8 +874,8 @@ electron-builder
 ### Distribution
 
 The built app is distributed as a zip with a `setup.sh` script that:
-1. Checks for Claude CLI and `az` CLI prerequisites
-2. Configures Claude Code hooks (HTTP POST to Next.js API routes)
+1. Checks for Copilot/Claude CLI and `az` CLI prerequisites
+2. Configures CLI hooks (Claude settings and Copilot `~/.copilot/hooks/agentmatrix.json` HTTP POST to Next.js API routes)
 3. Copies the app to `/Applications`
 
 ---
@@ -870,28 +888,28 @@ The built app is distributed as a zip with a `setup.sh` script that:
 | `electron/preload.ts` | Preload script -- exposes `platform` and `isElectron` |
 | `electron/terminalBridge.ts` | Socket.io <-> PTY bridge for all terminal I/O |
 | `electron/pty/PtyManager.ts` | PTY session spawning, tracking, and lifecycle |
-| `electron/pty/OutputParser.ts` | ANSI stripping, prompt detection, context parsing |
-| `electron/pty/PromptInjector.ts` | Inject-and-capture via file-based output |
-| `electron/services/OrchestratorService.ts` | Hidden Claude session for app-internal queries |
-| `electron/services/SummaryService.ts` | Work summary generation via prompt injection |
+| `electron/pty/OutputParser.ts` | ANSI stripping and legacy Claude output parsing helpers |
+| `electron/pty/PromptInjector.ts` | Fallback inject-and-capture via file-based output |
+| `electron/services/OrchestratorService.ts` | Hidden Copilot session for app-internal queries |
+| `electron/services/SummaryService.ts` | Work summary generation via captureQuery |
 | `electron/services/HandoffService.ts` | Context transfer between sessions |
-| `lib/state/activeSessionsCache.ts` | Auto-resume session list (`~/.claude/agentmatrix-active-sessions.json`) |
-| `lib/state/nameCache.ts` | Session name cache (`~/.claude/agentmatrix-names.json`) |
+| `lib/state/activeSessionsCache.ts` | Auto-resume session list (`~/.agentmatrix/active-sessions.json`) |
+| `lib/state/nameCache.ts` | Session name cache (`~/.agentmatrix/names.json`) |
 | `lib/state/appSettings.ts` | App settings including `autoResume` flag |
 | `lib/constants.ts` | Socket path, positions, colors |
 | `public/splash.html` | Native splash screen (loads before server starts) |
 | `package.json` | Build scripts including `electron:dev` and `electron:build` |
 
-### Runtime Files (all in `~/.claude/`)
+### Runtime Files (under `~/.agentmatrix/`)
 
 | File | Purpose |
 |------|---------|
-| `agentmatrix-active-sessions.json` | Sessions to auto-resume on restart |
-| `agentmatrix-names.json` | Session ID -> display name mapping |
-| `agentmatrix-orchestrator.json` | Cached orchestrator session ID |
-| `agentmatrix-output-<sessionId>.txt` | Temp file for prompt injection output |
-| `agentmatrix-handoff-<id>.md` | Context transfer documents |
-| `agentmatrix-settings.json` | User preferences |
-| `agentmatrix-tasks.json` | App task store |
-| `agentmatrix-ado.json` | Azure DevOps config |
-| `agentmatrix-task-<sessionId>-<taskId>.md` | Task assignment files |
+| `active-sessions.json` | Sessions to auto-resume on restart |
+| `names.json` | Session ID -> display name mapping |
+| `orchestrator.json` | Cached orchestrator session ID |
+| `output/<sessionId>.txt` | Temp file for prompt injection output |
+| `handoffs/<id>.md` | Context transfer documents |
+| `settings.json` | User preferences |
+| `tasks.json` | App task store |
+| `ado.json` | Azure DevOps config |
+| `tasks/<sessionId>-<taskId>.md` | Task assignment files |

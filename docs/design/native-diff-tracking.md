@@ -65,6 +65,9 @@ events.jsonl ────────▶│  (+ applyPatch)   │
 - **`diff.ts`** — LCS line-count for additions/deletions (common prefix/suffix trim + a cell cap
   so huge files fall back to a coarse magnitude estimate).
 - **`index.ts`** — `getSessionFileChanges()` / `getSessionFileDiff()` / `getSessionTouchedPaths()`.
+  It memoizes parsed transcripts by `(transcriptPath, mtimeMs)` and caches
+  `getSessionFileChanges()` results by transcript mtime, so repeated list/diff
+  opens do not re-parse unchanged JSONL files.
 
 ### Baseline reconstruction (the core idea)
 
@@ -76,6 +79,9 @@ To show "what this session changed", we need the file's **pre-session** content.
 - **Create-then-edits** → collapses to `''` at the `create` (the file was new → `isNew`).
 - **Full overwrite of a pre-existing file** is inherently lossy (prior content isn't in the
   transcript) → falls back to `git show HEAD:<path>` when available, else best-effort.
+  The git fallback uses async `execFile` and caches repo-root lookups per directory
+  (with a small shared cap) so lossy/deleted-file paths avoid repeated
+  `git rev-parse` work and never block the event loop with `execSync`.
 
 This needs no git and is exactly scoped to the session.
 

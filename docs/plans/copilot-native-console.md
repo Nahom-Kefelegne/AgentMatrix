@@ -1,6 +1,6 @@
 # Copilot-Native Console — Build Plan
 
-Status: **in progress** · Branch: `copilot-refactor-phase0`
+Status: **implemented** · Branch: `copilot-refactor-phase0`
 
 AgentMatrix is going **Copilot-first** (Claude access is ending). The embedded
 terminal console was built for Claude's inline-scrolling TUI; Copilot renders very
@@ -20,10 +20,12 @@ Confirmed via byte-level PTY probes of the Copilot CLI:
 
 - Full-screen **alt-screen** app (`ESC[?1049h`) using **absolute cursor positioning**
   (`ESC[<row>;<col>H`); enables bracketed paste (`2004`).
-- **No mouse-tracking** modes enabled (1000/1002/1003/1006 all off) → the scroll wheel
-  is inert by default.
-- **Manages its own timeline scrollback internally.** Scrolling is keyboard-only:
-  **PgUp/PgDn** (page), **Ctrl+O** (expand recent), **Ctrl+E** (expand all),
+- With `--mouse`, Copilot enables SGR mouse tracking (`1003` + `1006`) and accepts
+  SGR wheel reports for line-by-line timeline scrolling. Agent Matrix passes
+  `--mouse` on both new sessions and resumes.
+- Without mouse tracking (older Copilot, or `--mouse` not applied), Copilot
+  manages its own timeline scrollback internally and the fallback scroll primitive is:
+  **PgUp/PgDn** (page), plus **Ctrl+O** (expand recent), **Ctrl+E** (expand all),
   **Ctrl+T** (reasoning), **Ctrl+F** (timeline search).
 - xterm's own scrollback is **useless** for Copilot (alt-screen never writes the main
   buffer) — this was the source of the "scroll up shows garbage" bug.
@@ -63,15 +65,17 @@ Flow: `SessionDialog` / `FullscreenTerminal` → `TerminalPanel` (xterm) → soc
 Copilot); `terminal:exit`, `session:state`, `session:context`, `session:initializing`.
 
 **Rendering (Copilot):** never strip alt-screen/cursor/erase codes; forward
-PgUp/PgDn/Ctrl+O/E/T/F untouched; translate **mouse-wheel → PgUp/PgDn**; repaint via
-resize, never Ctrl+L.
+PgUp/PgDn/Ctrl+O/E/T/F untouched; translate **mouse-wheel → SGR wheel reports**
+while mouse tracking is on, and fall back to **PgUp/PgDn** pages when it is off;
+repaint via resize, never Ctrl+L.
 
 **Ownership:** exactly ONE panel per session owns PTY size (visible wins).
 
 **Output multiplexing:** `PtySession.onData` → subscriber `Set` so socket-emit +
 trust-watcher + state-monitor coexist.
 
-**Identity:** spawn with `--session-id=<uuid>` (+ optional `-n <name>`).
+**Identity:** spawn with `--session-id=<uuid>` (+ optional `-n <name>`) and include
+`--mouse` on spawn/resume so Copilot enables SGR wheel tracking.
 
 ---
 
@@ -96,8 +100,9 @@ Rejected: a single component branching on `cliType` — the anti-pattern the
 - **A1. Idempotent `terminal:resume`** ✅ per-socket `subscribeOutput` Map replaces all
   6 `onOutput` call sites; re-subscribe drops the prior sub; torn down on disconnect.
 - **A2. `CopilotTerminalPanel` + `useXterm()`** ✅ `lib/hooks/useXterm.ts` (shared
-  boilerplate) + `app/components/CopilotTerminalPanel.tsx` (raw passthrough, wheel→
-  PgUp/PgDn, copy/paste keys). Routed via new `app/components/SessionConsole.tsx`.
+  boilerplate) + `app/components/CopilotTerminalPanel.tsx` (raw passthrough,
+  wheel→SGR when mouse tracking is active, PgUp/PgDn fallback when inactive,
+  copy/paste keys). Routed via new `app/components/SessionConsole.tsx`.
   Shared theme extracted to `lib/terminalTheme.ts`.
 - **A3. Single-owner resize** ✅ only the visible panel emits `terminal:resize`;
   `PtySession.cols/rows` persisted; `PtyManager.forceRepaint()` (SIGWINCH nudge)
@@ -108,7 +113,7 @@ Rejected: a single component branching on `cliType` — the anti-pattern the
 
 Validation: `npx tsc --noEmit` + `npm run build` pass. Still to do: dev-build manual
 test (modal open/close mid-run, fullscreen toggle, resume-after-restart, long-output
-PgUp/PgDn + wheel, trust auto-accept) and Windows/RDP Canvas verification.
+PgUp/PgDn + line-by-line wheel, trust auto-accept) and Windows/RDP Canvas verification.
 
 ### Track B — Identity, naming & lifecycle (empirically probed 2026-07-07)
 
@@ -135,10 +140,9 @@ verified live against Copilot). B3 satisfied by B1. B2 deferred.
   `detectActiveSessionIds` comment fixed. Verified: dir created at exact UUID,
   `workspace.yaml` gets `name` + `user_named: true`. Claude untouched (already passed
   `--session-id`, ignores `name`).
-- **B2.** ⏸ DEFERRED — reading `session-store.db` needs a native SQLite dep
-  (`better-sqlite3`/node-gyp), risky with the expired mirror token + node 20.11 (no
-  built-in `node:sqlite`). Pure optimization; the existing `workspace.yaml` discovery
-  already yields names. Revisit as an optional PR (or via a pure-WASM reader).
+- **B2.** ⏸ DEFERRED for resume-search optimization — `workspace.yaml` discovery
+  still yields names. Context usage now reads `session-store.db` through the system
+  `sqlite3 -readonly` CLI asynchronously, avoiding a native Node SQLite dependency.
 - **B3.** ✅ SATISFIED by B1 — Copilot names are now durable in `workspace.yaml` and
   `discoverSessions()` already reads `meta.name`. **`nameCache` kept intact** (Claude +
   shared routes depend on it); nothing deleted.
@@ -212,22 +216,23 @@ config format, per-event payloads, discovery locations).
   (`notification` → attention for permission_prompt/elicitation_dialog only). All reuse
   existing card UI (status/statusReason/lastToolSummary/recentActions) — no frontend
   changes needed.
-- **Handler strategy (verified):** http hooks for the 11 fire-and-forget events (need
-  the localhost flag); **`PreToolUse` uses a `command`/curl hook** because Copilot
-  rejects http://localhost for it even with the flag (its response can grant perms).
-  E2e probe (real Copilot TUI): `session-start`, `prompt-submit`, `tool-use`
-  (PreToolUse cmd), `tool-complete`, `stop`, `session-end` all POST 200.
+- **Handler strategy (verified):** Agent Matrix writes user-level
+  `~/.copilot/hooks/agentmatrix.json` and sets `COPILOT_HOOK_ALLOW_LOCALHOST=1`.
+  Fire-and-forget monitoring events use HTTP POSTs to localhost; `PreToolUse` uses
+  a command/curl hook because Copilot rejects plain localhost HTTP for that
+  permission-capable event. E2e probe (real Copilot TUI): `session-start`,
+  `prompt-submit`, `tool-use`, `tool-complete`, `stop`, `session-end` all POST 200.
 - **Deferred:** `permissionRequest` (CLI-only, needs a decision response / https or
   command hook) — left for a follow-up; monitoring events cover the dashboard needs.
 
 ### Track C — Hooks + ACP (investigated 2026-07-07; reframed per user) [ACP portion]
-- **C-acp (ACP runner):** build `lib/cli/acp/` (`copilot --acp`) to replace the
+- **C-acp (ACP runner):** built `lib/cli/acp/` (`copilot --acp`) to replace the
   Claude-era `PromptInjector` for Summary/Handoff/Orchestrator (bypass Agency; PTY
   fallback). ACP verified working: `initialize` → `session/load{sessionId,cwd,
   mcpServers:[]}` → `session/prompt{sessionId,prompt:[{type:text,text}]}`, streams
   `agent_message_chunk`, ~2.5s, loads full history, **safe alongside a live PTY**.
 
-  **Mini-plan (executing):**
+  **Implemented:**
   - `lib/cli/acp/AcpClient.ts` — spawn `copilot --acp` (direct binary via
     `CopilotProvider.findBinary`, bypass Agency), JSON-RPC over stdio; `initialize` →
     `loadSession` → `prompt` (collect streamed text) → `dispose`; timeout + kill;
@@ -236,8 +241,7 @@ config format, per-event payloads, discovery locations).
     (`supportsAcp`) run via ACP, else fall back to `injectPrompt` (Claude PTY). Same
     `{success, content, lines}` return shape as PromptInjector so callers don't change.
   - Wire `SummaryService`, `HandoffService`, `OrchestratorService` through the helper.
-    Claude keeps PromptInjector; orchestrator (currently Claude) uses fallback until it
-    migrates to Copilot, then gets ACP for free.
+    Claude keeps PromptInjector; the hidden orchestrator now spawns as Copilot and gets ACP.
   - Keep `PromptInjector` (Claude fallback + safety net). ACP is experimental → never
     the only path.
 
@@ -293,7 +297,7 @@ for Claude. **Findings:**
   WAL-safe (works while Copilot writes) and fast (~12ms). Avoids a native SQLite dep.
 - Copilot runs a **~1M context** window (long_context tier; TUI footer "1M context").
 
-**Plan (implementing):**
+**Implemented:**
 - **Ctx-1:** `CliProvider.getContextUsage(sessionId): Promise<number|null>`. Copilot
   reads the latest `input_tokens` via `sqlite3 -readonly` (async `execFile`, UUID-
   validated, graceful null on any failure incl. Windows/no-sqlite3) and computes
@@ -310,7 +314,7 @@ for Claude. **Findings:**
 
 - After each phase: `npx tsc --noEmit` + `npm run build`; dev-build manual test —
   open/close modal mid-run, fullscreen toggle, resume-after-restart, long-output
-  PgUp/PgDn, trust-prompt auto-accept still fires. **Windows/RDP:** verify Canvas
+  PgUp/PgDn + line-by-line wheel, trust-prompt auto-accept still fires. **Windows/RDP:** verify Canvas
   renderer is crisp + responsive (A4).
 - Constraints: never dual-spawn PTY+ACP for one session; transcripts are sacred; don't
   block the main thread (Windows perf); ACP stays experimental with PTY fallback.

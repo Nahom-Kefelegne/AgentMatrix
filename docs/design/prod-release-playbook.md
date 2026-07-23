@@ -696,12 +696,12 @@ Or `@sentry/electron` (main + renderer) with `beforeSend` scrubbing file paths/c
 With auto-update you're blind on adoption otherwise. Send a privacy-reviewed `{version, os, arch}` heartbeat on launch (no transcript/task content). Lets you see who's on which version and whether the forced-hotfix landed. Add an **in-app version display + "Report a bug"** affordance (tie the version to crash reports).
 
 ### 8.3 Privacy note (start the compliance review NOW — non-technical blocker)
-The app **reads** `~/.claude` and `~/.copilot` (transcripts, names cache, session DBs), spawns CLIs, and **writes** prompts + captured output to `~/.claude/agentmatrix-output-*.txt` and task/handoff `.md` files that can contain source/secrets. For a `microsoft.com`-authored tool this needs:
+The app **reads** `~/.claude` and `~/.copilot` (native transcripts/session DBs) plus Agent Matrix state in `~/.agentmatrix`, spawns CLIs, and **writes** prompts + captured output to `~/.agentmatrix/output/*.txt` and task/handoff `.md` files that can contain source/secrets. For a `microsoft.com`-authored tool this needs:
 - A **`PRIVACY.md`** / data-flow doc stating what is read, what is written, and **what (if anything) leaves the machine** (crash reports + telemetry are the only egress — scrub them).
 - An internal **privacy/compliance sign-off** before distribution. This can stop release *late* if not started early.
 
 ### 8.4 Uninstall cleanup
-- **macOS:** ship an "Uninstall / Reset" menu action that (1) removes the injected hooks from `~/.claude/settings.json` + `~/.copilot/hooks/agentmatrix.json`, (2) offers to purge `~/.claude/agentmatrix-*.json` cache files.
+- **macOS:** ship an "Uninstall / Reset" menu action that (1) removes the injected hooks from `~/.claude/settings.json` + `~/.copilot/hooks/agentmatrix.json`, (2) offers to purge `~/.agentmatrix` app state.
 - **Windows NSIS:** add a custom uninstaller (`nsis.include` script) that runs the un-hook step on uninstall.
 - Provide a standalone `unhook.sh`/`unhook.ps1` for users who delete the app manually.
 

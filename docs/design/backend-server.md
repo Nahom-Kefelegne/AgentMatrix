@@ -8,7 +8,7 @@
 
 1. [Server Startup](#1-server-startup)
 2. [State Management (`lib/state/`)](#2-state-management)
-3. [Hook System (Claude Code -> Server -> Browser)](#3-hook-system)
+3. [Hook System (CLI -> Server -> Browser)](#3-hook-system)
 4. [Socket.io Event Catalog](#4-socketio-event-catalog)
 5. [API Route Catalog](#5-api-route-catalog)
 6. [Editor Terminal System](#6-editor-terminal-system)
@@ -115,12 +115,12 @@ Used by all API route handlers to push real-time updates after processing hooks.
 
 ### 2.3 Session Scanner (`lib/state/sessionScanner.ts`)
 
-Background process that discovers Claude Code sessions by parsing `ps aux` output.
+Background process that discovers external Claude and Copilot sessions through the CLI provider layer.
 
 **How it works:**
 
-1. Runs `ps aux | grep '[c]laude.*--session-id'` to find active Claude processes
-2. Extracts `--session-id` and optional `--resume` name from command line
+1. Asks each provider to detect active session IDs (`ps` args for Claude, Copilot process/session-state signals for Copilot)
+2. Extracts the session ID and optional resume/display name from provider results
 3. For new sessions: finds transcript file, resolves name, assigns desk, creates `SessionData`
 4. For existing sessions: updates names (from `--resume` flag or `/rename` detection)
 5. For disappeared processes: removes session (unless `appManaged`)
@@ -130,7 +130,7 @@ Background process that discovers Claude Code sessions by parsing `ps aux` outpu
 
 ### 2.4 Session Name (`lib/state/sessionName.ts`)
 
-Extracts session names from Claude transcript JSONL files:
+Extracts session names from provider metadata. Claude can also inspect transcript JSONL files:
 
 - `resolveSessionName(transcriptPath, cwd, sessionId)` -- full resolution chain
 - `checkForRename(transcriptPath)` -- checks only for `/rename` commands (reads last 500KB)
@@ -139,15 +139,15 @@ Rename detection regex: `/<local-command-stdout>Session and agent renamed to:(?:
 
 ### 2.5 Name Cache (`lib/state/nameCache.ts`)
 
-Persistent JSON file at `~/.claude/agentmatrix-names.json`. Maps session IDs to display names. Authority for session naming across restarts.
+Persistent JSON file at `~/.agentmatrix/names.json`. Maps session IDs to display names. Authority for session naming across restarts.
 
 ### 2.6 Active Sessions Cache (`lib/state/activeSessionsCache.ts`)
 
-Persistent JSON file at `~/.claude/agentmatrix-active-sessions.json`. Stores `{ id, name, cwd }` for auto-resume on app restart (used by Electron main process).
+Persistent JSON file at `~/.agentmatrix/active-sessions.json`. Stores `{ id, name, cwd, cliType? }` for auto-resume on app restart (used by Electron main process).
 
 ### 2.7 App Settings (`lib/state/appSettings.ts`)
 
-Persistent JSON file at `~/.claude/agentmatrix-settings.json`.
+Persistent JSON file at `~/.agentmatrix/settings.json`.
 
 ```typescript
 interface AppSettings {
@@ -156,16 +156,18 @@ interface AppSettings {
   defaultPermissionMode: string; // default: 'bypassPermissions'
   defaultEffort: string;        // default: ''
   appendSystemPrompt: string;   // default: ''
+  defaultCli?: 'claude' | 'copilot';
+  useAgency?: boolean;
 }
 ```
 
 ### 2.8 ADO Config (`lib/state/adoConfig.ts`)
 
-Persistent JSON file at `~/.claude/agentmatrix-ado.json`. Stores `{ organization, project, configured }`.
+Persistent JSON file at `~/.agentmatrix/ado.json`. Stores `{ organization, project, configured }`.
 
 ### 2.9 App Task Store (`lib/state/appTaskStore.ts`)
 
-Persistent JSON file at `~/.claude/agentmatrix-tasks.json`. CRUD operations for app-managed tasks (separate from Claude's native task system).
+Persistent JSON file at `~/.agentmatrix/tasks.json`. CRUD operations for app-managed tasks (separate from CLI-native task systems).
 
 ```typescript
 interface AppTask {
@@ -186,13 +188,13 @@ interface AppTask {
 
 ## 3. Hook System
 
-Claude Code fires HTTP webhooks at lifecycle events. The app configures these hooks in Claude's `settings.json` (via setup scripts). Each hook POSTs JSON to a local API route.
+Claude Code and GitHub Copilot CLI fire HTTP hooks at lifecycle events. The app configures Claude hooks in `~/.claude/settings.json` and Copilot hooks in `~/.copilot/hooks/agentmatrix.json` (via setup scripts). Each hook POSTs JSON to a local API route.
 
 ### Hook Event Flow
 
 ```mermaid
 sequenceDiagram
-    participant CC as Claude Code CLI
+    participant CC as CLI Hook
     participant API as Next.js API Route
     participant SS as Session Store
     participant IO as Socket.io
@@ -210,13 +212,19 @@ sequenceDiagram
 
 | Endpoint | Trigger | What it Does |
 |----------|---------|-------------|
-| `POST /api/hooks/session-start` | Claude session begins | Checks for `/rename` in transcript; updates name if found. Does NOT create sessions (scanner handles that). |
-| `POST /api/hooks/session-end` | Claude session ends | Removes session from store; emits `session:end` |
+| `POST /api/hooks/session-start` | CLI session begins | Checks for provider-specific rename metadata; updates name if found. Does NOT create sessions (scanner handles that). |
+| `POST /api/hooks/session-end` | CLI session ends | Removes session from store; emits `session:end` |
 | `POST /api/hooks/tool-use` | Tool invocation starts | Sets status to `working`; builds summary (e.g., "Reading src/foo.ts"); emits `tool:start` with truncated input (200 chars); checks for `/rename` |
 | `POST /api/hooks/tool-complete` | Tool finishes | Adds action to `recentActions`; clears `currentTool`; emits `tool:complete` and `session:update` |
-| `POST /api/hooks/stop` | Claude stops processing | Sets status to `idle`; clears tool info; emits `session:update` |
+| `POST /api/hooks/tool-failed` | Tool fails | Adds a failed action, clears current tool, emits tool/session updates |
+| `POST /api/hooks/stop` | CLI stops processing | Sets status to `idle`; clears tool info; emits `session:update` |
 | `POST /api/hooks/agent-start` | Subagent spawned | Creates `AgentData` with color/position; registers ID->name mapping; skips if agent type recently exited; emits `agent:start` (and `meeting:start` if team) |
 | `POST /api/hooks/agent-stop` | Subagent exits | Removes agent from session; marks agent type as exited (30s TTL); emits `agent:stop`; if no agents left, resets parent to idle |
+| `POST /api/hooks/prompt-submit` | User prompt submitted | Marks the session working immediately |
+| `POST /api/hooks/error` | CLI error | Emits/records error context for the session |
+| `POST /api/hooks/notification` | CLI notification | Marks session attention/status based on notification payload |
+| `POST /api/hooks/pre-compact` | Context compaction starts | Records compaction activity |
+| `POST /api/hooks/mcp-status` | MCP status update | Sets attention/done/idle status from MCP status tools |
 
 ### Hook Payload Shapes
 
@@ -340,7 +348,7 @@ All routes live under `app/api/` and use Next.js App Router conventions.
 
 ```mermaid
 graph TD
-    subgraph "/api/hooks (Claude Code Webhooks)"
+    subgraph "/api/hooks (CLI Hooks)"
         H1["POST /api/hooks/session-start"]
         H2["POST /api/hooks/session-end"]
         H3["POST /api/hooks/tool-use"]
@@ -348,6 +356,12 @@ graph TD
         H5["POST /api/hooks/stop"]
         H6["POST /api/hooks/agent-start"]
         H7["POST /api/hooks/agent-stop"]
+        H8["POST /api/hooks/tool-failed"]
+        H9["POST /api/hooks/prompt-submit"]
+        H10["POST /api/hooks/error"]
+        H11["POST /api/hooks/notification"]
+        H12["POST /api/hooks/pre-compact"]
+        H13["POST /api/hooks/mcp-status"]
     end
 
     subgraph "/api/sessions (Session Management)"
@@ -401,7 +415,7 @@ See [Section 3: Hook System](#3-hook-system) for full details.
 | `/sessions/list` | GET | List transcript files from disk | `?cwd=...&global=true` | `{ sessions: [{ id, name, slug, projectDir, lastModified, active }] }` |
 | `/sessions/info` | GET | Get single session info | `?id=...` | `{ id, name, cwd, status, deskIndex }` |
 | `/sessions/history` | GET | Read conversation history from transcript | `?sessionId=...&count=6` | `{ messages: [{ role, text, timestamp }] }` |
-| `/sessions/resolve` | GET | Resolve session ID to CWD by scanning `~/.claude/projects/` | `?id=...` | `{ id, cwd, name, projectDir }` |
+| `/sessions/resolve` | GET | Resolve session ID to CWD via providers | `?id=...&cliType=...` | `{ id, cwd, name, cliType }` |
 | `/sessions/resume-cmd` | GET | Get CLI command to resume session | `?id=...` | `{ command, cwd, name }` |
 | `/sessions/spawn` | POST | Spawn detached `claude --print` process | `{ task, cwd, name? }` | `{ ok, name, logFile }` |
 | `/sessions/kill` | POST | Kill session with animation delay | `{ sessionId }` | `{ ok }` |
@@ -413,11 +427,11 @@ See [Section 3: Hook System](#3-hook-system) for full details.
 | `/sessions/mcp` | POST | Write MCP server config | `{ servers }` | `{ ok }` |
 | `/sessions/mcp/registry` | GET | Get curated MCP server list | -- | `{ servers: [...] }` |
 
-**Session List** (`/sessions/list`): Scans `~/.claude/projects/` directories for `.jsonl` transcript files. When `global=true`, searches all project directories. Reads first 3KB of each transcript for slug extraction. Checks `ps aux` for which sessions are currently running.
+**Session List** (`/sessions/list`): Delegates to all CLI providers (or `cliType` filter) to discover on-disk sessions. When `global=true`, searches all provider session stores. Active-state detection also comes from providers.
 
 **Session Kill** (`/sessions/kill`): Emits `session:fired` socket event FIRST, then waits 3 seconds (for the "shocked + packing" animation), then kills matching processes via `ps aux | grep` + `kill`.
 
-**Session Resolve** (`/sessions/resolve`): Uses a greedy directory-name decoder (`decodeDirName`) to reverse Claude's project-dir encoding (where `/` becomes `-` but folder names can contain `-`). Falls back to reading `cwd` from transcript first line.
+**Session Resolve** (`/sessions/resolve`): Delegates to providers. Claude can use transcript metadata and the greedy directory-name decoder; Copilot uses session-state metadata.
 
 **Session History** (`/sessions/history`): Reads last 200KB of the JSONL transcript file and parses backwards to extract the most recent user/assistant text messages. Returns truncated text (user: 500 chars, assistant: 1000 chars).
 
@@ -480,10 +494,10 @@ These are Claude Code's own task files. The API reads/writes JSON files under `~
 |-------|--------|---------|
 | `/app-tasks` | GET | List all app tasks |
 | `/app-tasks` | POST | Create, update, delete, or discuss tasks |
-| `/app-tasks/assign` | POST | Write task assignment MD file for Claude to read |
+| `/app-tasks/assign` | POST | Write task assignment MD file for the selected CLI session to read |
 | `/app-tasks/assign` | DELETE | Clean up task assignment file |
 
-App tasks are stored in `~/.claude/agentmatrix-tasks.json`. Task assignment writes a markdown file to `~/.claude/agentmatrix-task-{sessionId}-{taskId}.md` that Claude can read to internalize the task.
+App tasks are stored in `~/.agentmatrix/tasks.json`. Task assignment writes a markdown file to `~/.agentmatrix/tasks/{sessionId}-{taskId}.md` that the CLI session can read to internalize the task.
 
 #### Orchestrator (`/api/orchestrator`)
 
@@ -495,7 +509,7 @@ Placeholder route. Returns `{ error: 'Use socket event "orchestrator:query" inst
 
 **File:** `server.ts` -- `setupEditorTerminals()`
 
-The editor has its own shell terminal system, independent of Claude session terminals (which run in Electron).
+The editor has its own shell terminal system, independent of coding-agent session terminals (which run in Electron).
 
 ### Architecture
 
@@ -543,22 +557,21 @@ sequenceDiagram
 
 ```mermaid
 stateDiagram-v2
-    [*] --> Discovered: Scanner finds claude process
+    [*] --> Discovered: Scanner finds CLI process
     Discovered --> Active: session:start emitted
     Active --> Working: tool-use hook
     Working --> Active: tool-complete / stop hook
     Active --> Meeting: agent-start (with team)
     Meeting --> Active: All agents stopped
-    Active --> Ended: Process disappears from ps aux
+    Active --> Ended: Provider no longer reports process
     Active --> Killed: /sessions/kill API
     Killed --> FiredAnimation: session:fired emitted
     FiredAnimation --> Ended: 3s delay + kill signal
     Ended --> [*]: session:end emitted
 
     note right of Discovered
-        Scanner runs ps aux every 10s
-        Finds transcript in ~/.claude/projects/
-        Resolves name from transcript/cache
+        Scanner queries providers every 10s
+        Resolves CWD/name from provider metadata/cache
         Assigns desk position
     end note
 
@@ -571,21 +584,20 @@ stateDiagram-v2
 
 ### Session Discovery (Scanner)
 
-1. `ps aux | grep '[c]laude.*--session-id'` extracts active session IDs + resume names
+1. Providers return active session IDs + resume names where available
 2. For each new ID:
-   - `find ~/.claude/projects/ -name "{id}.jsonl"` locates transcript
-   - Reads first 3KB for metadata (cwd, slug)
+   - Provider resolves CWD from transcript/session-state metadata
    - Resolves name (resume flag > cache > rename > slug > cwd)
    - Assigns next available desk index
    - Creates `SessionData` and adds to store
 3. For disappeared IDs: removes from store (unless app-managed)
-4. Name updates: detects `/rename` commands in transcript tail
+4. Name updates: detects provider-specific updates (Claude `/rename` commands in transcript tail)
 
 ### Session Data Shape
 
 ```typescript
 interface SessionData {
-  id: string;              // Claude session UUID
+  id: string;              // CLI session UUID
   name: string;            // Display name
   color: string;           // Character color (from 10-color palette)
   status: SessionStatus;   // 'idle' | 'working' | 'meeting'
@@ -599,6 +611,7 @@ interface SessionData {
   agents: AgentData[];     // Active subagents
   teamId?: string;
   cwd?: string;            // Working directory
+  cliType?: 'claude' | 'copilot';
   contextUsage?: number;
   summaryBullets?: string[];
   createdAt: number;
@@ -627,7 +640,7 @@ sequenceDiagram
     API-->>UI: { valid: true }
 
     UI->>API: POST { action: 'configure', organization, project }
-    API->>API: Save to ~/.claude/agentmatrix-ado.json
+    API->>API: Save to ~/.agentmatrix/ado.json
 
     Note over UI,API: Fetch Tasks
     UI->>API: GET ?action=tasks
@@ -664,42 +677,41 @@ Reads/writes Claude Code's own task files at `~/.claude/tasks/{listId}/{taskId}.
 
 ### 9.2 App Tasks (`/api/app-tasks/`)
 
-The app's own task board, stored in `~/.claude/agentmatrix-tasks.json`:
+The app's own task board, stored in `~/.agentmatrix/tasks.json`:
 
 - Create tasks manually or import from ADO
-- Assign tasks to sessions (writes markdown file for Claude to read)
+- Assign tasks to sessions (writes markdown file for the CLI to read)
 - Discussion threads on tasks
 - Status tracking: pending -> assigned -> completed
 - ADO sync: bidirectional state + comment sync
 
 **Assignment flow:**
 1. UI calls `POST /api/app-tasks/assign` with task details
-2. API writes `~/.claude/agentmatrix-task-{sessionId}-{taskId}.md`
-3. Electron tells Claude session to read the file
+2. API writes `~/.agentmatrix/tasks/{sessionId}-{taskId}.md`
+3. Electron tells the CLI session to read the file
 4. After 60s, UI calls `DELETE /api/app-tasks/assign` to clean up
 
 ---
 
 ## 10. Persistence Layer
 
-All persistent data lives as JSON files in `~/.claude/`:
+Agent Matrix's persistent data lives as JSON files in `~/.agentmatrix/`; native Claude data remains under `~/.claude/`:
 
 ```mermaid
 graph TD
-    subgraph "~/.claude/"
-        A[agentmatrix-names.json<br/>Session name cache]
-        B[agentmatrix-tasks.json<br/>App task store]
-        C[agentmatrix-active-sessions.json<br/>Auto-resume list]
-        D[agentmatrix-settings.json<br/>App preferences]
-        E[agentmatrix-orchestrator.json<br/>Orchestrator session ID]
-        F[agentmatrix-ado.json<br/>ADO org + project]
-        G[mcp_servers.json<br/>MCP server config]
+    subgraph "~/.agentmatrix/"
+        A[names.json<br/>Session name cache]
+        B[tasks.json<br/>App task store]
+        C[active-sessions.json<br/>Auto-resume list]
+        D[settings.json<br/>App preferences]
+        E[orchestrator.json<br/>Orchestrator session ID]
+        F[ado.json<br/>ADO org + project]
     end
 
-    subgraph "~/.claude/ (temp files)"
-        H["agentmatrix-output-{sessionId}.txt<br/>Prompt injection output"]
-        I["agentmatrix-task-{sessionId}-{taskId}.md<br/>Task assignment docs"]
-        J["agentmatrix-handoff-{id}.md<br/>Context transfer docs"]
+    subgraph "~/.agentmatrix/ (temp files)"
+        H["output/{sessionId}.txt<br/>Prompt injection output"]
+        I["tasks/{sessionId}-{taskId}.md<br/>Task assignment docs"]
+        J["handoffs/{id}.md<br/>Context transfer docs"]
     end
 
     subgraph "~/.claude/projects/"
@@ -711,7 +723,7 @@ graph TD
     end
 ```
 
-**Key design decision:** No database. All state is in flat JSON files or derived from `ps aux` + transcript files at runtime. The in-memory session store (`globalThis.__sessions`) is the runtime source of truth, hydrated by the scanner on startup and kept in sync by hooks.
+**Key design decision:** No app database. App-owned state is in flat JSON files; active/session metadata is derived through CLI providers from process and native session stores at runtime. The in-memory session store (`globalThis.__sessions`) is the runtime source of truth, hydrated by the scanner on startup and kept in sync by hooks.
 
 ---
 

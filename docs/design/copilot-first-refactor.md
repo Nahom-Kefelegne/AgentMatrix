@@ -1,6 +1,6 @@
 # Copilot-First Refactor — Implementation Design
 
-**Status:** Proposed
+**Status:** Historical plan; Phase 0 + selective Phase 1 have landed (see `copilot-refactor-overview.md`, `cli-provider-architecture.md`, and `state-storage-layout.md` for current implementation details).
 **Owners:** TBD
 **Last Updated:** 2026-05-14
 **Supersedes (in part):** `docs/design/multi-cli-support.md` (high-level architecture remains valid; this doc replaces the SDK section since `@github/copilot-sdk` won't support ACP and `@anthropic-ai/claude-agent-sdk` is unavailable to users — see [Architecture Decisions](#architecture-decisions))
@@ -83,8 +83,8 @@ interface CliProvider {
 ACP is fundamentally not PTY — no TTY rows/cols, no shell args, no buffer replay. Rather than forcing it into `CliProvider`, we add a **sibling** abstraction:
 
 ```typescript
-// lib/cli/acp/CopilotAcpConnection.ts
-class CopilotAcpConnection extends EventEmitter {
+// Implemented as lib/cli/acp/AcpClient.ts for one-shot captureQuery() calls.
+class AcpClient {
   start(): Promise<AcpSessionId>;
   resume(sessionId: AcpSessionId): Promise<void>;
   prompt(text: string, attachments?: ContentBlock[]): Promise<AcpStopReason>;
@@ -97,7 +97,7 @@ class CopilotAcpConnection extends EventEmitter {
 function runHeadlessAcpPrompt(opts): Promise<{ text; stopReason }>;
 ```
 
-`CopilotProvider` (PTY) and `CopilotAcpConnection` (ACP) coexist. The Spawn Modal exposes "Use ACP (preview)" toggle. Claude has no ACP — `Provider.supportsAcp = false`.
+`CopilotProvider` (PTY) and `AcpClient` (ACP) coexist. The current implementation uses ACP for out-of-band `captureQuery()` calls rather than exposing a separate "Use ACP (preview)" session toggle. Claude has no ACP — `Provider.supportsAcp = false`.
 
 ### 3.3 State storage migration
 
@@ -198,8 +198,8 @@ Every screen becomes CLI-aware. No more hardcoded Claude options.
 | # | Task | Files | Effort |
 |---|---|---|---|
 | 2.1 | Add `@agentclientprotocol/sdk` dependency | `package.json` | XS |
-| 2.2 | New module `lib/cli/acp/`: `types.ts`, `CopilotAcpConnection.ts`, `runHeadlessAcpPrompt.ts`, `index.ts` | New files | L |
-| 2.3 | Health probe: try `copilot --acp --stdio` + `initialize`; surface in Settings | `app/api/cli/health/route.ts`, `AppSettingsModal.tsx` | S |
+| 2.2 | New module `lib/cli/acp/`: `AcpClient.ts`, `captureQuery.ts` | New files | L |
+| 2.3 | Health probe: try `copilot --acp` + `initialize`; surface in Settings | `app/api/cli/health/route.ts`, `AppSettingsModal.tsx` | S |
 | 2.4 | App setting: `copilotAcpEnabled` (default `false`) | `lib/state/appSettings.ts`, `AppSettingsModal.tsx` | XS |
 | 2.5 | `PromptInjector` gains ACP branch for Copilot when flag enabled; falls back to PTY injection on any ACP error | `electron/pty/PromptInjector.ts` | M |
 | 2.6 | `SummaryService`, `HandoffService`, task-assign route, deep-search orchestrator: use ACP path when available | `electron/services/*.ts`, `app/api/app-tasks/assign/route.ts` | M |
@@ -217,7 +217,7 @@ The features Claude can't match. These are the demo-worthy wins.
 | # | Task | Files | Effort |
 |---|---|---|---|
 | 3.1 | Tool-level permission UI in SpawnModal: Allow/Deny columns, per-tool checkboxes, URL allowlist, pre-built templates | `SpawnModal.tsx`, `CopilotProvider.buildSpawnArgs` | L |
-| 3.2 | Mode toggle in SessionDialog footer: Interactive / Plan / Autopilot. Plan mode opens "Plan Review" panel with editable checklist | `SessionDialog.tsx`, new `PlanReview.tsx`, `CopilotAcpConnection.setMode()` | L |
+| 3.2 | Mode toggle in SessionDialog footer: Interactive / Plan / Autopilot. Plan mode opens "Plan Review" panel with editable checklist | `SessionDialog.tsx`, new `PlanReview.tsx`, ACP mode support | L |
 | 3.3 | Mid-session model swap: footer dropdown sends `/model <name>` via ACP | `SessionDialog.tsx` | S |
 | 3.4 | preToolUse hook returns JSON for guardrails (deny / modify args) | New `app/api/copilot/pre-tool-use/route.ts`, `setup.sh`/`.ps1` hook config update | M |
 | 3.5 | `/fleet` view: parse ACP `tool_call.title` heuristically + `SubagentStop` hooks to render parallel agent tree in SessionDialog | New `FleetView.tsx`, hook payload parsing | L |
@@ -304,7 +304,7 @@ Grouped by phase. **Bold = new file.**
 | File | Change |
 |---|---|
 | **`lib/cli/acp/types.ts`** | `AcpEvent`, `AcpToolCall`, `AcpPlanStep`, `AcpPermissionRequest`, `AcpSpawnOptions` |
-| **`lib/cli/acp/CopilotAcpConnection.ts`** | Class wrapping `copilot --acp --stdio` |
+| **`lib/cli/acp/AcpClient.ts`** | Class wrapping `copilot --acp --allow-all` |
 | **`lib/cli/acp/runHeadlessAcpPrompt.ts`** | One-shot helper for SummaryService / handoff / task-assign |
 | **`lib/cli/acp/index.ts`** | Registry: sessionId → connection |
 | `package.json` | Add `@agentclientprotocol/sdk` |
@@ -341,7 +341,7 @@ Grouped by phase. **Bold = new file.**
 | Two parallel sessions (PTY + ACP for Mirror View) diverge | High | High | Mirror View labeled clearly; don't ship A.2 until A.1 has 2+ release cycles of clean data |
 | Dual provider system (PTY + ACP) drifts | Med | Med | Type-strict interface; integration tests covering both |
 | Custom MCP servers in `mcpServers[]` fail silently | Med | Low | Validate via no-op tool ping after `session/new` |
-| `agency copilot --acp --stdio` stdio piping broken | Low | Med | Probe in health check; document non-Agency fallback |
+| `agency copilot --acp` stdio piping broken | Low | Med | Probe in health check; document non-Agency fallback |
 | Hook payload field differences between CLIs (`session_id` vs `sessionId`) | Low | Low | Normalize at handler entry; both already use snake_case via PascalCase event names |
 | User has Copilot installed but not authenticated → spawn fails opaquely | Med | Low | Detect via health probe; show "Run `gh auth login`" guidance in SpawnModal |
 | Phase 2 increases startup time (extra Copilot ACP process per programmatic task) | Low | Low | Lazy-spawn on first use; cache one ACP orchestrator per CLI type |

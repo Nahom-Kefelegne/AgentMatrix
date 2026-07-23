@@ -2,7 +2,7 @@
 
 ## Overview
 
-Agent Matrix's services layer orchestrates Claude Code sessions through three specialized services (Orchestrator, Summary, Handoff), a prompt injection mechanism for programmatic Claude interaction, and a state management system that persists across Next.js hot reloads using `globalThis`. All persistent data is stored as JSON files in `~/.claude/`.
+Agent Matrix's services layer orchestrates CLI sessions through three specialized services (Orchestrator, Summary, Handoff), provider-specific capture for programmatic CLI interaction, and a state management system that persists across Next.js hot reloads using `globalThis`. App-owned persistent data is stored as JSON files in `~/.agentmatrix/`; Claude and Copilot keep their own native state under their respective config directories.
 
 ---
 
@@ -10,7 +10,7 @@ Agent Matrix's services layer orchestrates Claude Code sessions through three sp
 
 **File:** `electron/services/OrchestratorService.ts`
 
-The Orchestrator is a hidden Claude Code session used exclusively for app-internal tasks (e.g., deep session search). It is never shown in the main UI session list.
+The Orchestrator is a hidden Copilot session used exclusively for app-internal tasks (e.g., deep session search). It is never shown in the main UI session list.
 
 ### Lifecycle
 
@@ -44,14 +44,14 @@ questions. Do not modify any file except the specified output file.
 
 ### Session ID Persistence
 
-- **Cache file:** `~/.claude/agentmatrix-orchestrator.json`
+- **Cache file:** `~/.agentmatrix/orchestrator.json`
 - **Schema:** `{ "sessionId": "<uuid>" }`
-- On startup, attempts to resume from cached ID; spawns fresh on failure
+- On startup, attempts to resume from cached Copilot ID if it exists on disk; spawns fresh on failure or stale pre-Copilot cache entries
 - Named `agentMatrixOrchestrator(doNotUseManually)` in the name cache to prevent accidental interaction
 
 ### Trust Prompt Handling
 
-The `startupMonitor()` intercepts PTY output for up to 60 seconds, looking for trust-related keywords (`"trust this folder"`, `"trust this project"`, `"Is this a project"`, `"Yes, I trust"`). When detected, it sends `\r` (Enter) after 300ms to auto-accept. The monitor restores the original `onData` handler after acceptance or timeout.
+The `startupMonitor()` subscribes to PTY output for up to 60 seconds, looking for provider-owned trust prompt patterns plus fallback keywords (`"trust this folder"`, `"trust this project"`, `"Is this a project"`, `"Yes, I trust"`). When detected, it sends `\r` (Enter) after 300ms to auto-accept, then removes its subscriber after acceptance or timeout.
 
 ### Query Interface
 
@@ -60,7 +60,7 @@ queryOrchestrator(instruction: string, opts?: InjectOptions)
   -> Promise<{ success: boolean; content: string; lines: string[] }>
 ```
 
-Delegates to `injectPrompt()` (see Section 4). Before querying, `ensureAlive()` checks if the session is still open and respawns if needed.
+Delegates to `captureQuery()` (ACP for Copilot, injector fallback for Claude). Before querying, the service checks if the session is still open and respawns if needed.
 
 ### Socket Events
 
@@ -89,7 +89,7 @@ Delegates to `injectPrompt()` (see Section 4). Before querying, `ensureAlive()` 
 
 **File:** `electron/services/SummaryService.ts`
 
-Generates concise work summaries for sessions by asking Claude to self-summarize.
+Generates concise work summaries for sessions through `captureQuery()` (ACP for Copilot, prompt-inject fallback for Claude).
 
 ### Summary Generation Flow
 
@@ -98,19 +98,16 @@ sequenceDiagram
     participant UI as Browser
     participant Bridge as terminalBridge
     participant Svc as SummaryService
-    participant PI as PromptInjector
-    participant PTY as Claude PTY
-    participant FS as Output File
+    participant CQ as captureQuery
+    participant PTY as CLI PTY / ACP
+    participant FS as Output File (fallback)
 
     UI->>Bridge: session:summary { sessionId }
     Bridge->>Svc: requestSummary(io, ptyManager, sessionId)
-    Svc->>PI: injectPrompt(ptySession, SUMMARY_INSTRUCTION)
-    PI->>PTY: Write prompt text
-    PI->>PTY: Send Enter (after 1s delay)
-    PTY->>FS: Claude writes output file
-    PI->>FS: Poll every 2s (up to 45s)
-    FS-->>PI: File found, read + delete
-    PI-->>Svc: { success, content, lines }
+    Svc->>CQ: captureQuery(ptySession, SUMMARY_INSTRUCTION)
+    CQ->>PTY: ACP request or injector prompt
+    PTY-->>CQ: Response or fallback output file
+    CQ-->>Svc: { success, content, lines }
     Svc->>Svc: parseBullets(lines)
     Svc->>Svc: updateSession(sessionId, { summaryBullets })
     Svc->>UI: io.emit(SESSION_UPDATE, { summaryBullets })
@@ -143,7 +140,7 @@ Bullets are stored on the `SessionData` object as `summaryBullets: string[]` and
 
 **File:** `electron/services/HandoffService.ts`
 
-Transfers context from one Claude session to a newly spawned session.
+Transfers context from one CLI session to a newly spawned session.
 
 ### Context Transfer Sequence
 
@@ -160,8 +157,8 @@ sequenceDiagram
     Bridge->>UI: handoff-status: "summarizing"
     Bridge->>HS: generateHandoffSummary(ptyManager, sourceId, request, handoffId)
     HS->>Src: injectPrompt(instruction, { timeout: 90s })
-    Note over Src: Claude summarizes context,<br/>writes to handoff file
-    Src->>FS: Write ~/.claude/agentmatrix-handoff-<id>.md
+    Note over Src: captureQuery summarizes context<br/>(ACP or injector fallback)
+    Src->>FS: Write ~/.agentmatrix/handoffs/<id>.md
     HS-->>Bridge: { success: true }
 
     Bridge->>UI: handoff-status: "spawning"
@@ -179,10 +176,10 @@ sequenceDiagram
 
 ### Handoff File
 
-- **Path:** `~/.claude/agentmatrix-handoff-<handoffId>.md`
+- **Path:** `~/.agentmatrix/handoffs/<handoffId>.md`
 - **Content:** Context summary generated by the source session, including decisions, file paths, code patterns, current state, and next steps
-- The source session is told to write directly to this path (overriding default PromptInjector output file)
-- Fallback: if Claude writes to the default output file instead, the service copies the content to the handoff path
+- `captureQuery()` captures the summary out-of-band and the service writes it to this path
+- Fallback: if the Claude injector path writes to the per-session output file instead, returned content is copied to the handoff path
 
 ### New Session Configuration
 
@@ -190,13 +187,13 @@ The handoff spawns a new session with full configuration options:
 - `sessionName` - Display name
 - `targetCwd` - Working directory
 - `permissionMode` - Default: `bypassPermissions`
-- `model` - Claude model
+- `model` - Provider model
 - `effort` - Effort level
 - `systemPrompt` - Custom system prompt
 
 ### Injection into New Session
 
-After an 8-second fixed delay (to allow Claude TUI to initialize), the service writes a prompt directly to the new session's PTY:
+After the spawn delay (to allow the CLI TUI to initialize), the service writes a prompt directly to the new session's PTY:
 
 ```
 Read the file at <path>. It contains context from a previous session.
@@ -212,11 +209,11 @@ Status updates are emitted via `session:handoff-status`:
 
 ---
 
-## 4. Prompt Injection System
+## 4. Prompt Injection Fallback System
 
 **File:** `electron/pty/PromptInjector.ts`
 
-The core mechanism for programmatic interaction with Claude sessions. Used by Orchestrator, Summary, and Handoff services.
+Fallback mechanism for programmatic interaction when a provider does not use ACP. `captureQuery()` selects ACP for Copilot and this injector path for Claude-style PTY capture.
 
 ### How It Works
 
@@ -241,9 +238,9 @@ flowchart TD
 
 ### Output File Convention
 
-Each session has its own output file: `~/.claude/agentmatrix-output-<sessionId>.txt`
+Each session has its own output file: `~/.agentmatrix/output/<sessionId>.txt`
 
-The injected prompt tells Claude:
+The injected prompt tells the CLI:
 ```
 Write ONLY the output to <path> using the Bash tool.
 Do NOT include any explanation or preamble in the file. Just the raw output.
@@ -261,7 +258,7 @@ interface InjectOptions {
 
 ### Prompt Ready Detection
 
-Checks the last 10 chunks of the PTY output buffer for the prompt indicator (`❯` or Unicode `\u276F`) at the end of stripped ANSI output.
+Checks the last 10 chunks of the PTY output buffer for common Claude/Copilot prompt indicators (`$`, `❯`, `›`, `>`) at the end of stripped ANSI output.
 
 ---
 
@@ -269,7 +266,7 @@ Checks the last 10 chunks of the PTY output buffer for the prompt indicator (`�
 
 **File:** `electron/pty/PtyManager.ts`
 
-Manages all Claude Code PTY processes.
+Manages all provider-backed CLI PTY processes.
 
 ### PtySession Interface
 
@@ -281,7 +278,7 @@ interface PtySession {
   currentState: PtyState;       // 'busy' | 'ready'
   contextUsage: number | null;  // % used (0-100)
   outputBuffer: string[];       // Last 300-500 chunks
-  onData: ((data: string) => void) | null;
+  subscribers: Set<(data: string) => void>;
   onReady: (() => void) | null;
   onStateChange: ((info: StateInfo) => void) | null;
   onContextUpdate: ((usage: number) => void) | null;
@@ -307,6 +304,7 @@ erDiagram
         number contextUsage
         string[] summaryBullets
         string cwd
+        string cliType
         number createdAt
     }
     AgentData {
@@ -349,6 +347,7 @@ erDiagram
         string id PK
         string name
         string cwd
+        string cliType
     }
     AppSettings {
         boolean autoResume
@@ -373,7 +372,7 @@ erDiagram
 
 | Method | Purpose |
 |---|---|
-| `spawnNew(id, opts)` | Launch new Claude session with `--session-id` |
+| `spawnNew(id, opts)` | Launch new provider session with provider-built args |
 | `spawnResume(id, opts)` | Resume existing session with `--resume` |
 | `sendPrompt(sessionId, prompt)` | Send prompt (queues if busy) |
 | `kill(sessionId)` | Kill PTY process |
@@ -382,17 +381,14 @@ erDiagram
 ### State Detection
 
 The PTY manager parses output in real-time:
-- **Ready state:** Detects prompt indicator (`❯`) in recent output buffer
+- **Ready state:** Delegates prompt detection to the session's provider
 - **Busy state:** Any output after ready state transitions back to busy
-- **Context usage:** Parses `"N% remaining"` or `"N% used"` from Claude's status bar
+- **Context usage:** Delegates to provider parsing; Copilot can also refresh usage from on-disk accounting after a turn completes
 - **Pending prompt:** If a prompt is sent while busy, it queues and auto-sends when ready
 
 ### CWD Resolution
 
-`findSessionCwd()` resolves the working directory for a session by:
-1. Scanning `~/.claude/projects/` for a `<sessionId>.jsonl` transcript file
-2. Reading the first line's `cwd` field
-3. Falling back to `decodeDirName()` — a greedy path decoder that converts the encoded project directory name (e.g., `-Users-johndoe-my-app`) back to a real filesystem path
+`findSessionCwd()` resolves the working directory for a session by delegating to the provider. Claude scans `~/.claude/projects/` transcripts and falls back to decoding the encoded project directory name; Copilot reads its session-state metadata.
 
 ---
 
@@ -427,19 +423,19 @@ flowchart TB
         EditorTerms["__editorTerminals<br/>Map&lt;string, {proc, buffer}&gt;"]
     end
 
-    subgraph Disk["Disk Persistence (~/.claude/)"]
-        Names["agentmatrix-names.json<br/>Record&lt;sessionId, name&gt;"]
-        Tasks["agentmatrix-tasks.json<br/>AppTask[]"]
-        Active["agentmatrix-active-sessions.json<br/>CachedSession[]"]
-        Settings["agentmatrix-settings.json<br/>AppSettings"]
-        Orch["agentmatrix-orchestrator.json<br/>{ sessionId }"]
-        ADO["agentmatrix-ado.json<br/>AdoConfig"]
+    subgraph Disk["Disk Persistence (~/.agentmatrix/)"]
+        Names["names.json<br/>Record&lt;sessionId, name&gt;"]
+        Tasks["tasks.json<br/>AppTask[]"]
+        Active["active-sessions.json<br/>CachedSession[]"]
+        Settings["settings.json<br/>AppSettings"]
+        Orch["orchestrator.json<br/>{ sessionId }"]
+        ADO["ado.json<br/>AdoConfig"]
     end
 
-    subgraph Temp["Temporary Files (~/.claude/)"]
-        Output["agentmatrix-output-&lt;sessionId&gt;.txt"]
-        TaskFile["agentmatrix-task-&lt;sessionId&gt;-&lt;taskId&gt;.md"]
-        Handoff["agentmatrix-handoff-&lt;id&gt;.md"]
+    subgraph Temp["Temporary Files (~/.agentmatrix/)"]
+        Output["output/&lt;sessionId&gt;.txt"]
+        TaskFile["tasks/&lt;sessionId&gt;-&lt;taskId&gt;.md"]
+        Handoff["handoffs/&lt;id&gt;.md"]
     end
 
     Sessions -.->|auto-resume| Active
@@ -476,7 +472,7 @@ flowchart TB
 ### Name Cache
 
 **File:** `lib/state/nameCache.ts`
-**Disk:** `~/.claude/agentmatrix-names.json`
+**Disk:** `~/.agentmatrix/names.json`
 **Schema:** `Record<string, string>` (sessionId -> display name)
 
 The authoritative source for session names. Read/written on every access (no in-memory caching).
@@ -484,15 +480,15 @@ The authoritative source for session names. Read/written on every access (no in-
 ### Active Sessions Cache
 
 **File:** `lib/state/activeSessionsCache.ts`
-**Disk:** `~/.claude/agentmatrix-active-sessions.json`
-**Schema:** `CachedSession[]` where `CachedSession = { id, name, cwd }`
+**Disk:** `~/.agentmatrix/active-sessions.json`
+**Schema:** `CachedSession[]` where `CachedSession = { id, name, cwd, cliType? }`
 
 Tracks sessions for auto-resume on app restart. Updated whenever a session is spawned, resumed, or ended.
 
 ### App Settings
 
 **File:** `lib/state/appSettings.ts`
-**Disk:** `~/.claude/agentmatrix-settings.json`
+**Disk:** `~/.agentmatrix/settings.json`
 **Schema:**
 
 ```typescript
@@ -502,13 +498,15 @@ interface AppSettings {
   defaultPermissionMode: string; // Default: 'bypassPermissions'
   defaultEffort: string;         // Default: ''
   appendSystemPrompt: string;    // Default: ''
+  defaultCli?: 'claude' | 'copilot';
+  useAgency?: boolean;
 }
 ```
 
 ### ADO Config
 
 **File:** `lib/state/adoConfig.ts`
-**Disk:** `~/.claude/agentmatrix-ado.json`
+**Disk:** `~/.agentmatrix/ado.json`
 **Schema:**
 
 ```typescript
@@ -526,7 +524,7 @@ interface AdoConfig {
 ### Task Model
 
 **File:** `lib/state/appTaskStore.ts`
-**Disk:** `~/.claude/agentmatrix-tasks.json`
+**Disk:** `~/.agentmatrix/tasks.json`
 
 ```typescript
 interface AppTask {
@@ -555,17 +553,17 @@ sequenceDiagram
     participant API as /api/app-tasks/assign
     participant FS as Task File
     participant Bridge as terminalBridge
-    participant PTY as Claude PTY
+    participant PTY as CLI PTY
 
     UI->>API: POST { sessionId, taskId, subject, description, ... }
-    API->>FS: Write agentmatrix-task-<sessionId>-<taskId>.md
+    API->>FS: Write ~/.agentmatrix/tasks/<sessionId>-<taskId>.md
     API-->>UI: { ok: true, filePath }
 
     UI->>Bridge: terminal:input (via socket)
     Note over UI: Sends prompt: "Read <filePath>,<br/>internalize task, then work on it"
     Bridge->>PTY: Write prompt + Enter
 
-    Note over PTY: Claude reads file,<br/>internalizes task details
+    Note over PTY: CLI reads file,<br/>internalizes task details
 
     Note over UI: After 60s cleanup delay
     UI->>API: DELETE { sessionId, taskId }
@@ -607,7 +605,7 @@ Comment text...
 - `POST action=delete` - Delete task
 
 **`app/api/app-tasks/assign/route.ts`** (Assignment):
-- `POST` - Write task file for Claude to read
+- `POST` - Write task file for the CLI to read
 - `DELETE` - Clean up task file after assignment
 
 ---
@@ -615,7 +613,7 @@ Comment text...
 ## 9. Azure DevOps Integration
 
 **File:** `app/api/ado/route.ts`
-**Config:** `~/.claude/agentmatrix-ado.json`
+**Config:** `~/.agentmatrix/ado.json`
 
 Uses the `az` CLI for all ADO operations (no API keys required -- relies on existing Azure CLI authentication).
 
@@ -661,13 +659,13 @@ HTML tags are stripped from comment text. Comments are added via the `--discussi
 
 **File:** `lib/state/sessionScanner.ts`
 
-Discovers Claude sessions running outside of Agent Matrix by scanning `ps aux` for Claude processes with `--session-id` flags.
+Discovers CLI sessions running outside of Agent Matrix by asking each provider for active session IDs. Claude scans process args for `--session-id`; Copilot cross-references live Copilot processes with its lock/session-state files.
 
 ### Scan Cycle (every 10 seconds)
 
-1. Parse `ps aux` output for active Claude processes
+1. Collect active processes from all providers
 2. For new processes: create SessionData, assign desk, resolve name
-3. For existing processes: check for `/rename`, fill missing CWD
+3. For existing processes: check provider-specific rename metadata (Claude `/rename`), fill missing CWD
 4. For disappeared processes: remove (unless `isAppManaged`)
 
 ### Name Resolution Priority
@@ -675,7 +673,7 @@ Discovers Claude sessions running outside of Agent Matrix by scanning `ps aux` f
 **File:** `lib/state/sessionName.ts`
 
 1. `--resume` name from process args
-2. Cached name from `agentmatrix-names.json`
+2. Cached name from `names.json`
 3. `/rename` command detected in last 500KB of transcript
 4. `slug` from transcript first 3KB
 5. Last segment of CWD path
@@ -722,7 +720,7 @@ The central wiring layer that connects Socket.IO events to PTY operations and se
 - **Summary requests:** `session:summary` -> delegate to SummaryService
 - **Orchestrator ops:** `orchestrator:reset`, `orchestrator:get-id`, `orchestrator:query`
 - **Context handoff:** `session:handoff` -> full handoff flow (summarize, spawn, inject)
-- **Editor terminals:** Raw shell PTY management for the code editor (no Claude)
+- **Editor terminals:** Raw shell PTY management for the code editor (no coding-agent CLI)
 
 ---
 
@@ -751,7 +749,7 @@ sequenceDiagram
     Srv->>Srv: httpServer.listen(3000)
 
     par Auto-Resume
-        Resume->>Resume: Read agentmatrix-active-sessions.json
+        Resume->>Resume: Read ~/.agentmatrix/active-sessions.json
         loop Each cached session
             Resume->>Resume: Create SessionData + addSession
             Resume->>IO: emit session:start
@@ -784,12 +782,12 @@ sequenceDiagram
 
 | Type | Fields | Purpose |
 |---|---|---|
-| `SessionData` | id, name, color, status, deskIndex, deskPosition, spawnPosition, currentTool, lastToolSummary, lastActivity, recentActions, agents, teamId, cwd, contextUsage, summaryBullets, createdAt | Full session state |
+| `SessionData` | id, name, color, status, deskIndex, deskPosition, spawnPosition, currentTool, lastToolSummary, lastActivity, recentActions, agents, teamId, cwd, contextUsage, summaryBullets, cliType, createdAt | Full session state |
 | `AgentData` | id, name, parentSessionId, teamName, color, status, position, currentTool, createdAt | Sub-agent attached to a session |
 | `Action` | toolName, summary, timestamp | Tool use record |
 | `CharacterData` | id, name, color, status, currentTool, lastToolSummary, lastActivity, recentActions, teamId, isAgent, parentName | Flattened view for React rendering |
 
-### Hook Payloads (from Claude Code)
+### Hook Payloads (from CLI hooks)
 
 | Type | Additional Fields | Hook |
 |---|---|---|
@@ -814,12 +812,12 @@ All payloads extend `HookPayload: { session_id, session_name?, cwd?, timestamp? 
 
 | File | Schema | Purpose | Read/Write Frequency |
 |---|---|---|---|
-| `agentmatrix-names.json` | `Record<sessionId, name>` | Session name authority | Every name lookup/set |
-| `agentmatrix-tasks.json` | `AppTask[]` | App task store | Every task operation |
-| `agentmatrix-active-sessions.json` | `CachedSession[]` | Auto-resume tracking | Spawn/resume/end |
-| `agentmatrix-settings.json` | `AppSettings` | User preferences | Settings read/save |
-| `agentmatrix-orchestrator.json` | `{ sessionId }` | Orchestrator session persistence | Startup/reset |
-| `agentmatrix-ado.json` | `AdoConfig` | ADO org + project | Config read/save |
-| `agentmatrix-output-<sessionId>.txt` | Plain text | Prompt injection output (temp) | Per injection |
-| `agentmatrix-task-<sessionId>-<taskId>.md` | Markdown | Task assignment document (temp) | Per assignment |
-| `agentmatrix-handoff-<id>.md` | Markdown | Context transfer document (temp) | Per handoff |
+| `names.json` | `Record<sessionId, name>` | Session name authority | Every name lookup/set |
+| `tasks.json` | `AppTask[]` | App task store | Every task operation |
+| `active-sessions.json` | `CachedSession[]` | Auto-resume tracking | Spawn/resume/end |
+| `settings.json` | `AppSettings` | User preferences | Settings read/save |
+| `orchestrator.json` | `{ sessionId }` | Orchestrator session persistence | Startup/reset |
+| `ado.json` | `AdoConfig` | ADO org + project | Config read/save |
+| `output/<sessionId>.txt` | Plain text | Prompt injection output (temp) | Per injection |
+| `tasks/<sessionId>-<taskId>.md` | Markdown | Task assignment document (temp) | Per assignment |
+| `handoffs/<id>.md` | Markdown | Context transfer document (temp) | Per handoff |

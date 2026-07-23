@@ -67,12 +67,15 @@ classDiagram
     +buildResumeShellCommand(opts) string
     +detectPromptReady(text) boolean
     +parseContextUsage(text) number?
+    +getContextUsage(id) Promise~number?~
     +getTrustPromptPatterns() string[]
     +getContextPromptPatterns() string[]
     +getModelList() ModelOption[]
     +getPermissionModes() PermissionMode[]
     +discoverSessions() DiscoveredSession[]
     +findSessionCwd(id) string?
+    +getTranscriptPath(id) string?
+    +renameSession(id, name) boolean
     +detectActiveSessionIds() ActiveProcessInfo[]
   }
 
@@ -88,7 +91,7 @@ classDiagram
     +type = "copilot"
     +supportsMcp = false
     +supportsFork = false
-    +supportsContextTracking = false
+    +supportsContextTracking = true
     +supportsAcp = true
   }
 
@@ -102,17 +105,17 @@ classDiagram
 |---|---|---|---|
 | `supportsMcp` | true | false | Whether `PtyManager.spawnNew()` injects the MCP-aware system prompt. |
 | `supportsFork` | true | false | Whether the Resume modal shows the "Fork session" option (`--fork-session`). |
-| `supportsContextTracking` | true | false | Whether the dashboard renders the context-usage bar. |
+| `supportsContextTracking` | true | true | Whether the dashboard renders the context-usage bar. Claude parses TUI text; Copilot reads token accounting from `session-store.db`. |
 | `supportsSubagents` | true | true | Whether the `/fleet` view is enabled and `SubagentStart/Stop` hooks are expected. |
-| `supportsAcp` | false | true | Whether ACP-based services (`PromptInjector`, `SummaryService`, `HandoffService`) can use stdio JSON-RPC instead of file polling. |
+| `supportsAcp` | false | true | Whether `captureQuery()` can use ACP stdio JSON-RPC instead of the PromptInjector file-polling fallback. |
 
 ### Method groups
 
 - **Binary & health**: `findBinary`, `checkHealth`
 - **Spawn / resume**: `buildSpawnArgs`, `buildResumeArgs`, `buildResumeShellCommand`
-- **TUI parsing**: `detectPromptReady`, `parseContextUsage`, `getTrustPromptPatterns`, `getContextPromptPatterns`
+- **TUI parsing / context usage**: `detectPromptReady`, `parseContextUsage`, `getContextUsage`, `getTrustPromptPatterns`, `getContextPromptPatterns`
 - **UI metadata**: `getModelList`, `getPermissionModes`
-- **Disk discovery**: `discoverSessions`, `findSessionCwd`
+- **Disk discovery**: `discoverSessions`, `findSessionCwd`, `getTranscriptPath`, `renameSession`
 - **Process detection**: `detectActiveSessionIds`
 
 ---
@@ -213,10 +216,14 @@ If a caller needs to repeatedly query `discoverSessions()`, that caller should m
 
 ### CopilotProvider
 
-- **`discoverSessions`** reads `~/.copilot/session-state/<UUID>/workspace.yaml` — a tiny flat YAML with `cwd` and `name`. A 25-line custom parser avoids the `js-yaml` dependency.
+- **`buildSpawnArgs`** emits `--session-id <uuid>` for deterministic identity, `-n <name>` for durable names, `--allow-all` for bypass-permissions, `--mode <interactive|plan|autopilot>` when non-default, `--model`, `--reasoning-effort`, `--allow-tool=<tool>`, and `--mouse` so the native console gets SGR wheel tracking.
+- **`buildResumeArgs` / `buildResumeShellCommand`** return `copilot --resume <id> --mouse`. Copilot remembers permission state; there is no fork-session flag.
+- **`discoverSessions`** reads `~/.copilot/session-state/<UUID>/workspace.yaml` — a tiny flat YAML with `cwd` and `name`. A custom parser avoids the `js-yaml` dependency and folds block-scalar names.
 - **`findSessionCwd`** is O(1) — directly opens `<UUID>/workspace.yaml`.
-- **`detectActiveSessionIds`** cross-references `~/.copilot/session-state/<UUID>/inuse.<PID>.lock` files against the set of live `copilot` processes from `ps`/`wmic`. This is necessary because Copilot does **not** accept `--session-id` on spawn, so the command line doesn't carry the session UUID.
-- **`parseContextUsage`** returns `null` for now (format unknown — Phase 0 PR #4).
+- **`detectActiveSessionIds`** cross-references `~/.copilot/session-state/<UUID>/inuse.<PID>.lock` files against the set of live `copilot` processes from `ps`/`wmic`. New Agent Matrix sessions are spawned with `--session-id`, but locks still reliably map resumed or externally-started Copilot processes to UUIDs.
+- **`parseContextUsage`** returns `null` because Copilot's TUI doesn't print a parseable context meter; **`getContextUsage`** reads the latest `assistant_usage_events.input_tokens` from `~/.copilot/session-store.db` via async `sqlite3 -readonly`.
+- **`getTranscriptPath`** returns `session-state/<id>/events.jsonl` for the native diff tracker.
+- **`renameSession`** writes `name:` and `user_named: true` into `workspace.yaml`, preserving Copilot-owned fields.
 
 ```mermaid
 flowchart LR
@@ -263,21 +270,21 @@ This is provider-agnostic — works for Claude and Copilot. Claude users see no 
 
 ## 8. What's next
 
-This PR is the foundation. PRs #2–#4 of Phase 0 consume the new interface:
+This section was originally the Phase 0 roadmap. The listed consumer work has
+since landed in the codebase:
 
-- **PR #2** — Migrate state storage from `~/.claude/agentmatrix-*` to `~/.agentmatrix/*`. Untangles app state from Claude's config dir.
-- **PR #3** — Wire callers to the new methods:
-  - `sessionScanner` uses `provider.detectActiveSessionIds()` instead of inline `ps aux | grep claude`
-  - `/api/sessions/list` + `/api/sessions/resolve` call `provider.discoverSessions()` for both CLIs
-  - `PtyManager.spawnNew` guards MCP injection behind `provider.supportsMcp`
-  - `PtyManager.findSessionCwd` delegates to `provider.findSessionCwd(id)`
-  - `electron/main.ts` reads `provider.getTrustPromptPatterns()` and `getContextPromptPatterns()` instead of inlined arrays
-  - `terminalBridge.watchForTrustPrompt` does the same
-  - `/api/sessions/spawn` uses `provider.findBinary()` instead of hardcoded `claude`
-- **PR #4** — Capture Copilot session ID from first hook payload; reverse-engineer Copilot's context-usage TUI output and implement `parseContextUsage()`.
+- **State storage** migrated from `~/.claude/agentmatrix-*` to `~/.agentmatrix/*`.
+- **Callers** (`sessionScanner`, `/api/sessions/list`, `/api/sessions/resolve`,
+  `PtyManager`, trust-prompt watchers, and spawn/resume command builders) now route
+  through provider methods.
+- **Copilot identity** is deterministic through `--session-id`; no first-hook capture is needed.
+- **Copilot context usage** is implemented through async `getContextUsage()` over
+  `session-store.db`, not TUI text parsing.
 
-Then **Phase 1** flips all UI surfaces (SpawnModal, ResumeModal, AppSettingsModal, etc.) to read from the provider.
+Phase 1 UI surfaces (SpawnModal, ResumeModal, AppSettingsModal, session cards and
+dialogs) are provider-aware and use `uiMetadata` for browser-safe model,
+permission, mode, and resume-command metadata.
 
-**Phase 2** introduces the sibling `CliTransport` abstraction for ACP, gated on `supportsAcp`. ACP is not forced into `CliProvider` because its shape is fundamentally different (event stream, not request/response). The two live side by side; UI picks one or the other per session, never both.
+**Phase 2** introduced the `AcpClient` / `captureQuery()` path for ACP, gated on `supportsAcp`. ACP is not forced into `CliProvider` because its shape is fundamentally different (event stream, not request/response). The visible PTY still owns the interactive session; ACP is used out-of-band for structured captures.
 
 See `copilot-first-refactor.md` §4 for the full phased plan.

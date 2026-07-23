@@ -179,12 +179,12 @@ Inherits host CLI's auth state. Must run `copilot login` or have `gh auth login`
 |---|---|---|---|
 | Interactive | default | default | Pauses at decisions |
 | Plan | `--plan` or `--mode plan` | `--permission-mode plan` | Produces structured plan as Markdown to stdout. NOT a discrete payload type. ACP `plan` notification may fire (UNDOCUMENTED). |
-| Autopilot | `--autopilot` or `--mode autopilot` | n/a (closest: `--dangerously-skip-permissions`) | Works through steps without user input. **Does NOT auto-grant permissions** — first turn prompts user to choose (1) enable all (2) limited (3) cancel. So autopilot ≠ `--yolo` ≠ `--allow-all`. |
+| Autopilot | `--autopilot` or `--mode autopilot` | n/a (closest: `--dangerously-skip-permissions`) | Works through steps without user input. **Does NOT auto-grant permissions** — first turn prompts user to choose (1) enable all (2) limited (3) cancel. So autopilot ≠ permissions bypass (`--allow-all`). |
 | Fleet | `/fleet` or pass `--prompt` to multiple subagents | Task tool spawning | Parallel subagents. v1.0.66-1 added concurrency + depth limits in settings. |
 
 Mode cycle in TUI: **Shift+Tab**. No `/mode` slash command.
 
-`--allow-all` / `--yolo` is a separate axis (permissions) from `--autopilot` (turn-taking). Combining all three = full hands-off.
+`--allow-all` is a separate axis (permissions) from `--autopilot` (turn-taking). Combining `--mode autopilot` with `--allow-all` = full hands-off.
 
 ---
 
@@ -202,7 +202,7 @@ Where `Kind` is `shell`, `write`, `read`, or an MCP server name. Examples:
 - `MyMCPServer(create_issue)`
 - URLs: `url(github.com)` (deny wins over allow)
 
-Flags: `--allow-tool=PATTERN` (repeatable) | `--deny-tool=PATTERN` (deny wins) | `--allow-all-tools` | `--allow-all-paths` | `--allow-all-urls` | `--allow-all` / `--yolo` (all three) | `--available-tools=…` (whitelist what the model SEES) | `--excluded-tools=…` (blacklist).
+Flags: `--allow-tool=PATTERN` (repeatable) | `--deny-tool=PATTERN` (deny wins) | `--allow-all-tools` | `--allow-all-paths` | `--allow-all-urls` | `--allow-all` (all three) | `--available-tools=…` (whitelist what the model SEES) | `--excluded-tools=…` (blacklist). Older Copilot builds used `--yolo`; Agent Matrix now emits `--allow-all`.
 
 Persistent approvals: "Yes, always" writes to `~/.copilot/permissions-config.json`. "Trusted Folders" for path-scoped approvals (storage location UNDOCUMENTED).
 

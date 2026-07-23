@@ -2,7 +2,7 @@
 
 ## Overview
 
-Agent Matrix is a Next.js 16 + Electron desktop application that provides a real-time visual interface for managing multiple Claude Code sessions. The frontend renders three distinct view modes -- a Dashboard card grid, a pixel-art Office canvas, and a Monaco-based Editor -- all connected to the backend via Socket.io for live updates.
+Agent Matrix is a Next.js 16 + Electron desktop application that provides a real-time visual interface for managing multiple CLI coding-agent sessions (GitHub Copilot CLI and Claude Code). The frontend renders three distinct view modes -- a Dashboard card grid, a pixel-art Office canvas, and a Monaco-based Editor -- all connected to the backend via Socket.io for live updates.
 
 All React components are client-side (`'use client'`) and use inline styles (no CSS modules or Tailwind class-based styling). The design language is a dark theme with a `#08080f`/`#111118` background palette, `#4a9eff` blue accents, and `#51cf66` green for success states.
 
@@ -36,7 +36,9 @@ graph TD
     OV --> AppSettingsModal
     OV --> OrchestratorViewer["SessionDialog (readOnly)"]
 
-    SessionDialog --> TerminalPanel
+    SessionDialog --> SessionConsole
+    SessionConsole --> TerminalPanel
+    SessionConsole --> CopilotTerminalPanel
     SessionDialog --> HandoffModal
     SessionDialog --> FullscreenTerminal
     SessionDialog --> ContextBar
@@ -44,10 +46,12 @@ graph TD
     SessionDialog --> InfoTab
     SessionDialog --> SettingsTab
 
-    FullscreenTerminal --> TerminalPanel
+    FullscreenTerminal --> SessionConsole
 
     DashboardView --> SessionCard
+    DashboardView --> AmbientOrbs
     SessionCard --> ContextBar
+    SessionCard --> MatrixRain
 
     EditorView --> FileTree
     EditorView --> EditorTabs
@@ -92,8 +96,8 @@ The `OfficeView` component holds a `viewMode` state: `'dashboard' | 'office' | '
 
 ### View Switching
 
-- **HeaderBar** renders a toggle button group with `Dashboard` and `Office` buttons (Editor is not shown in the toggle but exists as a lazy-loaded route).
-- **Office canvas stays mounted** even when not visible (`display: 'contents'` vs `display: 'none'`) to preserve the GameEngine state and avoid re-initializing sprites.
+- **HeaderBar** renders a toggle button group with `Dashboard` and `Office`; `Editor` appears after the hidden Ctrl/Cmd+Shift+E unlock.
+- **Office canvas is mounted only when visible** so its 60fps render loop stops while the Dashboard or Editor is active.
 - **Dashboard** is conditionally rendered (`{viewMode === 'dashboard' && <DashboardView />}`).
 - **Editor** is lazy-loaded via `next/dynamic` with `{ ssr: false }` and only rendered when `viewMode === 'editor'`.
 
@@ -144,7 +148,7 @@ flowchart LR
 
 ### State Flow Pattern
 
-1. **Server emits** socket events (from Claude Code hooks or PTY manager)
+1. **Server emits** socket events (from CLI hooks or PTY manager)
 2. **`useSocket` hook** updates the `sessions` Map and broadcasts via `emitEvent()`
 3. **SocketProvider** exposes state via React Context
 4. **Components** consume via `useSocketContext()` and re-render on Map changes
@@ -191,7 +195,7 @@ stateDiagram-v2
 
         state Tasks {
             [*] --> TaskList
-            TaskList --> SyncWithClaude : Sync button
+            TaskList --> SyncWithCli : Sync button
         }
 
         state Info {
@@ -220,14 +224,15 @@ stateDiagram-v2
 
 ### Tab Content
 
-- **Console**: `TerminalPanel` -- live xterm.js terminal connected to the session's PTY. All tabs stay mounted (`display: none/flex`) to preserve terminal state.
-- **Tasks**: Fetches tasks from `/api/app-tasks` filtered by `assignedTo === sessionId`. Each task card has a "Sync" button that writes task details to a file and sends a terminal command for Claude to read it.
+- **Console**: `SessionConsole` -- live xterm.js terminal connected to the session's PTY. It routes Copilot sessions to `CopilotTerminalPanel` (raw alt-screen passthrough) and Claude sessions to the legacy `TerminalPanel`.
+- Non-console tab bodies are **lazy-mounted on first activation** and then kept mounted to preserve local state; opening a session starts on the console without immediately fetching tasks, memory, or MCP data.
+- **Tasks**: Fetches tasks from `/api/app-tasks` filtered by `assignedTo === sessionId`. Each task card has a "Sync" button that writes task details to a file and sends a terminal command for the session's CLI to read it.
 - **Info**: Session status, CWD, agent list, work summary bullets, recent actions, context usage bar.
 - **Settings**: Memory notes (read/write to `~/.claude/projects/` memory files) and MCP server management (install/remove from a registry).
 
 ### Bottom Bar Actions
 
-- **Copy Resume Command** -- Copies `cd <cwd> && claude --dangerously-skip-permissions --resume <name>`
+- **View Changes** -- Opens `ChangesViewer`, which is lazy-mounted only when requested.
 - **Transfer Context** (purple) -- Opens HandoffModal. Turns yellow when transfer is in progress.
 - **Restart** -- Kills and provides a resume command
 - **End Session** -- Emits `terminal:end` event, waits 4.5s, then closes
@@ -244,7 +249,7 @@ Two fullscreen options:
 
 ```mermaid
 sequenceDiagram
-    participant UI as TerminalPanel
+    participant UI as SessionConsole
     participant Socket as Socket.io
     participant PTY as PTY Manager (Electron)
 
@@ -253,7 +258,7 @@ sequenceDiagram
     Socket->>PTY: Attach to existing PTY
     PTY-->>Socket: Output buffer replay (300 chunks)
     Socket-->>UI: "terminal:data" events
-    UI->>UI: terminal.write(stripClear(data))
+    UI->>UI: terminal.write(data) or legacy stripClear(data)
 
     Note over UI: User types
     UI->>Socket: emit("terminal:input", {sessionId, data})
@@ -273,16 +278,24 @@ sequenceDiagram
 
 ### xterm.js Configuration
 
-- **Terminal**: fontSize 16, Menlo/Monaco font, 5000 line scrollback, custom dark theme
-- **WebGL Addon**: Loaded for GPU-accelerated rendering (falls back gracefully)
+- **Terminal**: fontSize 16, Menlo/Monaco font, custom dark theme. Legacy Claude panels use larger scrollback; Copilot's alt-screen panel keeps xterm scrollback minimal because Copilot owns its timeline.
+- **Renderer ladder**: WebGL where appropriate, Canvas fallback/preference on Windows/RDP, DOM as last resort.
 - **FitAddon**: Auto-fits terminal to container, debounced ResizeObserver + window resize handler
 - **CSS**: Custom scrollbar styling injected via `<style>` tag
-- **Clear stripping**: Removes `\e[2J`, `\e[3J`, `\e[H` sequences to preserve terminal history
+- **Clear stripping**: Legacy `TerminalPanel` removes select clear sequences for Claude history. `CopilotTerminalPanel` is raw passthrough and never strips alt-screen/cursor/erase bytes.
 
 ### Keyboard Handling
 
-- **Shift+Enter**: Intercepted via `attachCustomKeyEventHandler`, sends CSI u encoding `\x1b[13;2u` for Claude TUI multiline input
+- **Shift+Enter**: Intercepted via `attachCustomKeyEventHandler`; Claude and Copilot use their provider-specific encodings for multiline input.
 - **All other keys**: Handled by xterm's default `onData` handler, forwarded to PTY
+
+### Copilot mouse-wheel handling
+
+Copilot sessions are launched/resumed with `--mouse`, so the TUI enables SGR
+mouse tracking (`1003` + `1006`). `CopilotTerminalPanel` tracks DECSET/DECRST
+mouse-mode toggles and translates DOM wheel events into SGR wheel reports for
+line-by-line timeline scrolling. If mouse tracking is off, it falls back to
+PgUp/PgDn page events.
 
 ### Session Initializing Overlay
 
@@ -290,13 +303,13 @@ When a session is generating a work summary on startup, the `session:initializin
 
 ### Visibility Handling
 
-When the Console tab becomes visible, the terminal is re-fitted multiple times at 50ms, 200ms, 500ms, and 1000ms intervals to handle layout transitions and dialog animations.
+When the Console tab becomes visible, the terminal is fitted/resized through the shared `useXterm` lifecycle and the owning visible panel emits the PTY resize. Hidden panels do not fight over a single PTY's dimensions.
 
 ---
 
 ## Office Canvas View
 
-The Office view renders a 38x26 tile pixel-art RPG office where each Claude session is represented as an animated character sprite.
+The Office view renders a 38x26 tile pixel-art RPG office where each CLI session is represented as an animated character sprite.
 
 ### Architecture
 
@@ -341,7 +354,7 @@ The Dashboard displays sessions as animated cards in a responsive grid.
 
 ### Layout
 
-- Max width 1100px, centered, responsive grid (`repeat(auto-fill, minmax(480px, 1fr))`)
+- Max width 1200px, centered, responsive grid (`repeat(auto-fill, minmax(420px, 1fr))`)
 - Filter pills at top: All / Working / Idle / Meeting (auto-hidden if count is 0)
 - Empty state with guidance to click "+ New"
 
@@ -352,21 +365,22 @@ Each card displays:
 - **Name + CWD** with truncation
 - **Status badge** with pulsing dot animation when working
 - **Context usage bar** (`ContextBar` component) -- green/yellow/red gradient based on percentage
-- **Stats row**: Session ID (truncated), last active time, agent count
-- **"Currently Working On"** section (visible when working) showing last tool summary
-- **Work Summary** bullets (if generated) or **Recent Activity** list with "Generate Summary" button
+- **Session ID footer** (truncated)
+- **Working strip** (visible when working) showing last tool summary
+- **Work Summary** bullets (if generated) plus a "Summarize" button
+- **MatrixRain** background only for active cards (`working`, `meeting`, `attention`) so idle/done cards do not mount the rain DOM or run its animations
 
 ### Animations
 
 - Cards enter with spring animation (staggered by index)
 - Hover lifts card 5px
 - Exit animation on filter change
-- `cardShimmer` keyframe for working cards
+- `MatrixRain` falling-character keyframes for active cards only
 - `statusPulse` keyframe for working status dot
 
 ### Live Updates
 
-- Timestamps refresh every 5 seconds via `setInterval`
+- `SessionCard` is wrapped in `React.memo`; stable refs/callbacks avoid card re-renders from parent context-map updates
 - Context usage tracked via `useSessionContext` hook
 - "Generate Summary" emits `session:summary` socket event
 
@@ -377,9 +391,11 @@ Each card displays:
 ### SpawnModal
 
 Form for creating new sessions:
+- **CLI**: Health-gated Claude/Copilot selector (direct binary or Agency when enabled)
 - **Working Directory**: `FolderPicker` component (loads dirs from `/api/dirs`)
-- **Session Name**: Optional text input
-- **Permission Mode**: Button group (Default, Skip Permissions, Accept Edits, Plan, Auto)
+- **Session Name**: Required text input
+- **Permission Mode**: CLI-specific button group (Claude exposes Default / Skip / Accept Edits / Plan / Auto; Copilot exposes Default / YOLO)
+- **Copilot Agent Mode**: Interactive / Plan / Autopilot when Copilot is selected
 - **Advanced Options** (collapsible): Model selector, Effort level, Allowed tools, System prompt
 - **Defaults**: Loaded from `/api/settings` on first open
 - **Launch**: Emits `terminal:new` socket event, listens for `terminal:spawned` response (5s timeout)
@@ -407,7 +423,7 @@ Multi-step process for transferring context between sessions:
 ### TaskBoard
 
 Full task management system with two tabs:
-- **In App**: Local tasks stored in `~/.claude/agentmatrix-tasks.json`
+- **In App**: Local tasks stored in `~/.agentmatrix/tasks.json`
 - **Azure DevOps**: Tasks imported from ADO via `az` CLI
 
 Features:
@@ -575,9 +591,9 @@ All file operations go through `/api/editor` REST endpoints:
 ### HeaderBar
 
 Fixed-position top bar (`z-index: 50`, `--header-height` CSS variable).
-- Left: Connection indicator dot (green/red) + "Agent Matrix" title
-- Center: View mode toggle (Dashboard / Office)
-- Right: + New, Sessions (with badge count), Resume, Tasks, gear menu (Settings, Hooks Config)
+- Center pill: Connection indicator dot + view mode toggle (Dashboard / Office, plus Editor after unlock)
+- Right pill: + New, Sessions (with badge count), Resume, Tasks, theme toggle, menu (Settings, Hooks Config)
+- The old magnetic button follow effect was removed; `MagneticButton` is now a static wrapper to avoid nav text stutter on Windows.
 
 ### HoverCard
 
@@ -660,10 +676,12 @@ Fully typed via `ServerToClientEvents` and `ClientToServerEvents` interfaces. Th
 
 ### Approach
 
-All styling is **inline** via React `style` props. No CSS-in-JS library, no Tailwind utility classes, no CSS modules. Only exceptions:
+Styling is a mix of React `style` props and shared CSS files imported from
+`app/globals.css`. There is no CSS-in-JS library or CSS modules. Key style sources:
 
 - `app/globals.css` -- CSS variables (`--header-height`, `--bg-primary`, etc.) and base resets
-- Injected `<style>` tags for keyframe animations (`spin`, `cardShimmer`, `statusPulse`, `promptPulse`) and xterm scrollbar customization
+- `app/styles/components.css`, `ambient-orbs.css`, `noise.css`, `activity-ticker.css`, and `matrix-rain.css`
+- Injected `<style>` tags for small component-local keyframes and xterm scrollbar customization
 - `xterm.css` loaded dynamically when terminal initializes
 
 ### Design Tokens (Inline)
@@ -695,8 +713,12 @@ All styling is **inline** via React `style` props. No CSS-in-JS library, no Tail
 
 1. **Canvas rendering** bypasses React: Socket events go directly to the GameEngine via the `onEvent` callback system, avoiding React re-renders for sprite updates.
 2. **Editor lazy loading**: Monaco and EditorView are loaded via `next/dynamic` only when the Editor tab is selected.
-3. **WebGL terminal rendering**: xterm.js uses the WebGL addon for GPU-accelerated text rendering.
-4. **Tab persistence**: All SessionDialog tabs stay mounted (`display: none`) to avoid re-creating terminals or losing form state.
-5. **Debounced resize**: Terminal fit operations are debounced (50ms) via ResizeObserver.
-6. **Output buffer replay**: When opening a terminal, the PTY replays the last 300 chunks so the user sees history.
-7. **Map state updates**: Session state uses immutable Map updates (`new Map(prev)`) to trigger React re-renders only when data actually changes.
+3. **Terminal renderer ladder**: xterm.js uses WebGL, Canvas, or DOM depending on platform and addon availability; Windows prefers Canvas for crisp RDP rendering.
+4. **Lazy SessionDialog tabs**: tasks/info/settings mount only after first activation; the console-open path avoids their fetches.
+5. **Lazy ChangesViewer**: the changes modal is mounted only when "View Changes" is opened, avoiding hidden transcript-diff fetches.
+6. **Dashboard animation budget**: `MatrixRain` mounts only for active cards; `AmbientOrbs` uses gradient-only, translate-only drift with no `filter: blur()`.
+7. **Memoized cards**: `SessionCard` is `React.memo`'d with stable callbacks so dashboard cards don't rerender on unrelated parent updates.
+8. **Client fetch cache**: `lib/clientCache.ts` provides a short-TTL JSON cache with in-flight de-duplication for MCP registry/config requests.
+9. **Debounced resize**: Terminal fit operations are debounced via ResizeObserver.
+10. **Output buffer replay**: When opening a terminal, the PTY replays the last 300 chunks so the user sees history.
+11. **Map state updates**: Session state uses immutable Map updates (`new Map(prev)`) to trigger React re-renders only when data actually changes.

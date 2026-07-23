@@ -1,10 +1,10 @@
 # Agent Matrix
 
-A desktop app that turns Claude Code into a visual, manageable multi-session powerhouse.
+A desktop app that turns CLI coding agents (GitHub Copilot CLI and Claude Code) into a visual, manageable multi-session powerhouse.
 
-**No API keys needed** — uses your installed Claude CLI directly.
+**No API keys needed** — uses your installed CLI binaries directly.
 
-> **Note:** This is in early internal testing. We recommend trying it on your **devbox (Windows)** first rather than your primary machine, since the setup configures Claude Code hooks globally.
+> **Note:** This is in early internal testing. We recommend trying it on your **devbox (Windows)** first rather than your primary machine, since the setup configures CLI hooks globally.
 
 ---
 
@@ -17,7 +17,8 @@ Make sure the following are installed and available on your PATH:
 | Tool | Required | How to check |
 |------|----------|-------------|
 | **Node.js 18+** | Yes | `node -v` |
-| **Claude CLI** | Yes | `claude --version` |
+| **GitHub Copilot CLI** | Recommended / primary | `copilot --version` |
+| **Claude Code CLI** | Supported / currently required by setup scripts | `claude --version` |
 | **Git** | Yes | `git --version` |
 | **Azure CLI** | Optional (ADO integration) | `az --version` |
 
@@ -39,7 +40,7 @@ The setup script will:
 1. Verify all prerequisites
 2. Clone this repo into an `AgentMatrix` folder
 3. Install dependencies and rebuild native modules
-4. Configure Claude Code hooks in `~/.claude/settings.json`
+4. Configure Claude Code hooks in `~/.claude/settings.json` and Copilot hooks in `~/.copilot/hooks/agentmatrix.json` when Copilot is detected
 5. Launch the app
 
 ### Run Again Later
@@ -68,14 +69,14 @@ From wherever you ran the setup command:
 bash AgentMatrix/update.sh
 ```
 
-This pulls the latest code, reinstalls dependencies, and updates Claude Code hooks.
+This pulls the latest code, reinstalls dependencies, and updates CLI hooks.
 
 ---
 
 ## Features
 
 ### Pixel RPG Office View
-- **24 unique character sprites** — each Claude session is a character that walks to a desk
+- **24 unique character sprites** — each CLI session is a character that walks to a desk
 - **Working animation** with flashing laptop, idle animation with sleep emoji
 - **Agent teams gather in meeting rooms** with chat bubbles showing what each agent is doing
 - **Drag characters** to different spots, hover for live tool status
@@ -84,7 +85,7 @@ This pulls the latest code, reinstalls dependencies, and updates Claude Code hoo
 ### Professional Dashboard
 - **Card grid** with session status, context usage bars, and work summaries
 - **Filter** by status (Working / Idle / Meeting)
-- **AI-generated work summaries** — Claude summarizes what each session has done in 3 bullet points
+- **AI-generated work summaries** — the session's CLI summarizes what it has done in 3 bullet points
 - **One-click actions** — open any session's terminal, view tasks, or transfer context
 
 ### Interactive Terminal (Electron)
@@ -102,7 +103,7 @@ This pulls the latest code, reinstalls dependencies, and updates Claude Code hoo
 - **Progress tracking** — live status updates (Summarizing → Spawning → Injecting → Done)
 
 ### Orchestrator
-- **Hidden Claude session** that powers app-internal features
+- **Hidden Copilot orchestrator session** that powers app-internal features
 - **Deep Session Search** — describe what you worked on, the orchestrator searches all transcripts using grep and subagents in parallel
 - **Persists across restarts** — same session, accumulated context
 - **View-only terminal** in Settings — see what the orchestrator is doing
@@ -111,14 +112,14 @@ This pulls the latest code, reinstalls dependencies, and updates Claude Code hoo
 ### Task Management
 - **App-level task board** — create tasks, assign them to sessions
 - **Assign = stdin injection** — task instruction is sent directly to the session's CLI
-- **Claude creates TodoWrite tasks** — tracked in the session's Tasks tab
-- **Bidirectional sync** — when Claude marks a task complete, the app task board updates
+- **CLI task sync** — task details are injected into the assigned session
+- **Bidirectional sync** — when the session marks a task complete, the app task board updates
 - **Unassign** — removes the task from the session and reverts to pending
 
 ### Session Management
 - **Session dialog** with tabs: Console, Tasks, Info, Settings
 - **Context usage bar** — see how much context each session has used
-- **Rename sessions** via CLI command injection
+- **Rename sessions** via provider-owned rename handling (Copilot updates `workspace.yaml`; Claude uses the legacy CLI path)
 - **Memory notes** — view and add project memory
 - **MCP server management** — browse, install, remove MCP servers
 - **Copy resume command** — one-click CLI command to resume in external terminal
@@ -144,19 +145,19 @@ Electron Main Process
 ├── PTY Manager (terminal sessions via node-pty)
 │   ├── User sessions (interactive terminals)
 │   └── Orchestrator (hidden, app-internal)
-├── Prompt Injector (stdin → file-based capture)
+├── ACP / Prompt Capture (Copilot ACP, Claude stdin → file fallback)
 │   ├── Summary generation
 │   ├── Task assignment
 │   ├── Context handoff
 │   └── Deep search queries
 ├── Services
 │   ├── SummaryService (AI work summaries)
-│   ├── OrchestratorService (hidden Claude session)
+│   ├── OrchestratorService (hidden Copilot session)
 │   └── HandoffService (context transfer)
 ├── Session Store (globalThis persistence)
 └── System Tray (background mode)
 
-Claude Code CLI
+CLI Agents (GitHub Copilot CLI / Claude Code)
 ├── Hooks → HTTP POST → API Routes → Socket.io → Browser
 └── PTY stdin/stdout ↔ xterm.js in browser
 ```
@@ -165,32 +166,32 @@ Claude Code CLI
 
 The app's killer feature is its **standardized prompt injection pipeline**:
 
-1. App writes a prompt to the session's PTY stdin
-2. Prompt tells Claude to write output to a session-specific temp file
-3. App polls for the file, reads it, cleans up
+1. App submits an out-of-band instruction for the session
+2. Copilot sessions use ACP capture when available; Claude falls back to a file-writing PTY prompt
+3. App reads the captured output and cleans up any temporary file
 4. Clean, structured output — no TUI parsing needed
 
 This powers: work summaries, task assignment, context handoff, and deep search.
 
 ## App Cache Files
 
-All stored in `~/.claude/`:
+All Agent Matrix-owned state is stored in `~/.agentmatrix/`:
 
 | File | Purpose |
 |------|---------|
-| `agentmatrix-names.json` | Session name cache |
-| `agentmatrix-tasks.json` | App task store |
-| `agentmatrix-active-sessions.json` | Auto-resume tracking |
-| `agentmatrix-settings.json` | User preferences |
-| `agentmatrix-orchestrator.json` | Orchestrator session ID |
-| `agentmatrix-output-<id>.txt` | Temp files for prompt injection |
-| `agentmatrix-handoff-<id>.md` | Context transfer documents |
+| `names.json` | Session name cache |
+| `tasks.json` | App task store |
+| `active-sessions.json` | Auto-resume tracking |
+| `settings.json` | User preferences |
+| `orchestrator.json` | Orchestrator session ID |
+| `output/<id>.txt` | Temp files for Claude prompt-injection fallback |
+| `handoffs/<id>.md` | Context transfer documents |
 
 ## Requirements
 
 - Node.js 18+
-- Claude Code CLI installed and authenticated
-- macOS or Linux (Windows via WSL)
+- GitHub Copilot CLI installed and authenticated (primary), with Claude Code CLI still supported
+- Windows, macOS, or Linux
 
 ## Credits
 

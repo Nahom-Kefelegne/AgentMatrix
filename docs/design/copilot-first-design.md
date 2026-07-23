@@ -207,7 +207,7 @@ Add new handlers under `app/api/hooks/{user-prompt-submit,tool-failure,permissio
 ```
 lib/cli/acp/
 ├── types.ts            # AcpEvent, AcpToolCall, AcpPlanStep, AcpPermissionRequest, AcpSpawnOptions
-├── CopilotAcpConnection.ts  # class wrapping `copilot --acp --stdio`
+├── AcpClient.ts             # class wrapping `copilot --acp --allow-all`
 ├── runHeadlessAcpPrompt.ts  # one-shot helper for SummaryService / handoff / task-assign / orchestrator
 └── index.ts            # registry: sessionId → connection
 ```
