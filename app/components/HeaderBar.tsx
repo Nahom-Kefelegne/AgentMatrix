@@ -23,15 +23,24 @@ function MagneticButton({ children, className, onClick, title, style }: {
   title?: string; style?: React.CSSProperties;
 }) {
   const ref = useRef<HTMLButtonElement>(null);
+  // Cache the button's rect on enter so the hot onMouseMove path never calls
+  // getBoundingClientRect(). Reading layout on every mouse move forces a
+  // synchronous full-page layout flush (layout thrashing) — cheap on a light
+  // page, but on the heavy dashboard / Windows it made the magnetic follow
+  // stutter badly. The rect is stable for the duration of a hover.
+  const rectRef = useRef<DOMRect | null>(null);
   const x = useMotionValue(0);
   const y = useMotionValue(0);
   const springX = useSpring(x, { stiffness: 300, damping: 20 });
   const springY = useSpring(y, { stiffness: 300, damping: 20 });
 
+  const handleEnter = useCallback(() => {
+    rectRef.current = ref.current?.getBoundingClientRect() ?? null;
+  }, []);
+
   const handleMouse = useCallback((e: React.MouseEvent) => {
-    const el = ref.current;
-    if (!el) return;
-    const rect = el.getBoundingClientRect();
+    const rect = rectRef.current;
+    if (!rect) return;
     x.set((e.clientX - (rect.left + rect.width / 2)) * 0.35);
     y.set((e.clientY - (rect.top + rect.height / 2)) * 0.35);
   }, [x, y]);
@@ -39,6 +48,7 @@ function MagneticButton({ children, className, onClick, title, style }: {
   return (
     <motion.button ref={ref} className={className} onClick={onClick} title={title}
       style={{ ...style, x: springX, y: springY }}
+      onMouseEnter={handleEnter}
       onMouseMove={handleMouse}
       onMouseLeave={() => { x.set(0); y.set(0); }}>
       {children}
