@@ -224,3 +224,29 @@ a { color: inherit; text-decoration: none; }
     @apply border-border outline-ring/50;
   }
 }
+
+/* ─── Reduced-motion mode (auto-enabled on remote/RDP sessions) ───
+   On a remote desktop, every animated frame must be re-encoded and streamed to
+   the client. Continuous, infinite decorative animations therefore saturate the
+   remote pipeline and make the whole UI feel laggy — including menu hovers.
+   Disable the decorative ones here. One-off hover/opacity transitions are cheap
+   (a single brief repaint) and left intact; the functional loading spinner is
+   also kept. See app/page.tsx (reduce-motion class) + /api/system (detection). */
+html.reduce-motion .ambient-orb,
+html.reduce-motion .activity-ticker-track,
+html.reduce-motion .matrix-rain-col,
+html.reduce-motion .matrix-card-status-dot--working,
+html.reduce-motion .session-card--attention,
+html.reduce-motion .session-card--attention .session-card-body::before,
+html.reduce-motion .session-card--working .session-card-body,
+html.reduce-motion .status-dot--working,
+html.reduce-motion .status-dot--attention,
+html.reduce-motion .summarize-btn--loading {
+  animation: none !important;
+}
+/* The ambient orbs exist only to drift; static, they're just soft blobs — hide
+   them entirely on remote so they cost zero repaint. */
+html.reduce-motion .ambient-orbs { display: none; }
+/* Matrix rain is a moving effect by nature; with animation off it would sit as
+   static glyphs, so hide it on remote. */
+html.reduce-motion .matrix-rain-bg { display: none; }

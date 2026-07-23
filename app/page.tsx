@@ -199,6 +199,27 @@ function OfficeView() {
 
 export default function Home() {
   useEffect(() => { initPerfMonitor(); }, []);
+  useEffect(() => {
+    // Reduced-motion mode: on a remote/RDP session every animated frame must be
+    // re-encoded and streamed, so continuous decorative animations (orbs drift,
+    // ticker scroll, matrix rain, pulsing dots, card heartbeat) saturate the
+    // remote pipeline and make the whole UI feel laggy — including hovers.
+    // Enable when: manual override 'am-reduce-motion'='1', OS prefers-reduced-
+    // motion, or a detected remote session. Manual '0' force-disables (in case
+    // auto-detect misfires). Set via DevTools: localStorage.setItem('am-reduce-motion','1').
+    const apply = () => document.documentElement.classList.add('reduce-motion');
+    let override: string | null = null;
+    try { override = localStorage.getItem('am-reduce-motion'); } catch { /* ignore */ }
+    if (override === '1') { apply(); return; }
+    if (override === '0') return;
+    try {
+      if (window.matchMedia?.('(prefers-reduced-motion: reduce)').matches) { apply(); return; }
+    } catch { /* ignore */ }
+    fetch('/api/system')
+      .then(r => r.json())
+      .then((d: { remote?: boolean }) => { if (d?.remote) apply(); })
+      .catch(() => { /* ignore */ });
+  }, []);
   return (
     <ThemeProvider>
       <SocketProvider>
