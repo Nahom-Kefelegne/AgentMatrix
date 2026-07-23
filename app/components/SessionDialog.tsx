@@ -609,7 +609,12 @@ export default function SessionDialog({
         <RestartDialog command={restartCommand} onClose={() => setRestartCommand(null)} />
       )}
 
-      <div style={{ display: showChanges ? undefined : 'none' }}>
+      {/* Lazy-mount: only render ChangesViewer when the user actually opens the
+          changes tab. It was previously always mounted (display:none), so every
+          console open fired its transcript-diff fetch (/api/sessions/changes,
+          ~2s on Windows) plus /api/sessions/comments — and re-fetched on every
+          tool-complete while hidden. Mounting on demand keeps console-open fast. */}
+      {showChanges && (
         <ChangesViewer
           sessionId={session.id}
           sessionName={session.name}
@@ -618,7 +623,7 @@ export default function SessionDialog({
           socketRef={socketRef}
           onSwitchToConsole={() => setActiveTab('console')}
         />
-      </div>
+      )}
     </>
   );
 }
