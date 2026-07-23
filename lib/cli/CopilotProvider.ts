@@ -251,6 +251,13 @@ export class CopilotProvider implements CliProvider {
     }
     if (opts.model) args.push('--model', opts.model);
     if (opts.effort) args.push('--reasoning-effort', opts.effort);
+    // Enable mouse support in alt-screen mode so the timeline scrolls
+    // line-by-line under the wheel (Copilot enables SGR mouse tracking, modes
+    // 1003+1006, which xterm forwards as native wheel events). This is on by
+    // default under Windows/ConPTY but OFF on macOS/Linux, which is why the
+    // console previously only paged. CopilotTerminalPanel detects the mouse
+    // DECSET and defers the wheel to xterm's native forwarding.
+    args.push('--mouse');
     if (opts.allowedTools) {
       for (const tool of opts.allowedTools.split(',').map(t => t.trim()).filter(Boolean)) {
         args.push(`--allow-tool=${tool}`);
@@ -261,7 +268,9 @@ export class CopilotProvider implements CliProvider {
 
   buildResumeArgs(opts: ResumeOptions): string[] {
     // Copilot remembers permission state on resume; no --yolo or --fork.
-    return ['--resume', opts.resumeId];
+    // --mouse enables alt-screen mouse tracking for line-by-line wheel
+    // scrolling (see buildSpawnArgs) — resumed sessions need it too.
+    return ['--resume', opts.resumeId, '--mouse'];
   }
 
   buildResumeShellCommand(opts: ResumeOptions): string {
