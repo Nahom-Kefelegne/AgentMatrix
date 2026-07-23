@@ -368,8 +368,7 @@ export default function SessionDialog({
   onPrev, onNext, sessionIndex, sessionTotal, readOnly, onSelectSession, onOpenTask,
 }: SessionDialogProps) {
   perfRender('SessionDialog');
-  const { socketRef, connected } = useSocketContext();
-  const contextMap = useSessionContext(socketRef, connected);
+  const { socketRef } = useSocketContext();
   const [activeTab, setActiveTab] = useState<'console' | 'tasks' | 'info' | 'settings'>('console');
   const [killing, setKilling] = useState(false);
   const [restartCommand, setRestartCommand] = useState<string | null>(null);
@@ -387,12 +386,6 @@ export default function SessionDialog({
   useEffect(() => {
     setVisitedTabs(prev => (prev.has(activeTab) ? prev : new Set(prev).add(activeTab)));
   }, [activeTab]);
-  const [, setTick] = useState(0);
-  // Live timestamps
-  useEffect(() => {
-    const interval = setInterval(() => setTick(t => t + 1), 5000);
-    return () => clearInterval(interval);
-  }, []);
 
   useEffect(() => {
     setActiveTab('console');
@@ -558,7 +551,7 @@ export default function SessionDialog({
             display: activeTab === 'info' ? 'block' : 'none',
           }}>
             {visitedTabs.has('info') && (
-              <InfoTab session={session} cliCmd={cliCmd} contextUsage={sessionId ? contextMap[sessionId] ?? null : null} socketRef={socketRef} onSelectSession={onSelectSession} />
+              <InfoTab session={session} cliCmd={cliCmd} socketRef={socketRef} onSelectSession={onSelectSession} />
             )}
           </div>
           <div style={{
@@ -881,10 +874,16 @@ function ForkSection({ session, socketRef, onSelectSession }: {
   );
 }
 
-function InfoTab({ session, cliCmd, contextUsage, socketRef, onSelectSession }: {
-  session: SessionData; cliCmd: string; contextUsage: number | null;
+function InfoTab({ session, cliCmd, socketRef, onSelectSession }: {
+  session: SessionData; cliCmd: string;
   socketRef: React.RefObject<any>; onSelectSession?: (id: string) => void;
 }) {
+  // Subscribe to context usage HERE (not in SessionDialog) so streaming
+  // session:context events only re-render this tab — which is lazy-mounted and
+  // usually not visible — instead of the whole dialog + console subtree.
+  const { connected } = useSocketContext();
+  const contextMap = useSessionContext(socketRef, connected);
+  const contextUsage = contextMap[session.id] ?? null;
   const [summaryLoading, setSummaryLoading] = useState(false);
 
   useEffect(() => {
