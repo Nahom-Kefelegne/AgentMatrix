@@ -9,7 +9,7 @@ import { NextResponse } from 'next/server';
 import { getSession, updateSession } from '@/lib/state/sessionStore';
 import { getProvider } from '@/lib/cli';
 import type { CliType } from '@/lib/types';
-import { getSessionFileChanges, getSessionFileDiff } from '@/lib/cli/transcript';
+import { getSessionFileChanges, getSessionFileDiff, invalidateSessionFileChanges } from '@/lib/cli/transcript';
 import { writeFileSync, unlinkSync, existsSync, readFileSync } from 'fs';
 
 /**
@@ -40,7 +40,7 @@ export async function GET(request: Request) {
     // Single-file diff.
     if (filePath) {
       const diff = transcriptPath
-        ? getSessionFileDiff(transcriptPath, cliType, filePath)
+        ? await getSessionFileDiff(transcriptPath, cliType, filePath)
         : null;
       if (!diff) {
         // Fall back to current on-disk content with an empty baseline so the
@@ -52,7 +52,7 @@ export async function GET(request: Request) {
     }
 
     // Full change list.
-    const files = transcriptPath ? getSessionFileChanges(transcriptPath, cliType) : [];
+    const files = transcriptPath ? await getSessionFileChanges(transcriptPath, cliType) : [];
     return NextResponse.json({
       sessionId,
       sessionName: session.name,
@@ -100,18 +100,20 @@ export async function POST(request: Request) {
     }
 
     if (action === 'revert-file' && file) {
-      const res = revertOne(transcriptPath, cliType, file);
+      const res = await revertOne(transcriptPath, cliType, file);
+      if (res.ok) invalidateSessionFileChanges(transcriptPath);
       return res.ok
         ? NextResponse.json({ ok: true, message: res.message })
         : NextResponse.json({ error: res.message }, { status: 500 });
     }
 
     if (action === 'revert-all') {
-      const changes = getSessionFileChanges(transcriptPath, cliType);
+      const changes = await getSessionFileChanges(transcriptPath, cliType);
       const results: string[] = [];
       for (const c of changes) {
-        results.push(revertOne(transcriptPath, cliType, c.path).message);
+        results.push((await revertOne(transcriptPath, cliType, c.path)).message);
       }
+      invalidateSessionFileChanges(transcriptPath);
       return NextResponse.json({ ok: true, results });
     }
 
@@ -130,8 +132,8 @@ function safeRead(path: string): string {
   }
 }
 
-function revertOne(transcriptPath: string, cliType: CliType, file: string): { ok: boolean; message: string } {
-  const diff = getSessionFileDiff(transcriptPath, cliType, file);
+async function revertOne(transcriptPath: string, cliType: CliType, file: string): Promise<{ ok: boolean; message: string }> {
+  const diff = await getSessionFileDiff(transcriptPath, cliType, file);
   if (!diff) return { ok: false, message: `No change record for ${file}` };
   try {
     if (diff.isNew) {
