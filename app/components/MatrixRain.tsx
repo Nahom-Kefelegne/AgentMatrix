@@ -10,7 +10,7 @@ const RAIN_CHARS = 'アイウエオカキクケコサシスセソタチツテト
  */
 export default function MatrixRain({ sessionId }: { sessionId: string }) {
   const columns = useMemo(() => {
-    const count = 16;
+    const count = 12;
     let hash = 0;
     for (let i = 0; i < sessionId.length; i++) {
       hash = ((hash << 5) - hash + sessionId.charCodeAt(i)) | 0;
@@ -18,7 +18,7 @@ export default function MatrixRain({ sessionId }: { sessionId: string }) {
     const cols: { left: number; chars: string[]; duration: number; delay: number }[] = [];
     for (let i = 0; i < count; i++) {
       hash = ((hash << 13) ^ hash) - 1;
-      const charCount = 5 + Math.abs(hash % 8);
+      const charCount = 4 + Math.abs(hash % 6);
       const chars: string[] = [];
       for (let j = 0; j < charCount; j++) {
         hash = ((hash << 7) ^ hash) + 1;

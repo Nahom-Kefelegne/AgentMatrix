@@ -5,10 +5,8 @@ import { motion, AnimatePresence } from 'framer-motion';
 import type { SessionData } from '@/lib/types';
 import { useSocketContext } from './SocketProvider';
 import ContextBar from './ContextBar';
-// TEST: AmbientOrbs / MatrixRain temporarily disabled to probe Windows dashboard
-// lag (both are always-on infinite CSS animations).
-// import AmbientOrbs from './AmbientOrbs';
-// import MatrixRain from './MatrixRain';
+import AmbientOrbs from './AmbientOrbs';
+import MatrixRain from './MatrixRain';
 import type { CliType } from '@/lib/types';
 import CliIcon from './CliIcon';
 
@@ -104,9 +102,8 @@ export default function DashboardView({ sessions, contextMap, onSelectSession }:
   return (
     <div data-scroll-area style={{ height: '100vh', position: 'relative' }}
       className="overflow-y-auto dashboard-bg">
-      {/* TEST: AmbientOrbs (3× animated blur(80px)) disabled to probe dashboard
-          lag on Windows. */}
-      {/* <AmbientOrbs /> */}
+      {/* Efficient orbs: cheap gradient-only drift (see ambient-orbs.css). */}
+      <AmbientOrbs />
       <div className="noise-overlay" />
       <div style={{ maxWidth: 1200, margin: '0 auto', padding: '72px 36px 80px', position: 'relative', zIndex: 2 }}>
         <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="filter-bar">
@@ -178,11 +175,13 @@ function SessionCard({ s, i, contextUsage, onClick, socketRef, isDragging, onDra
       style={{ cursor: isDragging ? 'grabbing' : 'grab' }}
       className={`session-card ${s.status === 'attention' ? 'session-card--attention' : ''} ${s.status === 'done' ? 'session-card--done' : ''} ${isActive ? 'session-card--active' : ''}`}
     >
-      {/* Matrix rain behind content — TEST: disabled to probe dashboard lag on
-          Windows. Each instance runs ~160 infinite CSS animations that keep
-          running even at opacity:0 (opacity does not pause animations), so with
-          many cards this saturates the compositor. */}
-      {/* <MatrixRain sessionId={s.id} /> */}
+      {/* Matrix rain behind content — only mounted for ACTIVE cards, which are
+          the only ones that display it (idle/done keep it at opacity:0). This
+          matters for perf: each instance runs ~100 infinite CSS animations that
+          keep running even at opacity:0 (opacity doesn't pause animations), so
+          mounting it for every card saturated the compositor. Gating on
+          isActive means only the few active cards pay that cost. */}
+      {isActive && <MatrixRain sessionId={s.id} />}
 
       <div className="session-card-body">
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>

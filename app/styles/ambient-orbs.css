@@ -13,7 +13,10 @@
 .ambient-orb {
   position: absolute;
   border-radius: 50%;
-  filter: blur(80px);
+  /* No filter: blur() — radial-gradients are already soft, so the blur was
+     redundant while forcing an expensive large-layer re-composite every frame
+     (brutal on Windows / software compositing). Dropping it makes the orbs
+     nearly free while looking the same. */
   opacity: 0.35;
   will-change: transform;
 }
@@ -24,51 +27,53 @@
 
 /* Orb 1 — indigo, top-left drift */
 .ambient-orb--1 {
-  width: 500px;
-  height: 500px;
-  background: radial-gradient(circle, #6366f1 0%, transparent 70%);
-  top: -10%;
-  left: -5%;
+  width: 640px;
+  height: 640px;
+  background: radial-gradient(circle, #6366f1 0%, transparent 65%);
+  top: -14%;
+  left: -8%;
   animation: orb-drift-1 25s ease-in-out infinite;
 }
 
 /* Orb 2 — cyan, center-right drift */
 .ambient-orb--2 {
-  width: 400px;
-  height: 400px;
-  background: radial-gradient(circle, #06b6d4 0%, transparent 70%);
-  top: 30%;
-  right: -8%;
+  width: 520px;
+  height: 520px;
+  background: radial-gradient(circle, #06b6d4 0%, transparent 65%);
+  top: 28%;
+  right: -10%;
   animation: orb-drift-2 30s ease-in-out infinite;
 }
 
 /* Orb 3 — purple, bottom-left drift */
 .ambient-orb--3 {
-  width: 450px;
-  height: 450px;
-  background: radial-gradient(circle, #8b5cf6 0%, transparent 70%);
-  bottom: -15%;
-  left: 20%;
+  width: 580px;
+  height: 580px;
+  background: radial-gradient(circle, #8b5cf6 0%, transparent 65%);
+  bottom: -18%;
+  left: 18%;
   animation: orb-drift-3 28s ease-in-out infinite;
 }
 
+/* Translate-only drift (no scale): a pure compositor transform the GPU can run
+   without re-rasterizing the gradient. */
 @keyframes orb-drift-1 {
-  0%, 100% { transform: translate(0, 0) scale(1); }
-  25% { transform: translate(60px, 40px) scale(1.1); }
-  50% { transform: translate(30px, 80px) scale(0.95); }
-  75% { transform: translate(-20px, 50px) scale(1.05); }
+  0%, 100% { transform: translate3d(0, 0, 0); }
+  25% { transform: translate3d(60px, 40px, 0); }
+  50% { transform: translate3d(30px, 80px, 0); }
+  75% { transform: translate3d(-20px, 50px, 0); }
 }
 
 @keyframes orb-drift-2 {
-  0%, 100% { transform: translate(0, 0) scale(1); }
-  25% { transform: translate(-50px, 30px) scale(1.08); }
-  50% { transform: translate(-80px, -20px) scale(0.92); }
-  75% { transform: translate(-30px, -50px) scale(1.03); }
+  0%, 100% { transform: translate3d(0, 0, 0); }
+  25% { transform: translate3d(-50px, 30px, 0); }
+  50% { transform: translate3d(-80px, -20px, 0); }
+  75% { transform: translate3d(-30px, -50px, 0); }
 }
 
 @keyframes orb-drift-3 {
-  0%, 100% { transform: translate(0, 0) scale(1); }
-  25% { transform: translate(40px, -30px) scale(1.06); }
-  50% { transform: translate(-30px, -60px) scale(0.97); }
-  75% { transform: translate(20px, -20px) scale(1.1); }
+  0%, 100% { transform: translate3d(0, 0, 0); }
+  25% { transform: translate3d(40px, -30px, 0); }
+  50% { transform: translate3d(-30px, -60px, 0); }
+  75% { transform: translate3d(20px, -20px, 0); }
 }
