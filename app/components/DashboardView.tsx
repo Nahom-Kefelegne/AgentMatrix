@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
+import { useState, useEffect, useCallback, useRef, useMemo, memo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import type { SessionData } from '@/lib/types';
 import { useSocketContext } from './SocketProvider';
@@ -18,13 +18,6 @@ const STATUS: Record<string, { label: string; dotClass: string }> = {
   done: { label: 'Done', dotClass: 'status-dot--done' },
 };
 
-function ago(ts: number): string {
-  const d = Math.floor((Date.now() - ts) / 1000);
-  if (d < 5) return 'just now';
-  if (d < 60) return `${d}s ago`;
-  if (d < 3600) return `${Math.floor(d / 60)}m ago`;
-  return d < 86400 ? `${Math.floor(d / 3600)}h ago` : `${Math.floor(d / 86400)}d ago`;
-}
 
 interface Props {
   sessions: Map<string, SessionData>;
@@ -41,8 +34,12 @@ export default function DashboardView({ sessions, contextMap, onSelectSession }:
   const dragOverItem = useRef<string | null>(null);
   const [dragId, setDragId] = useState<string | null>(null);
   const [dragOverId, setDragOverId] = useState<string | null>(null);
-  const [, tick] = useState(0);
-  useEffect(() => { const i = setInterval(() => tick(t => t + 1), 5000); return () => clearInterval(i); }, []);
+  // Stable refs so the card callbacks below never change identity, keeping
+  // React.memo(SessionCard) effective across context-map / parent re-renders.
+  // (The old 5s `tick` re-render was removed — it only existed to refresh an
+  // `ago()` relative timestamp that is no longer rendered.)
+  const dragIdRef = useRef(dragId); dragIdRef.current = dragId;
+  const onSelectRef = useRef(onSelectSession); onSelectRef.current = onSelectSession;
 
   const sessionIds = all.map(s => s.id).join(',');
   useEffect(() => {
@@ -70,12 +67,15 @@ export default function DashboardView({ sessions, contextMap, onSelectSession }:
     { key: 'idle', label: 'Idle' }, { key: 'meeting', label: 'Meeting' },
   ].filter(f => f.key === 'all' || counts[f.key] > 0);
 
-  const handleDragStart = (e: React.DragEvent, id: string) => {
+  const handleSelect = useCallback((id: string) => {
+    if (!dragIdRef.current) onSelectRef.current(id);
+  }, []);
+  const handleDragStart = useCallback((e: React.DragEvent, id: string) => {
     dragItem.current = id;
     setDragId(id);
     e.dataTransfer.effectAllowed = 'move';
-  };
-  const handleDragOver = (e: React.DragEvent, id: string) => {
+  }, []);
+  const handleDragOver = useCallback((e: React.DragEvent, id: string) => {
     e.preventDefault();
     e.dataTransfer.dropEffect = 'move';
     if (!dragItem.current || dragItem.current === id) { setDragOverId(null); return; }
@@ -91,13 +91,13 @@ export default function DashboardView({ sessions, contextMap, onSelectSession }:
       next.splice(to, 0, dragItem.current!);
       return next;
     });
-  };
-  const handleDragEnd = () => {
+  }, []);
+  const handleDragEnd = useCallback(() => {
     dragItem.current = null;
     dragOverItem.current = null;
     setDragId(null);
     setDragOverId(null);
-  };
+  }, []);
 
   return (
     <div data-scroll-area style={{ height: '100vh', position: 'relative' }}
@@ -122,14 +122,14 @@ export default function DashboardView({ sessions, contextMap, onSelectSession }:
           </div>
         ) : (
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(420px, 1fr))', gap: 20 }}>
-            {orderedList.map((s, i) => (
-              <SessionCard key={s.id} s={s} i={i}
+            {orderedList.map((s) => (
+              <SessionCard key={s.id} s={s}
                 contextUsage={contextMap[s.id] ?? null}
-                onClick={() => { if (!dragId) onSelectSession(s.id); }}
+                onSelect={handleSelect}
                 socketRef={socketRef}
                 isDragging={dragId === s.id}
-                onDragStart={(e) => handleDragStart(e, s.id)}
-                onDragOver={(e) => handleDragOver(e, s.id)}
+                onDragStartCard={handleDragStart}
+                onDragOverCard={handleDragOver}
                 onDragEnd={handleDragEnd} />
             ))}
           </div>
@@ -139,12 +139,12 @@ export default function DashboardView({ sessions, contextMap, onSelectSession }:
   );
 }
 
-function SessionCard({ s, i, contextUsage, onClick, socketRef, isDragging, onDragStart, onDragOver, onDragEnd }: {
-  s: SessionData; i: number; contextUsage: number | null;
-  onClick: () => void; socketRef: React.RefObject<any>;
+const SessionCard = memo(function SessionCard({ s, contextUsage, onSelect, socketRef, isDragging, onDragStartCard, onDragOverCard, onDragEnd }: {
+  s: SessionData; contextUsage: number | null;
+  onSelect: (id: string) => void; socketRef: React.RefObject<any>;
   isDragging?: boolean;
-  onDragStart?: (e: React.DragEvent) => void;
-  onDragOver?: (e: React.DragEvent) => void;
+  onDragStartCard?: (e: React.DragEvent, id: string) => void;
+  onDragOverCard?: (e: React.DragEvent, id: string) => void;
   onDragEnd?: () => void;
 }) {
   const meta = STATUS[s.status] || STATUS.idle;
@@ -170,8 +170,11 @@ function SessionCard({ s, i, contextUsage, onClick, socketRef, isDragging, onDra
       animate={{ opacity: isDragging ? 0.3 : 1, y: 0, scale: isDragging ? 0.98 : 1 }}
       exit={{ opacity: 0, y: -8 }}
       transition={{ layout: { type: 'spring', stiffness: 500, damping: 35 }, default: { duration: 0.15 } }}
-      {...{ draggable: true, onDragStart: onDragStart as any, onDragOver: onDragOver as any, onDragEnd: onDragEnd as any }}
-      onClick={onClick}
+      {...{ draggable: true,
+        onDragStart: (onDragStartCard ? ((e: React.DragEvent) => onDragStartCard(e, s.id)) : undefined) as any,
+        onDragOver: (onDragOverCard ? ((e: React.DragEvent) => onDragOverCard(e, s.id)) : undefined) as any,
+        onDragEnd: onDragEnd as any }}
+      onClick={() => onSelect(s.id)}
       style={{ cursor: isDragging ? 'grabbing' : 'grab' }}
       className={`session-card ${s.status === 'attention' ? 'session-card--attention' : ''} ${s.status === 'done' ? 'session-card--done' : ''} ${isActive ? 'session-card--active' : ''}`}
     >
@@ -236,4 +239,4 @@ function SessionCard({ s, i, contextUsage, onClick, socketRef, isDragging, onDra
       </div>
     </motion.div>
   );
-}
+});
