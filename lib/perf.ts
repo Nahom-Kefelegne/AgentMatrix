@@ -34,6 +34,18 @@ export function perfEnabled(): boolean {
   return enabled;
 }
 
+/** Best-effort forward of a perf summary to the server terminal (fire-and-forget). */
+function forwardToTerminal(line: string): void {
+  try {
+    fetch('/api/perf-log', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ line }),
+      keepalive: true,
+    }).catch(() => {});
+  } catch { /* ignore */ }
+}
+
 // ── Aggregated counters, flushed on an interval ──────────────────────────────
 const renderCounts = new Map<string, number>();
 const eventCounts = new Map<string, number>();
@@ -102,8 +114,12 @@ function flush(): void {
   }
 
   if (parts.length > 0) {
+    const summary = parts.join('  ');
     // eslint-disable-next-line no-console
-    console.log(`%c[perf] ${parts.join('  ')}`, 'color:#8b5cf6');
+    console.log(`%c[perf] ${summary}`, 'color:#8b5cf6');
+    // Also forward to the server so it shows up in the app's terminal stdout
+    // (handy when you're reading the launch terminal rather than DevTools).
+    forwardToTerminal(summary);
   }
 
   renderCounts.clear();
@@ -114,12 +130,12 @@ function flush(): void {
 }
 
 /** Start the global monitor (long tasks + FPS + periodic summary). Idempotent. */
-export function initPerfMonitor(): void {
-  if (started || !perfEnabled() || typeof window === 'undefined') return;
+function startMonitor(): void {
+  if (started || typeof window === 'undefined') return;
   started = true;
 
   // eslint-disable-next-line no-console
-  console.log('%c[perf] monitoring enabled — summaries every 3s. Disable: localStorage.removeItem("am-perf")', 'color:#8b5cf6;font-weight:bold');
+  console.log('%c[perf] monitoring enabled — summaries every 3s (also sent to the app terminal). Disable: localStorage.removeItem("am-perf")', 'color:#8b5cf6;font-weight:bold');
 
   // Long tasks: main-thread blocks > 50ms.
   try {
@@ -150,4 +166,26 @@ export function initPerfMonitor(): void {
   requestAnimationFrame(sample);
 
   setInterval(flush, SUMMARY_MS);
+}
+
+/**
+ * Initialize perf monitoring. Turns on when EITHER the local flag is set
+ * (localStorage 'am-perf' / ?perf=1) OR the server reports AM_PERF=1 — so a
+ * single `AM_PERF=1` at launch enables both client and PTY telemetry with no
+ * DevTools step. Idempotent.
+ */
+export function initPerfMonitor(): void {
+  if (typeof window === 'undefined') return;
+  if (perfEnabled()) { startMonitor(); return; }
+  // Not enabled locally — ask the server whether AM_PERF is set.
+  fetch('/api/perf-log')
+    .then(r => r.json())
+    .then((cfg: { enabled?: boolean }) => {
+      if (cfg?.enabled) {
+        enabled = true;
+        try { localStorage.setItem('am-perf', '1'); } catch { /* ignore */ }
+        startMonitor();
+      }
+    })
+    .catch(() => { /* server flag unavailable */ });
 }
