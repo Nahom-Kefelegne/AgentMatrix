@@ -5,9 +5,10 @@ import { motion, AnimatePresence } from 'framer-motion';
 import type { SessionData } from '@/lib/types';
 import { useSocketContext } from './SocketProvider';
 import ContextBar from './ContextBar';
-import AmbientOrbs from './AmbientOrbs';
-
-import MatrixRain from './MatrixRain';
+// TEST: AmbientOrbs / MatrixRain temporarily disabled to probe Windows dashboard
+// lag (both are always-on infinite CSS animations).
+// import AmbientOrbs from './AmbientOrbs';
+// import MatrixRain from './MatrixRain';
 import type { CliType } from '@/lib/types';
 import CliIcon from './CliIcon';
 
@@ -103,7 +104,9 @@ export default function DashboardView({ sessions, contextMap, onSelectSession }:
   return (
     <div data-scroll-area style={{ height: '100vh', position: 'relative' }}
       className="overflow-y-auto dashboard-bg">
-      <AmbientOrbs />
+      {/* TEST: AmbientOrbs (3× animated blur(80px)) disabled to probe dashboard
+          lag on Windows. */}
+      {/* <AmbientOrbs /> */}
       <div className="noise-overlay" />
       <div style={{ maxWidth: 1200, margin: '0 auto', padding: '72px 36px 80px', position: 'relative', zIndex: 2 }}>
         <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="filter-bar">
@@ -175,8 +178,11 @@ function SessionCard({ s, i, contextUsage, onClick, socketRef, isDragging, onDra
       style={{ cursor: isDragging ? 'grabbing' : 'grab' }}
       className={`session-card ${s.status === 'attention' ? 'session-card--attention' : ''} ${s.status === 'done' ? 'session-card--done' : ''} ${isActive ? 'session-card--active' : ''}`}
     >
-      {/* Matrix rain behind content */}
-      <MatrixRain sessionId={s.id} />
+      {/* Matrix rain behind content — TEST: disabled to probe dashboard lag on
+          Windows. Each instance runs ~160 infinite CSS animations that keep
+          running even at opacity:0 (opacity does not pause animations), so with
+          many cards this saturates the compositor. */}
+      {/* <MatrixRain sessionId={s.id} /> */}
 
       <div className="session-card-body">
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
