@@ -76,6 +76,12 @@ function createWindow() {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
       nodeIntegration: false,
+      // Keep rendering active even when the OS/Electron thinks the window is
+      // occluded. Over Remote Desktop, Electron often reports the window as
+      // hidden (e.g. when the physical monitor is off/locked), which otherwise
+      // throttles requestAnimationFrame to ~0fps and leaves canvas views (the
+      // Office view) blank. Disabling throttling keeps them painting.
+      backgroundThrottling: false,
     },
   });
 

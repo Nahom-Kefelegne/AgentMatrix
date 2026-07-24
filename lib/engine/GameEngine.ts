@@ -73,16 +73,6 @@ export class GameEngine {
   private gameLoop(timestamp: number): void {
     if (!this.running) return;
 
-    // Skip work when the page isn't visible (minimized / occluded — common over
-    // a remote session): there's no point rendering frames nobody sees, and on
-    // RDP every painted frame is re-encoded and streamed. Keep the loop alive
-    // but idle so it resumes instantly when the window is shown again.
-    if (typeof document !== 'undefined' && document.hidden) {
-      this.lastTimestamp = timestamp;
-      this.rafId = requestAnimationFrame((ts) => this.gameLoop(ts));
-      return;
-    }
-
     const dt = Math.min((timestamp - this.lastTimestamp) / 1000, 0.1); // cap at 100ms
     this.lastTimestamp = timestamp;
 
