@@ -244,9 +244,9 @@ html.reduce-motion .status-dot--attention,
 html.reduce-motion .summarize-btn--loading {
   animation: none !important;
 }
-/* The ambient orbs exist only to drift; static, they're just soft blobs — hide
-   them entirely on remote so they cost zero repaint. */
-html.reduce-motion .ambient-orbs { display: none; }
+/* The ambient orbs' drift is what costs repaints; STATIC they're just soft
+   gradient blobs that paint once and then cost nothing on remote — so keep them
+   visible (below), only the animation is disabled above. */
 /* Matrix rain is a moving effect by nature; with animation off it would sit as
    static glyphs, so hide it on remote. */
 html.reduce-motion .matrix-rain-bg { display: none; }
