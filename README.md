@@ -57,7 +57,14 @@ From wherever you ran the setup command:
 ./AgentMatrix/start.sh
 ```
 
+The start scripts **fast-forward to the latest code from `main` before launching**
+(a failed pull — offline, local edits, blocked network — is non-fatal and the app
+still starts on the current version). If a pull changes dependencies, they'll tell
+you to run the update script below to reinstall.
+
 ### Update
+
+For a full update (pull + reinstall dependencies + refresh CLI hooks):
 
 **Windows (PowerShell):**
 ```powershell
@@ -70,6 +77,41 @@ bash AgentMatrix/update.sh
 ```
 
 This pulls the latest code, reinstalls dependencies, and updates CLI hooks.
+
+### Running over Remote Desktop (RDP)
+
+The app is tuned for remote/RDP use. When it detects a Windows remote session it
+automatically enables a **reduced-motion mode** that turns off continuous
+background animations (which are expensive to stream over RDP) while keeping the
+static ambient visuals — this makes the whole UI feel much snappier. No action
+needed.
+
+If you use a remote protocol that isn't auto-detected (Citrix, VNC, Parsec, …),
+force it on from the app's DevTools console (Ctrl+Shift+I):
+
+```js
+localStorage.setItem('am-reduce-motion', '1'); location.reload();
+```
+
+Set it to `'0'` to force it off, or remove the key to return to auto-detect.
+
+### Performance diagnostics (optional)
+
+To capture performance telemetry in the app's terminal output, launch with
+`AM_PERF=1`:
+
+```powershell
+# Windows
+$env:AM_PERF = '1'; .\AgentMatrix\start.ps1
+```
+```bash
+# macOS / Linux
+AM_PERF=1 ./AgentMatrix/start.sh
+```
+
+Every ~3s the terminal logs `[perf:client]` (long tasks, FPS, component render
+counts, socket/terminal throughput) and `[pty:perf]` (per-chunk processing cost)
+lines. Everything is off by default — this only runs when `AM_PERF=1` is set.
 
 ---
 
