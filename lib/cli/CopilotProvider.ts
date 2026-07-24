@@ -1,4 +1,4 @@
-import { execSync, execFile } from 'child_process';
+import { execSync, execFile, execFileSync } from 'child_process';
 import { existsSync, readdirSync, statSync, openSync, readSync, closeSync, readFileSync, writeFileSync } from 'fs';
 import { join } from 'path';
 import { homedir } from 'os';
@@ -348,6 +348,21 @@ export class CopilotProvider implements CliProvider {
    * (~few hundred bytes each). Call from UI flows only.
    */
   discoverSessions(): DiscoveredSession[] {
+    // Cache the scan result briefly: discoverSessions walks every session dir
+    // (statSync + workspace.yaml read + activity check) which is slow on network
+    // drives, and it's hit by both the resume modal and the periodic scanner.
+    // A short TTL keeps repeated opens instant and bounds how often the sync
+    // disk walk can block the event loop.
+    const now = Date.now();
+    if (discoverCache && now - discoverCache.ts < DISCOVER_TTL_MS) {
+      return discoverCache.sessions;
+    }
+    const sessions = this.discoverSessionsUncached();
+    discoverCache = { sessions, ts: now };
+    return sessions;
+  }
+
+  private discoverSessionsUncached(): DiscoveredSession[] {
     if (!existsSync(COPILOT_SESSION_STATE_DIR)) return [];
     const results: DiscoveredSession[] = [];
 
@@ -524,35 +539,76 @@ export class CopilotProvider implements CliProvider {
 }
 
 /** Returns the set of PIDs whose command line includes "copilot". */
-function collectLiveCopilotPids(): Set<number> {
+// Detecting live PIDs runs a slow subprocess (`wmic` on Windows can take several
+// seconds, `ps` on Unix), and it's called by detectActiveSessionIds() on every
+// resume-modal open and every background scan. Blocking the shared event loop on
+// it froze the whole app. Cache the result and refresh it ASYNCHRONOUSLY: after
+// the first (startup) warm-up, callers get the cached set instantly and a stale
+// cache triggers a background refresh — so a modal open never blocks on wmic.
+const LIVE_PIDS_TTL_MS = 4000;
+let livePidsCache: { pids: Set<number>; ts: number } | null = null;
+let livePidsRefreshing = false;
+
+// Short-TTL cache for the session-dir scan (see discoverSessions).
+const DISCOVER_TTL_MS = 4000;
+let discoverCache: { sessions: DiscoveredSession[]; ts: number } | null = null;
+
+function livePidsCommand(): { cmd: string; args: string[]; shell: boolean } {
+  if (process.platform === 'win32') {
+    return {
+      cmd: 'wmic',
+      args: ['process', 'where', "name='copilot.exe' or name='node.exe'", 'get', 'ProcessId,CommandLine', '/format:csv'],
+      shell: false,
+    };
+  }
+  return { cmd: '/bin/sh', args: ['-c', "ps -eo pid,args | grep '[c]opilot' | grep -v grep"], shell: false };
+}
+
+function parseLivePids(output: string): Set<number> {
   const pids = new Set<number>();
   if (process.platform === 'win32') {
-    try {
-      const output = execSync(
-        'wmic process where "name=\'copilot.exe\' or name=\'node.exe\'" get ProcessId,CommandLine /format:csv',
-        { encoding: 'utf-8', timeout: 5000, stdio: ['pipe', 'pipe', 'pipe'] },
-      );
-      for (const line of output.split('\n')) {
-        if (!/copilot/i.test(line)) continue;
-        // CSV format: Node,CommandLine,ProcessId
-        const cols = line.split(',');
-        const pidStr = cols[cols.length - 1]?.trim();
-        const pid = parseInt(pidStr, 10);
-        if (Number.isFinite(pid)) pids.add(pid);
-      }
-    } catch { /* ignore */ }
-    return pids;
-  }
-
-  try {
-    const output = execSync(
-      "ps -eo pid,args | grep '[c]opilot' | grep -v grep",
-      { encoding: 'utf-8', timeout: 5000, stdio: ['pipe', 'pipe', 'pipe'] },
-    );
+    for (const line of output.split('\n')) {
+      if (!/copilot/i.test(line)) continue;
+      const cols = line.split(',');
+      const pid = parseInt(cols[cols.length - 1]?.trim(), 10);
+      if (Number.isFinite(pid)) pids.add(pid);
+    }
+  } else {
     for (const line of output.split('\n')) {
       const m = line.trim().match(/^(\d+)\s/);
       if (m) pids.add(parseInt(m[1], 10));
     }
-  } catch { /* ignore */ }
+  }
   return pids;
 }
+
+function refreshLivePidsAsync(): void {
+  if (livePidsRefreshing) return;
+  livePidsRefreshing = true;
+  const { cmd, args } = livePidsCommand();
+  execFile(cmd, args, { encoding: 'utf-8', timeout: 5000, windowsHide: true }, (err, stdout) => {
+    livePidsRefreshing = false;
+    if (err) return; // keep the previous cache on failure
+    livePidsCache = { pids: parseLivePids(stdout || ''), ts: Date.now() };
+  });
+}
+
+function collectLiveCopilotPids(): Set<number> {
+  const now = Date.now();
+  if (livePidsCache) {
+    // Serve cached instantly; kick off a background refresh if stale.
+    if (now - livePidsCache.ts >= LIVE_PIDS_TTL_MS) refreshLivePidsAsync();
+    return livePidsCache.pids;
+  }
+  // Cold start (typically the very first background scan at startup): do one
+  // synchronous read to seed the cache, then all later calls stay non-blocking.
+  const { cmd, args } = livePidsCommand();
+  try {
+    const output = execFileSync(cmd, args, { encoding: 'utf-8', timeout: 5000, windowsHide: true });
+    livePidsCache = { pids: parseLivePids(output), ts: now };
+  } catch {
+    livePidsCache = { pids: new Set(), ts: now };
+  }
+  return livePidsCache.pids;
+}
+

@@ -1,4 +1,4 @@
-import { execSync } from 'child_process';
+import { execSync, execFile, execFileSync } from 'child_process';
 import { existsSync, readdirSync, statSync, openSync, readSync, closeSync } from 'fs';
 import { join, sep } from 'path';
 import { homedir } from 'os';
@@ -248,6 +248,20 @@ export class ClaudeProvider implements CliProvider {
    * only (Resume modal, deep search). Do NOT call from render hot paths.
    */
   discoverSessions(): DiscoveredSession[] {
+    // Short-TTL cache: this scans every Claude project dir (readdir + per-file
+    // reads) which is slow on network drives and is hit by the resume modal and
+    // the periodic scanner. Caching keeps repeat opens instant and bounds how
+    // often the sync scan can block the event loop.
+    const now = Date.now();
+    if (claudeDiscoverCache && now - claudeDiscoverCache.ts < CLAUDE_DISCOVER_TTL_MS) {
+      return claudeDiscoverCache.sessions;
+    }
+    const sessions = this.discoverSessionsUncached();
+    claudeDiscoverCache = { sessions, ts: now };
+    return sessions;
+  }
+
+  private discoverSessionsUncached(): DiscoveredSession[] {
     if (!existsSync(CLAUDE_PROJECTS_DIR)) return [];
     const results: DiscoveredSession[] = [];
 
@@ -373,30 +387,55 @@ export class ClaudeProvider implements CliProvider {
    * the session scanner; not in render paths.
    */
   detectActiveSessionIds(): ActiveProcessInfo[] {
-    if (process.platform === 'win32') {
-      // Windows: use WMIC to read command lines. WMIC is deprecated but
-      // still ships with Win10/11; fall back to empty if missing.
-      try {
-        const output = execSync(
-          'wmic process where "name=\'claude.exe\' or name=\'node.exe\'" get CommandLine /format:csv',
-          { encoding: 'utf-8', timeout: 5000, stdio: ['pipe', 'pipe', 'pipe'] },
-        );
-        return parseClaudeProcessLines(output);
-      } catch {
-        return [];
-      }
+    const now = Date.now();
+    if (claudeActiveCache) {
+      if (now - claudeActiveCache.ts >= CLAUDE_ACTIVE_TTL_MS) refreshClaudeActiveAsync();
+      return claudeActiveCache.result;
     }
-
+    // Cold start: one synchronous read to seed the cache (typically the startup
+    // scan), then every later call is served from cache + refreshed in the
+    // background so a resume-modal open never blocks on wmic/ps.
+    const { cmd, args } = claudeProcCommand();
     try {
-      const output = execSync(
-        "ps -eo args | grep '[c]laude' | grep -- '--session-id'",
-        { encoding: 'utf-8', timeout: 5000, stdio: ['pipe', 'pipe', 'pipe'] },
-      );
-      return parseClaudeProcessLines(output);
+      const output = execFileSync(cmd, args, { encoding: 'utf-8', timeout: 5000, windowsHide: true });
+      claudeActiveCache = { result: parseClaudeProcessLines(output), ts: now };
     } catch {
-      return [];
+      claudeActiveCache = { result: [], ts: now };
     }
+    return claudeActiveCache.result;
   }
+}
+
+// Detecting live Claude sessions runs a slow subprocess (wmic on Windows, ps on
+// Unix) that blocked the shared event loop on every resume-modal open / scan.
+// Cache the result and refresh it asynchronously (see detectActiveSessionIds).
+const CLAUDE_ACTIVE_TTL_MS = 4000;
+let claudeActiveCache: { result: ActiveProcessInfo[]; ts: number } | null = null;
+let claudeActiveRefreshing = false;
+
+// Short-TTL cache for the project-dir scan (see discoverSessions).
+const CLAUDE_DISCOVER_TTL_MS = 4000;
+let claudeDiscoverCache: { sessions: DiscoveredSession[]; ts: number } | null = null;
+
+function claudeProcCommand(): { cmd: string; args: string[] } {
+  if (process.platform === 'win32') {
+    return {
+      cmd: 'wmic',
+      args: ['process', 'where', "name='claude.exe' or name='node.exe'", 'get', 'CommandLine', '/format:csv'],
+    };
+  }
+  return { cmd: '/bin/sh', args: ['-c', "ps -eo args | grep '[c]laude' | grep -- '--session-id'"] };
+}
+
+function refreshClaudeActiveAsync(): void {
+  if (claudeActiveRefreshing) return;
+  claudeActiveRefreshing = true;
+  const { cmd, args } = claudeProcCommand();
+  execFile(cmd, args, { encoding: 'utf-8', timeout: 5000, windowsHide: true }, (err, stdout) => {
+    claudeActiveRefreshing = false;
+    if (err) return; // keep previous cache on failure
+    claudeActiveCache = { result: parseClaudeProcessLines(stdout || ''), ts: Date.now() };
+  });
 }
 
 function parseClaudeProcessLines(output: string): ActiveProcessInfo[] {
