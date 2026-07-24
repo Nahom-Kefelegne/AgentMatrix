@@ -1,6 +1,7 @@
 #!/bin/bash
 # Agent Matrix Setup Script (macOS/Linux)
-# Checks prerequisites, configures Claude hooks, and launches the app.
+# Checks prerequisites, configures Claude + Copilot hooks, installs dependencies,
+# sets up native modules, and launches the app.
 
 set -e
 
@@ -40,12 +41,26 @@ else
     MISSING=1
 fi
 
-# Check Claude CLI
+# Check GitHub Copilot CLI (primary) and Claude CLI — at least one is required.
+HAVE_CLI=0
+if command -v copilot &> /dev/null; then
+    echo -e "  ${CHECK} GitHub Copilot CLI found (primary)"
+    HAVE_CLI=1
+else
+    echo -e "  ${WARN} GitHub Copilot CLI not found (recommended primary)"
+    echo -e "     Install from: https://github.com/github/copilot-cli"
+fi
+
 if command -v claude &> /dev/null; then
     echo -e "  ${CHECK} Claude CLI found"
+    HAVE_CLI=1
 else
-    echo -e "  ${CROSS} Claude CLI not found"
+    echo -e "  ${WARN} Claude CLI not found"
     echo -e "     Install from: https://docs.anthropic.com/en/docs/claude-code"
+fi
+
+if [ $HAVE_CLI -eq 0 ]; then
+    echo -e "  ${CROSS} Neither GitHub Copilot CLI nor Claude CLI found — install at least one."
     MISSING=1
 fi
 

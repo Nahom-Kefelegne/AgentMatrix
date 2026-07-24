@@ -12,13 +12,15 @@ A desktop app that turns CLI coding agents (GitHub Copilot CLI and Claude Code) 
 
 ### Prerequisites
 
-Make sure the following are installed and available on your PATH:
+Make sure the following are installed and available on your PATH. **At least one
+CLI agent** (GitHub Copilot CLI or Claude Code CLI) is required — Copilot is the
+primary, recommended agent.
 
 | Tool | Required | How to check |
 |------|----------|-------------|
 | **Node.js 18+** | Yes | `node -v` |
-| **GitHub Copilot CLI** | Recommended / primary | `copilot --version` |
-| **Claude Code CLI** | Supported / currently required by setup scripts | `claude --version` |
+| **GitHub Copilot CLI** | Recommended primary (or Claude) | `copilot --version` |
+| **Claude Code CLI** | Optional (or Copilot) | `claude --version` |
 | **Git** | Yes | `git --version` |
 | **Azure CLI** | Optional (ADO integration) | `az --version` |
 
@@ -37,11 +39,12 @@ curl -sO https://raw.githubusercontent.com/Nahom-Kefelegne/AgentMatrix/main/setu
 ```
 
 The setup script will:
-1. Verify all prerequisites
-2. Clone this repo into an `AgentMatrix` folder
-3. Install dependencies and rebuild native modules
-4. Configure Claude Code hooks in `~/.claude/settings.json` and Copilot hooks in `~/.copilot/hooks/agentmatrix.json` when Copilot is detected
-5. Launch the app
+1. Verify prerequisites (Node, git, and at least one of Copilot/Claude)
+2. Configure Claude Code hooks in `~/.claude/settings.json` and Copilot hooks in `~/.copilot/hooks/agentmatrix.json` when Copilot is detected
+3. Clone this repo into an `AgentMatrix` folder
+4. Install dependencies — resilient to blocked public-npm networks: it fails fast and re-resolves through the registry in your `.npmrc` (e.g. a corporate Azure Artifacts mirror)
+5. Set up native modules (node-pty) — it verifies the shipped N-API prebuilt binary works under Electron and **skips the network-dependent `electron-rebuild`** unless the prebuilt genuinely can't spawn (in which case it tries a time-bounded rebuild)
+6. Launch the app
 
 ### Run Again Later
 

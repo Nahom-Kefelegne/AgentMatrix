@@ -33,8 +33,62 @@ Write-Host ""
 
 # Install dependencies
 Write-Host "Installing dependencies..." -ForegroundColor Blue
-npm install
+# See setup.ps1: fail fast if public npm is blocked, then re-resolve through the
+# registry configured in .npmrc (e.g. a corporate mirror) by dropping the lockfile.
+function Invoke-NpmInstallResilient {
+    npm install --fetch-timeout=60000 --fetch-retry-maxtimeout=60000 --fetch-retries=1 2>&1 | Out-Host
+    if ($LASTEXITCODE -eq 0) { return $true }
+    $reg = (npm config get registry 2>$null)
+    Write-Host "  [!] npm install failed (registry.npmjs.org may be blocked)." -ForegroundColor Yellow
+    Write-Host "      Re-resolving through your configured registry: $reg"
+    Remove-Item -Force package-lock.json -ErrorAction SilentlyContinue
+    npm install --fetch-timeout=120000 --fetch-retry-maxtimeout=120000 --fetch-retries=2 2>&1 | Out-Host
+    return ($LASTEXITCODE -eq 0)
+}
+if (-not (Invoke-NpmInstallResilient)) {
+    $reg = (npm config get registry 2>$null)
+    Write-Host "  [X] Could not install dependencies. If public npm is blocked, authenticate" -ForegroundColor Red
+    Write-Host "      your mirror ($reg) — e.g. npx vsts-npm-auth -config .npmrc -F — then re-run."
+    exit 1
+}
 Write-Host "  [OK] Dependencies installed" -ForegroundColor Green
+Write-Host ""
+
+# ── Native modules (node-pty) ─────────────────────────────────────────────
+# node-pty ships N-API prebuilt binaries that work under both Node and Electron,
+# so no electron-rebuild is needed (it downloads headers and hangs on blocked
+# networks). Verify the prebuilt can spawn under Electron; only rebuild (bounded)
+# if it can't. See setup.ps1 for detail.
+Write-Host "Setting up native modules (node-pty)..." -ForegroundColor Blue
+
+function Test-PtyWorks {
+    $electron = Join-Path (Get-Location) "node_modules\.bin\electron.cmd"
+    if (-not (Test-Path $electron)) { return $false }
+    $env:ELECTRON_RUN_AS_NODE = "1"
+    try {
+        & $electron -e "const p=require('node-pty');const t=p.spawn(process.env.ComSpec||'cmd.exe',['/c','exit'],{});t.kill();" *> $null
+        return ($LASTEXITCODE -eq 0)
+    } catch {
+        return $false
+    } finally {
+        Remove-Item Env:\ELECTRON_RUN_AS_NODE -ErrorAction SilentlyContinue
+    }
+}
+
+if (Test-PtyWorks) {
+    Write-Host "  [OK] node-pty prebuilt binary works under Electron — no rebuild needed" -ForegroundColor Green
+} else {
+    Write-Host "  [!] Prebuilt node-pty can't spawn — attempting a time-bounded rebuild..." -ForegroundColor Yellow
+    $repoDir = (Get-Location).Path
+    $job = Start-Job -ScriptBlock { param($d) Set-Location $d; npx electron-rebuild -f -w node-pty } -ArgumentList $repoDir
+    if (Wait-Job $job -Timeout 180) { Receive-Job $job | Out-Host } else {
+        Stop-Job $job
+        Write-Host "  [!] Rebuild timed out (likely blocked network) — the prebuilt binary should still work." -ForegroundColor Yellow
+    }
+    Remove-Job $job -Force -ErrorAction SilentlyContinue
+    if (Test-PtyWorks) { Write-Host "  [OK] Native modules ready" -ForegroundColor Green }
+    else { Write-Host "  [!] node-pty still can't spawn — the app will report the exact error if the terminal fails." -ForegroundColor Yellow }
+}
 Write-Host ""
 
 # Re-configure hooks

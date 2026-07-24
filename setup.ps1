@@ -1,5 +1,6 @@
 # Agent Matrix Setup Script (Windows PowerShell)
-# Checks prerequisites, configures Claude hooks, and launches the app.
+# Checks prerequisites, configures Claude + Copilot hooks, installs dependencies
+# (resilient to blocked npm mirrors), sets up native modules, and launches the app.
 
 $ErrorActionPreference = "Stop"
 
@@ -30,13 +31,28 @@ try {
     $missing = 1
 }
 
-# Check Claude CLI
+# Check GitHub Copilot CLI (primary) and Claude CLI — at least one is required.
+$haveCli = $false
+try {
+    $null = Get-Command copilot -ErrorAction Stop
+    Write-Host "  [OK] GitHub Copilot CLI found (primary)" -ForegroundColor Green
+    $haveCli = $true
+} catch {
+    Write-Host "  [!] GitHub Copilot CLI not found (recommended primary)" -ForegroundColor Yellow
+    Write-Host "      Install from: https://github.com/github/copilot-cli"
+}
+
 try {
     $null = Get-Command claude -ErrorAction Stop
     Write-Host "  [OK] Claude CLI found" -ForegroundColor Green
+    $haveCli = $true
 } catch {
-    Write-Host "  [X] Claude CLI not found" -ForegroundColor Red
+    Write-Host "  [!] Claude CLI not found" -ForegroundColor Yellow
     Write-Host "      Install from: https://docs.anthropic.com/en/docs/claude-code"
+}
+
+if (-not $haveCli) {
+    Write-Host "  [X] Neither GitHub Copilot CLI nor Claude CLI found — install at least one." -ForegroundColor Red
     $missing = 1
 }
 
@@ -166,16 +182,75 @@ if (-not (Test-Path (Join-Path $scriptDir "electron\main.ts"))) {
 
 # Install dependencies
 Write-Host "Installing dependencies..." -ForegroundColor Blue
-npm install
+# package-lock.json pins tarball URLs on registry.npmjs.org. On networks where
+# public npm is blocked (e.g. corporate/Microsoft), npm honors those URLs and
+# hangs. Fail fast (bounded timeout/retries), then fall back to re-resolving
+# every dependency through the registry configured in .npmrc (e.g. an Azure
+# Artifacts mirror) by dropping the lockfile.
+function Invoke-NpmInstallResilient {
+    npm install --fetch-timeout=60000 --fetch-retry-maxtimeout=60000 --fetch-retries=1 2>&1 | Out-Host
+    if ($LASTEXITCODE -eq 0) { return $true }
+    $reg = (npm config get registry 2>$null)
+    Write-Host "  [!] npm install failed — the registry in package-lock.json" -ForegroundColor Yellow
+    Write-Host "      (registry.npmjs.org) may be blocked on this network." -ForegroundColor Yellow
+    Write-Host "      Re-resolving dependencies through your configured registry: $reg"
+    Remove-Item -Force package-lock.json -ErrorAction SilentlyContinue
+    npm install --fetch-timeout=120000 --fetch-retry-maxtimeout=120000 --fetch-retries=2 2>&1 | Out-Host
+    return ($LASTEXITCODE -eq 0)
+}
+if (-not (Invoke-NpmInstallResilient)) {
+    $reg = (npm config get registry 2>$null)
+    Write-Host "  [X] Could not install dependencies." -ForegroundColor Red
+    Write-Host "      Public npm appears blocked and your mirror isn't usable. Fix the mirror auth:"
+    Write-Host "        - Registry: $reg"
+    Write-Host "        - Azure Artifacts (Windows): npx vsts-npm-auth -config .npmrc -F"
+    Write-Host "          (or add a Packaging-read PAT to your user .npmrc), then re-run this script."
+    exit 1
+}
 Write-Host ""
 
-# Rebuild node-pty for Electron
-Write-Host "Rebuilding native modules for Electron..." -ForegroundColor Blue
-try {
-    npx electron-rebuild -m . -o node-pty 2>$null
-    Write-Host "  [OK] Native modules rebuilt" -ForegroundColor Green
-} catch {
-    Write-Host "  [!] electron-rebuild failed. You may need: npm install --global windows-build-tools" -ForegroundColor Yellow
+# ── Native modules (node-pty) ─────────────────────────────────────────────
+# node-pty ships N-API prebuilt binaries (prebuilds/<platform>-<arch>/) that are
+# ABI-stable across Node AND Electron, so NO electron-rebuild is needed — which
+# matters because electron-rebuild downloads Electron C++ headers from the
+# internet and HANGS on networks where public downloads are blocked (e.g.
+# corporate/Microsoft). Verify the prebuilt binary can spawn under Electron's
+# runtime; only if it can't do we attempt a (time-bounded) rebuild.
+Write-Host "Setting up native modules (node-pty)..." -ForegroundColor Blue
+
+function Test-PtyWorks {
+    $electron = Join-Path (Get-Location) "node_modules\.bin\electron.cmd"
+    if (-not (Test-Path $electron)) { return $false }
+    $env:ELECTRON_RUN_AS_NODE = "1"
+    try {
+        & $electron -e "const p=require('node-pty');const t=p.spawn(process.env.ComSpec||'cmd.exe',['/c','exit'],{});t.kill();" *> $null
+        return ($LASTEXITCODE -eq 0)
+    } catch {
+        return $false
+    } finally {
+        Remove-Item Env:\ELECTRON_RUN_AS_NODE -ErrorAction SilentlyContinue
+    }
+}
+
+if (Test-PtyWorks) {
+    Write-Host "  [OK] node-pty prebuilt binary works under Electron — no rebuild needed" -ForegroundColor Green
+} else {
+    Write-Host "  [!] Prebuilt node-pty can't spawn — attempting a time-bounded rebuild..." -ForegroundColor Yellow
+    $repoDir = (Get-Location).Path
+    $job = Start-Job -ScriptBlock { param($d) Set-Location $d; npx electron-rebuild -f -w node-pty } -ArgumentList $repoDir
+    if (Wait-Job $job -Timeout 180) { Receive-Job $job | Out-Host } else {
+        Stop-Job $job
+        Write-Host "  [!] Rebuild timed out (likely blocked network fetching Electron headers)." -ForegroundColor Yellow
+    }
+    Remove-Job $job -Force -ErrorAction SilentlyContinue
+    if (Test-PtyWorks) {
+        Write-Host "  [OK] Native modules ready" -ForegroundColor Green
+    } else {
+        Write-Host "  [X] node-pty still can't spawn. On a network that blocks public downloads," -ForegroundColor Red
+        Write-Host "      do NOT run electron-rebuild (it hangs fetching Electron headers) — the"
+        Write-Host "      prebuilt N-API binary is sufficient. Try reinstalling node-pty, or run"
+        Write-Host "      the app anyway; the terminal will report the exact spawn error if it fails."
+    }
 }
 Write-Host ""
 
