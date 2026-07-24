@@ -135,11 +135,12 @@ function OfficeView() {
         editorUnlocked={editorUnlocked}
       />
 
-      {/* Office view — TEST: unmount when not active so its 60fps canvas
-          render loop (requestAnimationFrame) stops instead of running hidden
-          behind the dashboard. Previously kept mounted (display:none) to
-          preserve the engine, but that left the loop burning CPU on other
-          views. */}
+      {/* Office view is enabled but mounted ONLY while it's the active view: its
+          GameEngine runs a 60fps requestAnimationFrame render loop, so keeping
+          it mounted (even hidden) would burn CPU/GPU — and stream frames over a
+          remote session — behind the dashboard. Unmounting on view change runs
+          the engine's cleanup (cancelAnimationFrame), so the loop only runs
+          while you're actually looking at the office. */}
       {viewMode === 'office' && (
         <div style={{ display: 'contents' }}>
           <OfficeCanvas
