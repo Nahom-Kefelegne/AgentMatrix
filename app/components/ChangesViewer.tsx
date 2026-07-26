@@ -1,11 +1,26 @@
 'use client';
 
-import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
-import { DiffEditor, type DiffOnMount } from '@monaco-editor/react';
-import Editor, { type OnMount } from '@monaco-editor/react';
-import type { editor as monacoEditor } from 'monaco-editor';
-import { defineAgentMatrixTheme, AGENT_MATRIX_THEME } from '@/lib/monacoTheme';
-import type { ReviewComment } from '@/lib/types';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import Editor from '@monaco-editor/react';
+import { AGENT_MATRIX_THEME } from '@/lib/monacoTheme';
+import type { ReviewComment, ReviewSendMode } from './diff-core';
+import {
+  SessionDiffCore,
+  useComments,
+  useCommentAnnotations,
+  buildFileTree,
+  FileIcon,
+  FileTreeNode,
+  CommentComposerPopover,
+  CommentsPanel,
+  ReviewActions,
+  DiffCoreStyles,
+  LoadingSpinner,
+  EditorLoading,
+  EditorError,
+  detectLanguage,
+  monacoOpts,
+} from './diff-core';
 import { FolderPicker } from './ui/FolderPicker';
 
 // Module-level file index cache — persists across re-renders/remounts, not page reloads
@@ -32,170 +47,6 @@ function setCachedIndex(root: string, files: string[]) {
 // Module-level browse root cache — persists user's chosen root per session
 const BROWSE_ROOT_CACHE = new Map<string, { root: string; isRepo: boolean }>();
 
-function detectLanguage(filePath: string): string {
-  const ext = ('.' + (filePath.split('.').pop() || '')).toLowerCase();
-  const map: Record<string, string> = {
-    '.ts': 'typescript', '.tsx': 'typescript', '.js': 'javascript', '.jsx': 'javascript',
-    '.json': 'json', '.md': 'markdown', '.css': 'css', '.scss': 'scss', '.less': 'less',
-    '.html': 'html', '.htm': 'html', '.xml': 'xml', '.svg': 'xml',
-    '.py': 'python', '.rs': 'rust', '.go': 'go', '.java': 'java',
-    '.c': 'c', '.cpp': 'cpp', '.h': 'c', '.hpp': 'cpp',
-    '.sh': 'shell', '.bash': 'shell', '.zsh': 'shell',
-    '.yaml': 'yaml', '.yml': 'yaml', '.toml': 'toml',
-    '.sql': 'sql', '.graphql': 'graphql', '.gql': 'graphql',
-    '.rb': 'ruby', '.php': 'php', '.swift': 'swift', '.kt': 'kotlin',
-  };
-  const basename = filePath.split('/').pop()?.split('\\').pop()?.toLowerCase() || '';
-  if (basename === 'dockerfile') return 'dockerfile';
-  if (basename === 'makefile') return 'makefile';
-  return map[ext] || 'plaintext';
-}
-
-// === File tree ===
-
-interface TreeNode {
-  name: string;
-  path: string;
-  isDir: boolean;
-  children: TreeNode[];
-}
-
-function buildFileTree(files: string[]): TreeNode[] {
-  const root: TreeNode = { name: '', path: '', isDir: true, children: [] };
-  for (const file of files) {
-    const parts = file.split('/');
-    let current = root;
-    for (let i = 0; i < parts.length; i++) {
-      const part = parts[i];
-      const isLast = i === parts.length - 1;
-      const pathSoFar = parts.slice(0, i + 1).join('/');
-      let child = current.children.find(c => c.name === part);
-      if (!child) {
-        child = { name: part, path: pathSoFar, isDir: !isLast, children: [] };
-        current.children.push(child);
-      }
-      current = child;
-    }
-  }
-  // Sort: dirs first, then files, alpha within each
-  function sortTree(nodes: TreeNode[]) {
-    nodes.sort((a, b) => {
-      if (a.isDir && !b.isDir) return -1;
-      if (!a.isDir && b.isDir) return 1;
-      return a.name.localeCompare(b.name, undefined, { sensitivity: 'base' });
-    });
-    for (const n of nodes) if (n.isDir) sortTree(n.children);
-  }
-  sortTree(root.children);
-  return root.children;
-}
-
-// File type colors (VS Code Material Icon Theme)
-const FILE_COLORS: Record<string, string> = {
-  ts: '#3178c6', tsx: '#1a6fb5', js: '#f0db4f', jsx: '#61dafb',
-  json: '#cbcb41', css: '#563d7c', scss: '#cd6799', less: '#1d365d',
-  html: '#e44d26', xml: '#e44d26', svg: '#ffb13b',
-  md: '#519aba', py: '#3572a5', rs: '#dea584', go: '#00add8',
-  java: '#b07219', c: '#555', cpp: '#f34b7d', h: '#555',
-  rb: '#cc342d', php: '#4f5d95', swift: '#f05138', kt: '#a97bff',
-  sh: '#4ec962', bash: '#4ec962', zsh: '#4ec962',
-  yaml: '#cb171e', yml: '#cb171e', toml: '#9c4121',
-  sql: '#e38c00', graphql: '#e535ab', gql: '#e535ab',
-  png: '#a074c4', jpg: '#a074c4', gif: '#a074c4', ico: '#a074c4',
-  lock: '#555', env: '#faf743',
-  gitignore: '#f05032', dockerfile: '#2496ed',
-};
-
-function FileIcon({ name }: { name: string }) {
-  const ext = name.split('.').pop()?.toLowerCase() || '';
-  const baseName = name.toLowerCase();
-  const color = FILE_COLORS[baseName] || FILE_COLORS[ext] || '#666';
-
-  return (
-    <svg width="16" height="16" viewBox="0 0 16 16" fill="none" style={{ flexShrink: 0 }}>
-      <path d="M3 1.5h6.5L13 5v9.5a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1v-13z" fill={color} fillOpacity="0.15" stroke={color} strokeWidth="1" />
-      <path d="M9.5 1.5V5H13" stroke={color} strokeWidth="1" />
-    </svg>
-  );
-}
-
-function FileTreeNode({ node, depth, selected, expanded, onSelect, onToggle, commentCounts }: {
-  node: TreeNode; depth: number; selected: string | null;
-  expanded: Set<string>; onSelect: (path: string) => void;
-  onToggle: (path: string) => void;
-  commentCounts: Map<string, number>;
-}) {
-  const isOpen = expanded.has(node.path);
-  const isSelected = selected === node.path;
-  const count = commentCounts.get(node.path) || 0;
-
-  if (node.isDir) {
-    return (
-      <>
-        <div
-          onClick={() => onToggle(node.path)}
-          style={{
-            padding: '3px 8px 3px',
-            paddingLeft: 12 + depth * 16,
-            cursor: 'pointer',
-            display: 'flex', alignItems: 'center', gap: 6,
-            fontSize: 13, color: '#ccc', fontWeight: 600,
-            background: 'transparent',
-            userSelect: 'none',
-          }}
-          onMouseEnter={e => e.currentTarget.style.background = '#1e1e26'}
-          onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
-        >
-          <span style={{ fontSize: 10, color: '#666', width: 12, textAlign: 'center', flexShrink: 0 }}>
-            {isOpen ? '\u25BE' : '\u25B8'}
-          </span>
-          <span style={{ fontSize: 14 }}>{isOpen ? '\uD83D\uDCC2' : '\uD83D\uDCC1'}</span>
-          <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{node.name}</span>
-        </div>
-        {isOpen && node.children.map(child => (
-          <FileTreeNode
-            key={child.path}
-            node={child}
-            depth={depth + 1}
-            selected={selected}
-            expanded={expanded}
-            onSelect={onSelect}
-            onToggle={onToggle}
-            commentCounts={commentCounts}
-          />
-        ))}
-      </>
-    );
-  }
-
-  return (
-    <div
-      onClick={() => onSelect(node.path)}
-      style={{
-        padding: '3px 8px 3px',
-        paddingLeft: 12 + depth * 16,
-        cursor: 'pointer',
-        display: 'flex', alignItems: 'center', gap: 6,
-        fontSize: 13, color: isSelected ? '#eee' : '#aaa',
-        background: isSelected ? '#1e1e26' : 'transparent',
-        userSelect: 'none',
-      }}
-      onMouseEnter={e => { if (!isSelected) e.currentTarget.style.background = '#14141e'; }}
-      onMouseLeave={e => { if (!isSelected) e.currentTarget.style.background = 'transparent'; }}
-    >
-      <FileIcon name={node.name} />
-      <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1 }}>{node.name}</span>
-      {count > 0 && (
-        <span style={{ fontSize: 10, padding: '0 5px', borderRadius: 8, background: '#fbbf2420', color: '#fbbf24', fontWeight: 700, flexShrink: 0 }}>{count}</span>
-      )}
-    </div>
-  );
-}
-
-// === Main types ===
-
-interface FileChange { path: string; status: string; additions: number; deletions: number; }
-
 interface ChangesViewerProps {
   sessionId: string;
   sessionName: string;
@@ -205,29 +56,15 @@ interface ChangesViewerProps {
   onSwitchToConsole?: () => void;
 }
 
-interface FloatingPopover {
-  mode: 'add' | 'view';
-  line: number;
-  endLine: number;
-  x: number;
-  y: number;
-  comment?: ReviewComment;
-}
-
 type ViewMode = 'changes' | 'browse';
 
+// Compatibility modal wrapper around the reusable SessionDiffCore. Owns the
+// fixed-position overlay, the Changes/Browse mode toggle, the browse
+// (root-picker + file-tree) experience, and the terminal-injection review
+// behavior. The changes experience is delegated to SessionDiffCore; comments
+// are shared across both modes via a single controller.
 export default function ChangesViewer({ sessionId, sessionName, cwd, onClose, socketRef, onSwitchToConsole }: ChangesViewerProps) {
   const [viewMode, setViewMode] = useState<ViewMode>('changes');
-
-  // === Changes mode state ===
-  const [files, setFiles] = useState<FileChange[]>([]);
-  const [selectedFile, setSelectedFile] = useState<string | null>(null);
-  const [diff, setDiff] = useState<{ original: string; current: string; isNew: boolean } | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [reverting, setReverting] = useState(false);
-  const [diffMode, setDiffMode] = useState<'inline' | 'split'>('inline');
-  const [loadingDiff, setLoadingDiff] = useState(false);
-  const [refreshTick, setRefreshTick] = useState(0);
 
   // === Browse mode state ===
   const [repoRoot, setRepoRoot] = useState<string | null>(null);
@@ -237,79 +74,31 @@ export default function ChangesViewer({ sessionId, sessionName, cwd, onClose, so
   const [browseFile, setBrowseFile] = useState<string | null>(null);
   const [browseContent, setBrowseContent] = useState<string | null>(null);
   const [browseLanguage, setBrowseLanguage] = useState('plaintext');
+  const [browseError, setBrowseError] = useState<string | null>(null);
   const [loadingBrowse, setLoadingBrowse] = useState(false);
   const [showPathPicker, setShowPathPicker] = useState(false);
   const [pickedPath, setPickedPath] = useState('');
   const [expandedDirs, setExpandedDirs] = useState<Set<string>>(new Set());
+  const [browseSending, setBrowseSending] = useState(false);
 
-  // === Shared comment state ===
-  const [comments, setComments] = useState<ReviewComment[]>([]);
-  const [commentText, setCommentText] = useState('');
-  const [sending, setSending] = useState(false);
-  const [popover, setPopover] = useState<FloatingPopover | null>(null);
-
-  // === Refs ===
-  const diffEditorRef = useRef<monacoEditor.IDiffEditor | null>(null);
-  const browseEditorRef = useRef<monacoEditor.IStandaloneCodeEditor | null>(null);
-  const monacoRef = useRef<Parameters<DiffOnMount>[1] | null>(null);
-  const decorationsRef = useRef<monacoEditor.IEditorDecorationsCollection | null>(null);
-  const browseDecorationsRef = useRef<monacoEditor.IEditorDecorationsCollection | null>(null);
-  const floatingInputRef = useRef<HTMLTextAreaElement>(null);
   const modalRef = useRef<HTMLDivElement>(null);
-  const mousePos = useRef({ x: 0, y: 0 });
-  const commentsRef = useRef(comments);
-  commentsRef.current = comments;
-  const activeFileRef = useRef<string | null>(null);
-  // Track which file is active across modes
-  const currentFile = viewMode === 'changes' ? selectedFile : (browseFile ? `${repoRoot}/${browseFile}` : null);
-  activeFileRef.current = currentFile;
-
   const searchInputRef = useRef<HTMLInputElement>(null);
 
-  const statusColors: Record<string, string> = {
-    modified: '#f59e0b', new: '#51cf66', deleted: '#ff6b6b', untracked: '#a78bfa',
-  };
+  // === Shared comments (single source of truth across changes + browse) ===
+  const cc = useComments(sessionId);
+  const comments = cc.comments;
 
-  // === Mouse tracking ===
-  useEffect(() => {
-    const handler = (e: MouseEvent) => { mousePos.current = { x: e.clientX, y: e.clientY }; };
-    window.addEventListener('mousemove', handler);
-    return () => window.removeEventListener('mousemove', handler);
-  }, []);
+  const browseFullPath = browseFile && repoRoot ? `${repoRoot}/${browseFile}` : null;
 
-  // === Load changed files ===
-  const loadFiles = useCallback(() => {
-    fetch(`/api/sessions/changes?sessionId=${sessionId}`)
-      .then(r => r.json())
-      .then(data => { setFiles(data.files || []); setLoading(false); })
-      .catch(() => setLoading(false));
-  }, [sessionId]);
-  useEffect(() => {
-    loadFiles();
-  }, [loadFiles]);
-
-  // Live refresh: re-fetch the change list + current diff whenever the agent
-  // finishes a file-mutating tool (emitted by the tool-complete hook).
-  useEffect(() => {
-    const socket = socketRef.current;
-    if (!socket) return;
-    const handler = (data: { sessionId: string }) => {
-      if (data.sessionId !== sessionId) return;
-      loadFiles();
-      setRefreshTick(t => t + 1);
-    };
-    socket.on('session:files-changed' as any, handler);
-    return () => { socket.off('session:files-changed' as any, handler); };
-  }, [socketRef, sessionId, loadFiles]);
-
-  // === Load comments ===
-  const loadComments = useCallback(() => {
-    fetch(`/api/sessions/comments?sessionId=${sessionId}`)
-      .then(r => r.json())
-      .then(data => setComments(data.comments || []))
-      .catch(() => {});
-  }, [sessionId]);
-  useEffect(() => { loadComments(); }, [loadComments]);
+  // === Browse comment annotations (decorations, gutter/selection, popover) ===
+  const browseAnnotations = useCommentAnnotations({
+    containerRef: modalRef,
+    activeFilePath: browseFullPath,
+    comments,
+    revision: browseContent,
+    onAddComment: cc.addComment,
+    onDeleteComment: cc.deleteComment,
+  });
 
   // === Detect repo root on mount — skip if user already set a custom root ===
   useEffect(() => {
@@ -321,13 +110,17 @@ export default function ChangesViewer({ sessionId, sessionName, cwd, onClose, so
       return;
     }
     fetch(`/api/editor/browse?action=repo-root&path=${encodeURIComponent(cwd)}`)
-      .then(r => r.json())
+      .then(r => {
+        if (!r.ok) throw new Error(`repo-root request failed (${r.status})`);
+        return r.json();
+      })
       .then(data => {
         setRepoRoot(data.root);
         setIsRepo(data.isRepo);
         BROWSE_ROOT_CACHE.set(sessionId, { root: data.root, isRepo: data.isRepo });
       })
-      .catch(() => {
+      .catch(err => {
+        console.error('[changes-viewer] Failed to detect repo root:', err);
         setRepoRoot(cwd);
         setIsRepo(false);
         BROWSE_ROOT_CACHE.set(sessionId, { root: cwd, isRepo: false });
@@ -341,14 +134,20 @@ export default function ChangesViewer({ sessionId, sessionName, cwd, onClose, so
     if (cached) { setAllFiles(cached); return; }
     setLoadingBrowse(true);
     fetch(`/api/editor/browse?action=files&root=${encodeURIComponent(repoRoot)}`)
-      .then(r => r.json())
+      .then(r => {
+        if (!r.ok) throw new Error(`file index request failed (${r.status})`);
+        return r.json();
+      })
       .then(data => {
         const files = data.files || [];
         setAllFiles(files);
         setCachedIndex(repoRoot, files);
         setLoadingBrowse(false);
       })
-      .catch(() => setLoadingBrowse(false));
+      .catch(err => {
+        console.error('[changes-viewer] Failed to index files:', err);
+        setLoadingBrowse(false);
+      });
   }, [viewMode, repoRoot]);
 
   // === File tree (built once from allFiles, cheap) ===
@@ -387,277 +186,43 @@ export default function ChangesViewer({ sessionId, sessionName, cwd, onClose, so
       .slice(0, 200);
   }, [allFiles, browseSearch, isSearching]);
 
-  // === Load diff for changes mode ===
-  useEffect(() => {
-    if (viewMode !== 'changes') return;
-    if (!selectedFile) { setDiff(null); setLoadingDiff(false); return; }
-    setLoadingDiff(true); setDiff(null);
-    fetch(`/api/sessions/changes?sessionId=${sessionId}&file=${encodeURIComponent(selectedFile)}`)
-      .then(r => r.json())
-      .then(data => { setDiff(data); setLoadingDiff(false); })
-      .catch(() => { setDiff(null); setLoadingDiff(false); });
-  }, [selectedFile, sessionId, viewMode, refreshTick]);
-
   // === Load file content for browse mode ===
   useEffect(() => {
     if (viewMode !== 'browse' || !browseFile || !repoRoot) { setBrowseContent(null); return; }
+    const ctrl = new AbortController();
     setLoadingBrowse(true);
+    setBrowseError(null);
     const fullPath = `${repoRoot}/${browseFile}`;
-    fetch(`/api/editor/browse?action=read&path=${encodeURIComponent(fullPath)}`)
-      .then(r => r.json())
+    fetch(`/api/editor/browse?action=read&path=${encodeURIComponent(fullPath)}`, { signal: ctrl.signal })
+      .then(r => {
+        if (!r.ok) throw new Error(`read request failed (${r.status})`);
+        return r.json();
+      })
       .then(data => {
         setBrowseContent(data.content);
         setBrowseLanguage(data.language || detectLanguage(browseFile));
         setLoadingBrowse(false);
       })
-      .catch(() => { setBrowseContent(null); setLoadingBrowse(false); });
+      .catch(err => {
+        if (ctrl.signal.aborted) return;
+        console.error('[changes-viewer] Failed to read file:', err);
+        setBrowseError(err instanceof Error ? err.message : 'Failed to read file');
+        setBrowseContent(null); setLoadingBrowse(false);
+      });
+    return () => ctrl.abort();
   }, [browseFile, repoRoot, viewMode]);
 
-  // === Decorations for diff editor ===
-  useEffect(() => {
-    if (viewMode !== 'changes') return;
-    const modified = diffEditorRef.current?.getModifiedEditor();
-    if (!modified || !monacoRef.current) return;
-    const fileComments = comments.filter(c => c.filePath === selectedFile);
-    // Always recreate — the editor model changes when switching files
-    decorationsRef.current?.clear();
-    decorationsRef.current = modified.createDecorationsCollection(
-      fileComments.map(c => ({
-        range: new monacoRef.current!.Range(c.lineNumber, 1, c.lineNumber, 1),
-        options: {
-          glyphMarginClassName: c.resolved ? 'review-comment-glyph--resolved' : 'review-comment-glyph',
-          isWholeLine: true,
-          className: c.resolved ? 'review-comment-line--resolved' : 'review-comment-line',
-          glyphMarginHoverMessage: { value: `${c.resolved ? '(resolved) ' : ''}${c.text}` },
-        },
-      }))
-    );
-  }, [comments, selectedFile, diff, viewMode]);
-
-  // === Decorations for browse editor ===
-  useEffect(() => {
-    if (viewMode !== 'browse') return;
-    const editor = browseEditorRef.current;
-    if (!editor || !monacoRef.current || !browseFile || !repoRoot) return;
-    const fullPath = `${repoRoot}/${browseFile}`;
-    const fileComments = comments.filter(c => c.filePath === fullPath);
-    browseDecorationsRef.current?.clear();
-    browseDecorationsRef.current = editor.createDecorationsCollection(
-      fileComments.map(c => ({
-        range: new monacoRef.current!.Range(c.lineNumber, 1, c.lineNumber, 1),
-        options: {
-          glyphMarginClassName: c.resolved ? 'review-comment-glyph--resolved' : 'review-comment-glyph',
-          isWholeLine: true,
-          className: c.resolved ? 'review-comment-line--resolved' : 'review-comment-line',
-          glyphMarginHoverMessage: { value: `${c.resolved ? '(resolved) ' : ''}${c.text}` },
-        },
-      }))
-    );
-  }, [comments, browseFile, browseContent, repoRoot, viewMode]);
-
-  // === Focus ===
-  useEffect(() => {
-    if (popover?.mode === 'add') setTimeout(() => floatingInputRef.current?.focus(), 30);
-  }, [popover]);
-
+  // === Focus search when entering browse ===
   useEffect(() => {
     if (viewMode === 'browse') setTimeout(() => searchInputRef.current?.focus(), 100);
   }, [viewMode]);
 
-  // === Clamp popover ===
-  const clampPopover = useCallback((rawX: number, rawY: number, popW = 340, popH = 160) => {
-    const modal = modalRef.current;
-    if (!modal) return { x: rawX, y: rawY };
-    const rect = modal.getBoundingClientRect();
-    const pad = 12;
-    let x = rawX, y = rawY;
-    if (x + popW + pad > rect.right) x = rect.right - popW - pad;
-    if (x < rect.left + pad) x = rect.left + pad;
-    if (y + popH + pad > rect.bottom) y = rawY - popH - 8;
-    if (y < rect.top + pad) y = rect.top + pad;
-    return { x, y };
-  }, []);
-
-  // === Wire up editor interactions (shared between both editors) ===
-  function wireEditorInteractions(editor: monacoEditor.IStandaloneCodeEditor, monaco: Parameters<DiffOnMount>[1]) {
-    editor.onMouseDown((e) => {
-      if (e.target.type === monaco.editor.MouseTargetType.GUTTER_GLYPH_MARGIN) {
-        const line = e.target.position?.lineNumber;
-        if (!line) return;
-        const pos = clampPopover(mousePos.current.x, mousePos.current.y);
-        const existing = commentsRef.current.find(
-          c => c.filePath === activeFileRef.current && c.lineNumber === line
-        );
-        if (existing) {
-          setPopover({ mode: 'view', line, endLine: line, x: pos.x, y: pos.y, comment: existing });
-        } else {
-          setPopover({ mode: 'add', line, endLine: line, x: pos.x, y: pos.y });
-          setCommentText('');
-        }
-      }
-    });
-    editor.onMouseUp(() => {
-      const sel = editor.getSelection();
-      if (!sel || sel.isEmpty()) return;
-      setTimeout(() => {
-        const pos = clampPopover(mousePos.current.x, mousePos.current.y);
-        setPopover({ mode: 'add', line: sel.startLineNumber, endLine: sel.endLineNumber, x: pos.x, y: pos.y });
-        setCommentText('');
-      }, 50);
-    });
-  }
-
-  const handleDiffMount: DiffOnMount = useCallback((editor, monaco) => {
-    diffEditorRef.current = editor;
-    monacoRef.current = monaco;
-    defineAgentMatrixTheme(monaco);
-    monaco.editor.setTheme(AGENT_MATRIX_THEME);
-    wireEditorInteractions(editor.getModifiedEditor(), monaco);
-  }, [clampPopover]);
-
-  const handleBrowseMount: OnMount = useCallback((editor, monaco) => {
-    browseEditorRef.current = editor;
-    monacoRef.current = monaco;
-    defineAgentMatrixTheme(monaco);
-    monaco.editor.setTheme(AGENT_MATRIX_THEME);
-    wireEditorInteractions(editor, monaco);
-  }, [clampPopover]);
-
-  // === Comment actions ===
-  const handleAddComment = async () => {
-    if (!commentText.trim() || !currentFile || !popover) return;
-    const text = popover.line !== popover.endLine
-      ? `[Lines ${popover.line}-${popover.endLine}] ${commentText.trim()}`
-      : commentText.trim();
-    await fetch('/api/sessions/comments', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        sessionId,
-        comment: { filePath: currentFile, lineNumber: popover.line, text },
-      }),
-    }).then(r => r.json()).then(data => setComments(data.comments || []));
-    setCommentText('');
-    setPopover(null);
-  };
-
-  const dismissPopover = useCallback(() => { setPopover(null); setCommentText(''); }, []);
-
-  const handleDeleteComment = async (commentId: string) => {
-    await fetch('/api/sessions/comments', {
-      method: 'DELETE',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ sessionId, commentId }),
-    }).then(r => r.json()).then(data => setComments(data.comments || []));
-    if (popover?.comment?.id === commentId) setPopover(null);
-  };
-
-  const handleRevertFile = async (filePath: string) => {
-    setReverting(true);
-    await fetch('/api/sessions/changes', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ sessionId, action: 'revert-file', file: filePath }),
-    });
-    if (selectedFile === filePath) { setSelectedFile(null); setDiff(null); }
-    loadFiles();
-    setReverting(false);
-  };
-
-  const handleRevertAll = async () => {
-    if (!confirm('Revert all changes? This will restore all files to their git HEAD state.')) return;
-    setReverting(true);
-    await fetch('/api/sessions/changes', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ sessionId, action: 'revert-all' }),
-    });
-    setSelectedFile(null); setDiff(null);
-    loadFiles();
-    setReverting(false);
-  };
-
-  const handleClearTracking = async () => {
-    await fetch('/api/sessions/changes', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ sessionId, action: 'clear-tracking' }),
-    });
-    setFiles([]); setSelectedFile(null); setDiff(null);
-  };
-
-  const handleSendSingleComment = async (comment: ReviewComment, mode: 'fix' | 'discuss') => {
-    setSending(true);
-    try {
-      const writeRes = await fetch('/api/sessions/review', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ sessionId, comments: [comment] }),
-      });
-      const { filePath } = await writeRes.json();
-      const socket = socketRef.current;
-      if (socket) {
-        const prompt = mode === 'discuss'
-          ? `Read the code review at ${filePath}. Let's discuss this comment — share your thoughts before making changes. Don't delete the review file yet.\r`
-          : `Read the code review at ${filePath}. Address the comment by making the requested change. Delete the review file when done.\r`;
-        socket.emit('terminal:input', { sessionId, data: prompt });
-      }
-      if (mode === 'fix') {
-        setTimeout(() => {
-          fetch('/api/sessions/review', { method: 'DELETE', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ sessionId }) }).catch(() => {});
-        }, 60000);
-      }
-      await fetch('/api/sessions/comments', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ sessionId, action: 'resolve', commentId: comment.id }),
-      }).then(r => r.json()).then(data => setComments(data.comments || []));
-      setPopover(null);
-      onClose();
-      if (onSwitchToConsole) onSwitchToConsole();
-    } catch (err) { console.error('[review] Failed:', err); }
-    setSending(false);
-  };
-
-  const handleSendToClaudeReview = async (mode: 'fix' | 'discuss' = 'fix') => {
-    const unresolvedComments = comments.filter(c => !c.resolved);
-    if (unresolvedComments.length === 0) return;
-    setSending(true);
-    try {
-      const writeRes = await fetch('/api/sessions/review', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ sessionId, comments: unresolvedComments }),
-      });
-      const { filePath } = await writeRes.json();
-      const socket = socketRef.current;
-      if (socket) {
-        const prompt = mode === 'discuss'
-          ? `Read the code review at ${filePath}. Let's discuss each comment — share your thoughts on the feedback before making changes. Don't delete the review file yet.\r`
-          : `Read the code review at ${filePath}. Address each comment by making the requested changes to the files. Delete the review file when done.\r`;
-        socket.emit('terminal:input', { sessionId, data: prompt });
-      }
-      if (mode === 'fix') {
-        setTimeout(() => {
-          fetch('/api/sessions/review', { method: 'DELETE', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ sessionId }) }).catch(() => {});
-        }, 60000);
-      }
-      await fetch('/api/sessions/comments', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ sessionId, action: 'resolve-all' }),
-      }).then(r => r.json()).then(data => setComments(data.comments || []));
-      onClose();
-      if (onSwitchToConsole) onSwitchToConsole();
-    } catch (err) { console.error('[review] Failed:', err); }
-    setSending(false);
-  };
-
   const handleSetRoot = (path: string) => {
     fetch(`/api/editor/browse?action=repo-root&path=${encodeURIComponent(path)}`)
-      .then(r => r.json())
+      .then(r => {
+        if (!r.ok) throw new Error(`repo-root request failed (${r.status})`);
+        return r.json();
+      })
       .then(data => {
         const root = data.root || path;
         const repo = data.isRepo || false;
@@ -665,7 +230,8 @@ export default function ChangesViewer({ sessionId, sessionName, cwd, onClose, so
         setIsRepo(repo);
         BROWSE_ROOT_CACHE.set(sessionId, { root, isRepo: repo });
       })
-      .catch(() => {
+      .catch(err => {
+        console.error('[changes-viewer] Failed to set root:', err);
         setRepoRoot(path);
         setIsRepo(false);
         BROWSE_ROOT_CACHE.set(sessionId, { root: path, isRepo: false });
@@ -676,116 +242,102 @@ export default function ChangesViewer({ sessionId, sessionName, cwd, onClose, so
     setExpandedDirs(new Set());
   };
 
-  const fileComments = comments.filter(c => c.filePath === currentFile);
-  const language = currentFile ? detectLanguage(currentFile) : 'plaintext';
+  // === Review send (terminal-injection lives here in the wrapper) ===
+  const sendReview = useCallback(async (commentsToSend: ReviewComment[], mode: ReviewSendMode) => {
+    if (commentsToSend.length === 0) return;
+    try {
+      const writeRes = await fetch('/api/sessions/review', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sessionId, comments: commentsToSend }),
+      });
+      if (!writeRes.ok) throw new Error(`review write failed (${writeRes.status})`);
+      const { filePath } = await writeRes.json();
+      const socket = socketRef.current;
+      if (socket) {
+        const prompt = mode === 'discuss'
+          ? `Read the code review at ${filePath}. Let's discuss each comment — share your thoughts on the feedback before making changes. Don't delete the review file yet.\r`
+          : `Read the code review at ${filePath}. Address each comment by making the requested changes to the files. Delete the review file when done.\r`;
+        socket.emit('terminal:input', { sessionId, data: prompt });
+      }
+      if (mode === 'fix') {
+        setTimeout(() => {
+          fetch('/api/sessions/review', {
+            method: 'DELETE', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ sessionId }),
+          }).catch(err => console.error('[changes-viewer] Failed to clean up review file:', err));
+        }, 60000);
+      }
+      await cc.resolveAll();
+      onClose();
+      if (onSwitchToConsole) onSwitchToConsole();
+    } catch (err) {
+      console.error('[changes-viewer] Failed to send review:', err);
+    }
+  }, [sessionId, socketRef, cc, onClose, onSwitchToConsole]);
+
+  const sendReviewComment = useCallback(async (comment: ReviewComment, mode: ReviewSendMode) => {
+    try {
+      const writeRes = await fetch('/api/sessions/review', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sessionId, comments: [comment] }),
+      });
+      if (!writeRes.ok) throw new Error(`review write failed (${writeRes.status})`);
+      const { filePath } = await writeRes.json();
+      const socket = socketRef.current;
+      if (socket) {
+        const prompt = mode === 'discuss'
+          ? `Read the code review at ${filePath}. Let's discuss this comment — share your thoughts before making changes. Don't delete the review file yet.\r`
+          : `Read the code review at ${filePath}. Address the comment by making the requested change. Delete the review file when done.\r`;
+        socket.emit('terminal:input', { sessionId, data: prompt });
+      }
+      if (mode === 'fix') {
+        setTimeout(() => {
+          fetch('/api/sessions/review', {
+            method: 'DELETE', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ sessionId }),
+          }).catch(err => console.error('[changes-viewer] Failed to clean up review file:', err));
+        }, 60000);
+      }
+      await cc.resolveComment(comment.id);
+      onClose();
+      if (onSwitchToConsole) onSwitchToConsole();
+    } catch (err) {
+      console.error('[changes-viewer] Failed to send review comment:', err);
+    }
+  }, [sessionId, socketRef, cc, onClose, onSwitchToConsole]);
+
+  const handleBrowseSendAll = useCallback((mode: ReviewSendMode) => {
+    const unresolved = comments.filter(c => !c.resolved);
+    if (unresolved.length === 0) return;
+    setBrowseSending(true);
+    sendReview(unresolved, mode).finally(() => setBrowseSending(false));
+  }, [comments, sendReview]);
+
   const unresolvedCount = comments.filter(c => !c.resolved).length;
   const resolvedCount = comments.filter(c => c.resolved).length;
 
-  const monacoOpts = {
-    readOnly: true,
-    glyphMargin: true,
-    minimap: { enabled: false },
-    fontSize: 13,
-    lineNumbers: 'on' as const,
-    scrollBeyondLastLine: false,
-    smoothScrolling: true,
-    fontFamily: "'JetBrains Mono', 'Fira Code', 'Cascadia Code', 'Consolas', monospace",
-    fontLigatures: true,
-    padding: { top: 8 },
-    automaticLayout: true,
-    folding: true,
-    renderOverviewRuler: false,
-    overviewRulerLanes: 0,
-    hideCursorInOverviewRuler: true,
-    overviewRulerBorder: false,
-  };
+  const browseFileComments = browseFullPath ? comments.filter(c => c.filePath === browseFullPath) : [];
 
-  const loadingSpinner = (
-    <div style={{ height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', flexDirection: 'column', gap: 10 }}>
-      <div style={{ width: 24, height: 24, border: '3px solid #222', borderTopColor: '#6366f1', borderRadius: '50%', animation: 'spin 1s linear infinite' }} />
-      <span style={{ fontSize: 13, color: '#555' }}>Loading...</span>
+  const modeToggle = (
+    <div style={{ display: 'flex', background: '#1c1c22', border: '1px solid #33333c', borderRadius: 8, padding: 2, gap: 2 }}>
+      {(['changes', 'browse'] as const).map(m => (
+        <button key={m} onClick={() => setViewMode(m)}
+          className={`cv-seg ${viewMode === m ? 'cv-seg--active' : ''}`}>
+          {m === 'changes' ? 'Changes' : 'Browse'}
+        </button>
+      ))}
     </div>
   );
 
-  const editorLoading = (
-    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', color: '#888', fontSize: 14, background: '#0f0f13' }}>
-      Loading editor...
-    </div>
+  const closeButton = (
+    <button type="button" onClick={onClose} className="cv-icon-btn" title="Close" aria-label="Close changes viewer">&times;</button>
   );
 
   return (
     <>
-      <style>{`
-        .review-comment-glyph {
-          display: flex !important;
-          align-items: center !important;
-          justify-content: center !important;
-          cursor: pointer !important;
-        }
-        .review-comment-glyph::before {
-          content: '';
-          display: block;
-          width: 16px;
-          height: 16px;
-          border-radius: 4px;
-          background: #fbbf24;
-          mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24'%3E%3Cpath d='M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z'/%3E%3C/svg%3E") center/contain no-repeat;
-          -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24'%3E%3Cpath d='M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z'/%3E%3C/svg%3E") center/contain no-repeat;
-        }
-        .review-comment-glyph:hover::before { background: #fcd34d; }
-        .review-comment-line {
-          background: rgba(251, 191, 36, 0.10) !important;
-          border-left: 2px solid rgba(251, 191, 36, 0.4) !important;
-        }
-        .review-comment-glyph--resolved {
-          display: flex !important; align-items: center !important; justify-content: center !important; cursor: pointer !important;
-        }
-        .review-comment-glyph--resolved::before {
-          content: ''; display: block; width: 16px; height: 16px; border-radius: 4px; background: #51cf66; opacity: 0.7;
-          mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24'%3E%3Cpath d='M20 6L9 17l-5-5'/%3E%3C/svg%3E") center/contain no-repeat;
-          -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24'%3E%3Cpath d='M20 6L9 17l-5-5'/%3E%3C/svg%3E") center/contain no-repeat;
-        }
-        .review-comment-line--resolved {
-          background: rgba(81, 207, 102, 0.06) !important;
-          border-left: 2px solid rgba(81, 207, 102, 0.3) !important;
-        }
-        @keyframes spin { to { transform: rotate(360deg); } }
-        @keyframes glass-in {
-          from { opacity: 0; transform: scale(0.92) translateY(4px); }
-          to { opacity: 1; transform: scale(1) translateY(0); }
-        }
-        @keyframes cv-modal-in {
-          from { opacity: 0; transform: scale(0.98) translateY(6px); }
-          to { opacity: 1; transform: scale(1) translateY(0); }
-        }
-        /* Segmented toggle (Changes/Browse, Inline/Split) — matches app pill toggles */
-        .cv-seg {
-          padding: 5px 13px; font-size: 11px; font-weight: 600; border-radius: 6px;
-          border: none; background: transparent; color: #71717a; cursor: pointer;
-          font-family: inherit; transition: color 0.15s, background 0.15s;
-        }
-        .cv-seg:hover { color: #a1a1aa; }
-        .cv-seg--active { background: #6366f1; color: #fff; box-shadow: 0 1px 4px rgba(99,102,241,0.4); }
-        .cv-seg--active:hover { color: #fff; }
-        /* Outline button (Change Root, Clear Tracked, Cancel) */
-        .cv-btn-outline {
-          padding: 5px 12px; border-radius: 7px; border: 1px solid #33333c;
-          background: transparent; color: #a1a1aa; font-size: 12px; cursor: pointer;
-          font-family: inherit; transition: all 0.15s;
-        }
-        .cv-btn-outline:hover { border-color: #4a4a56; background: #1c1c22; color: #e4e4e7; }
-        /* Icon/close button */
-        .cv-icon-btn {
-          width: 30px; height: 30px; border-radius: 8px; border: 1px solid #2a2a30;
-          background: #1c1c22; color: #a1a1aa; font-size: 16px; line-height: 1;
-          display: flex; align-items: center; justify-content: center; cursor: pointer;
-          transition: all 0.15s;
-        }
-        .cv-icon-btn:hover { background: #26262e; color: #fafafa; border-color: #3a3a44; }
-        /* File row in the changes/browse sidebar */
-        .cv-row { transition: background 0.12s; }
-        .cv-row:hover { background: #17171d; }
-      `}</style>
+      <DiffCoreStyles />
 
       <div onClick={onClose} style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', backdropFilter: 'blur(4px)', WebkitBackdropFilter: 'blur(4px)', zIndex: 200 }} />
       <div ref={modalRef} style={{
@@ -795,470 +347,225 @@ export default function ChangesViewer({ sessionId, sessionName, cwd, onClose, so
         boxShadow: '0 24px 80px rgba(0,0,0,0.55)',
         animation: 'cv-modal-in 0.2s ease',
       }}>
-        {/* Header */}
-        <div style={{
-          padding: '12px 20px', borderBottom: '1px solid #26262e',
-          display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexShrink: 0,
-        }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-            {/* Mode toggle */}
-            <div style={{
-              display: 'flex', background: '#1c1c22', border: '1px solid #33333c',
-              borderRadius: 8, padding: 2, gap: 2,
-            }}>
-              {(['changes', 'browse'] as const).map(m => (
-                <button key={m} onClick={() => setViewMode(m)}
-                  className={`cv-seg ${viewMode === m ? 'cv-seg--active' : ''}`}>
-                  {m === 'changes' ? 'Changes' : 'Browse'}
-                </button>
-              ))}
-            </div>
-            <span style={{ fontSize: 15, fontWeight: 700, color: '#fafafa' }}>
-              {viewMode === 'changes' ? sessionName : (repoRoot?.split('/').pop() || 'Project')}
-            </span>
-            {viewMode === 'changes' && files.length > 0 && (
-              <span style={{ fontSize: 12, color: '#71717a', fontWeight: 400 }}>({files.length} files)</span>
-            )}
-            {viewMode === 'browse' && allFiles.length > 0 && (
-              <span style={{ fontSize: 12, color: '#71717a', fontWeight: 400 }}>({allFiles.length} files)</span>
-            )}
-          </div>
-
-          <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
-            {viewMode === 'changes' && (
-              <div style={{ display: 'flex', background: '#1c1c22', border: '1px solid #33333c', borderRadius: 8, padding: 2, gap: 2 }}>
-                {(['inline', 'split'] as const).map(mode => (
-                  <button key={mode} onClick={() => setDiffMode(mode)}
-                    className={`cv-seg ${diffMode === mode ? 'cv-seg--active' : ''}`}>
-                    {mode === 'inline' ? 'Inline' : 'Split'}
-                  </button>
-                ))}
-              </div>
-            )}
-            {viewMode === 'browse' && (
-              <button onClick={() => { setShowPathPicker(!showPathPicker); setPickedPath(''); }} className="cv-btn-outline">Change Root</button>
-            )}
-            {viewMode === 'changes' && files.length > 0 && (
-              <button onClick={handleClearTracking} className="cv-btn-outline">Clear Tracked</button>
-            )}
-            <button onClick={onClose} className="cv-icon-btn" title="Close">&times;</button>
-          </div>
+        {/* ==================== CHANGES MODE (delegated to SessionDiffCore) ==================== */}
+        <div style={{ display: viewMode === 'changes' ? 'flex' : 'none', flexDirection: 'column', flex: viewMode === 'changes' ? 1 : undefined, minHeight: 0 }}>
+          <SessionDiffCore
+            sessionId={sessionId}
+            sessionName={sessionName}
+            cwd={cwd}
+            socketRef={socketRef}
+            presentation="modal"
+            commentsController={cc}
+            containerRef={modalRef}
+            headerLeft={modeToggle}
+            headerRight={closeButton}
+            onSwitchToConsole={onSwitchToConsole}
+            onSendReviewAll={sendReview}
+            onSendReviewComment={sendReviewComment}
+          />
         </div>
 
-        {/* Path picker dropdown */}
-        {showPathPicker && (
-          <div style={{
-            padding: '8px 20px', borderBottom: '1px solid #26262e', background: '#0f0f13',
-            display: 'flex', gap: 8, alignItems: 'center',
-          }}>
-            <span style={{ fontSize: 12, color: '#888', whiteSpace: 'nowrap' }}>Root:</span>
-            <div style={{ flex: 1 }}>
-              <FolderPicker value={pickedPath || repoRoot || cwd || '/'} onChange={setPickedPath} />
+        {/* ==================== BROWSE MODE (owned by wrapper) ==================== */}
+        {viewMode === 'browse' && (
+          <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0 }}>
+            {/* Header */}
+            <div style={{
+              padding: '12px 20px', borderBottom: '1px solid #26262e',
+              display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexShrink: 0,
+            }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                {modeToggle}
+                <span style={{ fontSize: 15, fontWeight: 700, color: '#fafafa' }}>
+                  {repoRoot?.split('/').pop() || 'Project'}
+                </span>
+                {allFiles.length > 0 && (
+                  <span style={{ fontSize: 12, color: '#71717a', fontWeight: 400 }}>({allFiles.length} files)</span>
+                )}
+              </div>
+              <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                <button onClick={() => { setShowPathPicker(!showPathPicker); setPickedPath(''); }} className="cv-btn-outline">Change Root</button>
+                {closeButton}
+              </div>
             </div>
-            <button onClick={() => {
-              if (pickedPath) handleSetRoot(pickedPath);
-              setShowPathPicker(false);
-            }} style={{
-              padding: '5px 14px', borderRadius: 6, border: 'none',
-              background: '#6366f1', color: '#fff', fontSize: 12, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit',
-            }}>Set</button>
-            <button onClick={() => { setShowPathPicker(false); setPickedPath(''); }} style={{
-              padding: '5px 10px', borderRadius: 6, border: '1px solid #3a3a44',
-              background: 'transparent', color: '#888', fontSize: 12, cursor: 'pointer', fontFamily: 'inherit',
-            }}>Cancel</button>
-          </div>
-        )}
 
-        <div style={{ flex: 1, display: 'flex', minHeight: 0 }}>
-          {/* ==================== SIDEBAR ==================== */}
-          <div style={{ width: 280, borderRight: '1px solid #26262e', display: 'flex', flexDirection: 'column', flexShrink: 0 }}>
-            {/* Browse: search bar + current root */}
-            {viewMode === 'browse' && (
-              <div style={{ borderBottom: '1px solid #24242c', flexShrink: 0 }}>
-                <div style={{ padding: '8px 10px 4px' }}>
-                  <input
-                    ref={searchInputRef}
-                    value={browseSearch}
-                    onChange={e => setBrowseSearch(e.target.value)}
-                    placeholder="Search files..."
-                    style={{
-                      width: '100%', padding: '6px 10px', borderRadius: 6,
-                      border: '1px solid #33333c', background: '#1a1a20',
-                      color: '#eee', fontSize: 13, fontFamily: 'inherit', outline: 'none',
-                    }}
-                  />
+            {/* Path picker dropdown */}
+            {showPathPicker && (
+              <div style={{
+                padding: '8px 20px', borderBottom: '1px solid #26262e', background: '#0f0f13',
+                display: 'flex', gap: 8, alignItems: 'center',
+              }}>
+                <span style={{ fontSize: 12, color: '#888', whiteSpace: 'nowrap' }}>Root:</span>
+                <div style={{ flex: 1 }}>
+                  <FolderPicker value={pickedPath || repoRoot || cwd || '/'} onChange={setPickedPath} />
                 </div>
-                <div style={{
-                  padding: '2px 10px 6px', fontSize: 10, color: '#555',
-                  fontFamily: "'Courier New', monospace",
-                  overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-                  display: 'flex', alignItems: 'center', gap: 4,
-                }}>
-                  <span style={{ color: isRepo ? '#51cf66' : '#ffd43b', fontSize: 8 }}>{isRepo ? '\u25CF' : '\u25CF'}</span>
-                  {repoRoot || 'No root set'}
-                </div>
+                <button onClick={() => {
+                  if (pickedPath) handleSetRoot(pickedPath);
+                  setShowPathPicker(false);
+                }} style={{
+                  padding: '5px 14px', borderRadius: 6, border: 'none',
+                  background: '#6366f1', color: '#fff', fontSize: 12, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit',
+                }}>Set</button>
+                <button onClick={() => { setShowPathPicker(false); setPickedPath(''); }} style={{
+                  padding: '5px 10px', borderRadius: 6, border: '1px solid #3a3a44',
+                  background: 'transparent', color: '#888', fontSize: 12, cursor: 'pointer', fontFamily: 'inherit',
+                }}>Cancel</button>
               </div>
             )}
 
-            {/* File list */}
-            <div style={{ flex: 1, overflowY: 'auto' }}>
-              {viewMode === 'changes' ? (
-                // Changes file list
-                loading ? (
-                  <div style={{ padding: 30, display: 'flex', alignItems: 'center', justifyContent: 'center', flexDirection: 'column', gap: 8 }}>
-                    <div style={{ width: 20, height: 20, border: '2px solid #222', borderTopColor: '#6366f1', borderRadius: '50%', animation: 'spin 1s linear infinite' }} />
-                    <span style={{ fontSize: 12, color: '#555' }}>Loading files...</span>
+            <div style={{ flex: 1, display: 'flex', minHeight: 0 }}>
+              {/* Sidebar */}
+              <div style={{ width: 280, borderRight: '1px solid #26262e', display: 'flex', flexDirection: 'column', flexShrink: 0 }}>
+                {/* Search bar + current root */}
+                <div style={{ borderBottom: '1px solid #24242c', flexShrink: 0 }}>
+                  <div style={{ padding: '8px 10px 4px' }}>
+                    <input
+                      ref={searchInputRef}
+                      value={browseSearch}
+                      onChange={e => setBrowseSearch(e.target.value)}
+                      placeholder="Search files..."
+                      style={{
+                        width: '100%', padding: '6px 10px', borderRadius: 6,
+                        border: '1px solid #33333c', background: '#1a1a20',
+                        color: '#eee', fontSize: 13, fontFamily: 'inherit', outline: 'none',
+                      }}
+                    />
                   </div>
-                ) : files.length === 0 ? (
-                  <div style={{ padding: 20, color: '#555', textAlign: 'center' }}>No file changes tracked yet</div>
-                ) : (
-                  files.map(f => {
-                    const name = f.path.split('/').pop() || f.path.split('\\').pop() || f.path;
-                    const dir = f.path.replace(/[/\\][^/\\]+$/, '');
-                    const isSelected = selectedFile === f.path;
-                    const commentCount = comments.filter(c => c.filePath === f.path).length;
-                    return (
-                      <div key={f.path} onClick={() => setSelectedFile(f.path)}
-                        className={isSelected ? '' : 'cv-row'}
-                        style={{
-                        padding: '10px 14px', cursor: 'pointer',
-                        background: isSelected ? '#1e1e26' : 'transparent',
-                        borderBottom: '1px solid #24242c',
-                        borderLeft: `3px solid ${isSelected ? (statusColors[f.status] || '#888') : 'transparent'}`,
-                      }}>
-                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                          <div style={{ fontSize: 13, fontWeight: 600, color: isSelected ? '#fafafa' : '#c8c8d0' }}>{name}</div>
-                          {commentCount > 0 && (
-                            <span style={{ fontSize: 10, padding: '1px 6px', borderRadius: 8, background: '#fbbf2420', color: '#fbbf24', fontWeight: 700 }}>{commentCount}</span>
-                          )}
-                        </div>
-                        <div style={{ fontSize: 11, color: '#71717a', fontFamily: "'Courier New', monospace", marginTop: 2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{dir}</div>
-                        <div style={{ display: 'flex', gap: 8, marginTop: 5, fontSize: 11, alignItems: 'center' }}>
-                          <span style={{
-                            color: statusColors[f.status] || '#888', fontWeight: 700,
-                            fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.03em',
-                            padding: '1px 7px', borderRadius: 5,
-                            background: `${statusColors[f.status] || '#888'}1a`,
-                          }}>{f.status}</span>
-                          {f.additions > 0 && <span style={{ color: '#51cf66', fontWeight: 600 }}>+{f.additions}</span>}
-                          {f.deletions > 0 && <span style={{ color: '#ff6b6b', fontWeight: 600 }}>-{f.deletions}</span>}
-                        </div>
-                      </div>
-                    );
-                  })
-                )
-              ) : (
-                // Browse: tree or search results
-                loadingBrowse && allFiles.length === 0 ? (
-                  <div style={{ padding: 30, display: 'flex', alignItems: 'center', justifyContent: 'center', flexDirection: 'column', gap: 8 }}>
-                    <div style={{ width: 20, height: 20, border: '2px solid #222', borderTopColor: '#6366f1', borderRadius: '50%', animation: 'spin 1s linear infinite' }} />
-                    <span style={{ fontSize: 12, color: '#555' }}>Indexing files...</span>
+                  <div style={{
+                    padding: '2px 10px 6px', fontSize: 10, color: '#555',
+                    fontFamily: "'Courier New', monospace",
+                    overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                    display: 'flex', alignItems: 'center', gap: 4,
+                  }}>
+                    <span style={{ color: isRepo ? '#51cf66' : '#ffd43b', fontSize: 8 }}>{'\u25CF'}</span>
+                    {repoRoot || 'No root set'}
                   </div>
-                ) : isSearching ? (
-                  // Flat search results
-                  filteredBrowseFiles.length === 0 ? (
-                    <div style={{ padding: 20, color: '#555', textAlign: 'center' }}>No matches</div>
-                  ) : (
-                    filteredBrowseFiles.map(f => {
-                      const name = f.split('/').pop() || f;
-                      const dir = f.includes('/') ? f.replace(/\/[^/]+$/, '') : '';
-                      const isSelected = browseFile === f;
-                      const count = browseCommentCounts.get(f) || 0;
-                      return (
-                        <div key={f} onClick={() => setBrowseFile(f)} style={{
-                          padding: '5px 14px', cursor: 'pointer',
-                          background: isSelected ? '#1e1e26' : 'transparent',
-                          borderBottom: '1px solid #24242c',
-                        }}>
-                          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                            <FileIcon name={name} />
-                            <span style={{ fontSize: 13, fontWeight: 600, color: isSelected ? '#eee' : '#ccc', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1 }}>{name}</span>
-                            {count > 0 && (
-                              <span style={{ fontSize: 10, padding: '0 5px', borderRadius: 8, background: '#fbbf2420', color: '#fbbf24', fontWeight: 700, flexShrink: 0 }}>{count}</span>
+                </div>
+
+                {/* File list */}
+                <div style={{ flex: 1, overflowY: 'auto' }}>
+                  {loadingBrowse && allFiles.length === 0 ? (
+                    <div style={{ padding: 30, display: 'flex', alignItems: 'center', justifyContent: 'center', flexDirection: 'column', gap: 8 }}>
+                      <div style={{ width: 20, height: 20, border: '2px solid #222', borderTopColor: '#6366f1', borderRadius: '50%', animation: 'spin 1s linear infinite' }} />
+                      <span style={{ fontSize: 12, color: '#555' }}>Indexing files...</span>
+                    </div>
+                  ) : isSearching ? (
+                    filteredBrowseFiles.length === 0 ? (
+                      <div style={{ padding: 20, color: '#555', textAlign: 'center' }}>No matches</div>
+                    ) : (
+                      filteredBrowseFiles.map(f => {
+                        const name = f.split('/').pop() || f;
+                        const dir = f.includes('/') ? f.replace(/\/[^/]+$/, '') : '';
+                        const isSelected = browseFile === f;
+                        const count = browseCommentCounts.get(f) || 0;
+                        return (
+                          <div key={f} onClick={() => setBrowseFile(f)} style={{
+                            padding: '5px 14px', cursor: 'pointer',
+                            background: isSelected ? '#1e1e26' : 'transparent',
+                            borderBottom: '1px solid #24242c',
+                            contentVisibility: 'auto', containIntrinsicSize: 'auto 34px',
+                          }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                              <FileIcon name={name} />
+                              <span style={{ fontSize: 13, fontWeight: 600, color: isSelected ? '#eee' : '#ccc', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1 }}>{name}</span>
+                              {count > 0 && (
+                                <span style={{ fontSize: 10, padding: '0 5px', borderRadius: 8, background: '#fbbf2420', color: '#fbbf24', fontWeight: 700, flexShrink: 0 }}>{count}</span>
+                              )}
+                            </div>
+                            {dir && (
+                              <div style={{ fontSize: 10, color: '#999', fontFamily: "'Courier New', monospace", marginTop: 1, paddingLeft: 18, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{dir}</div>
                             )}
                           </div>
-                          {dir && (
-                            <div style={{ fontSize: 10, color: '#999', fontFamily: "'Courier New', monospace", marginTop: 1, paddingLeft: 18, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{dir}</div>
-                          )}
-                        </div>
-                      );
-                    })
-                  )
-                ) : fileTree.length === 0 ? (
-                  <div style={{ padding: 20, color: '#555', textAlign: 'center' }}>No files found</div>
-                ) : (
-                  // Tree view
-                  <div style={{ padding: '4px 0' }}>
-                    {fileTree.map(node => (
-                      <FileTreeNode
-                        key={node.path}
-                        node={node}
-                        depth={0}
-                        selected={browseFile}
-                        expanded={expandedDirs}
-                        onSelect={setBrowseFile}
-                        onToggle={toggleDir}
-                        commentCounts={browseCommentCounts}
-                      />
-                    ))}
-                  </div>
-                )
-              )}
-            </div>
-          </div>
-
-          {/* ==================== EDITOR PANEL ==================== */}
-          <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
-            <div style={{ flex: 1, minHeight: 0, position: 'relative' }}>
-              {viewMode === 'changes' ? (
-                // Diff editor
-                !selectedFile ? (
-                  <div style={{ height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', flexDirection: 'column', gap: 8 }}>
-                    <div style={{ fontSize: 14, color: '#555' }}>Select a file to view changes</div>
-                    <div style={{ fontSize: 12, color: '#444' }}>Highlight code or click the gutter to add comments</div>
-                  </div>
-                ) : loadingDiff || !diff ? loadingSpinner : (
-                  <DiffEditor
-                    original={diff.original}
-                    modified={diff.current}
-                    language={language}
-                    theme={AGENT_MATRIX_THEME}
-                    onMount={handleDiffMount}
-                    options={{ ...monacoOpts, originalEditable: false, renderSideBySide: diffMode === 'split' }}
-                    loading={editorLoading}
-                  />
-                )
-              ) : (
-                // Browse editor
-                !browseFile ? (
-                  <div style={{ height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', flexDirection: 'column', gap: 8 }}>
-                    <div style={{ fontSize: 14, color: '#555' }}>Search and select a file to view</div>
-                    <div style={{ fontSize: 12, color: '#444' }}>Highlight code to add review comments</div>
-                  </div>
-                ) : loadingBrowse || browseContent === null ? loadingSpinner : (
-                  <Editor
-                    value={browseContent}
-                    language={browseLanguage}
-                    theme={AGENT_MATRIX_THEME}
-                    onMount={handleBrowseMount}
-                    options={monacoOpts}
-                    loading={editorLoading}
-                  />
-                )
-              )}
-            </div>
-
-            {/* Comments list panel */}
-            {currentFile && (viewMode === 'changes' ? diff : browseContent !== null) && (
-              <div style={{
-                height: fileComments.length > 0 ? 120 : 36,
-                borderTop: '1px solid #26262e', background: '#0f0f13',
-                display: 'flex', flexDirection: 'column', flexShrink: 0,
-                transition: 'height 0.2s ease',
-              }}>
-                <div style={{ flex: 1, overflowY: 'auto', padding: '4px 0' }}>
-                  {fileComments.length === 0 && (
-                    <div style={{ padding: '8px 14px', fontSize: 12, color: '#555', fontStyle: 'italic' }}>
-                      Highlight code or click the gutter to add a review comment
+                        );
+                      })
+                    )
+                  ) : fileTree.length === 0 ? (
+                    <div style={{ padding: 20, color: '#555', textAlign: 'center' }}>No files found</div>
+                  ) : (
+                    <div style={{ padding: '4px 0' }}>
+                      {fileTree.map(node => (
+                        <FileTreeNode
+                          key={node.path}
+                          node={node}
+                          depth={0}
+                          selected={browseFile}
+                          expanded={expandedDirs}
+                          onSelect={setBrowseFile}
+                          onToggle={toggleDir}
+                          commentCounts={browseCommentCounts}
+                        />
+                      ))}
                     </div>
                   )}
-                  {fileComments.map(c => (
-                    <div key={c.id} style={{
-                      display: 'flex', alignItems: 'center', gap: 8,
-                      padding: '5px 12px', fontSize: 12,
-                      opacity: c.resolved ? 0.5 : 1,
-                    }}>
-                      <span style={{ color: c.resolved ? '#51cf66' : '#fbbf24', fontWeight: 700, minWidth: 50 }}>
-                        {c.resolved ? '\u2713' : ''} Line {c.lineNumber}
-                      </span>
-                      <span style={{ flex: 1, color: '#ccc', textDecoration: c.resolved ? 'line-through' : 'none' }}>{c.text}</span>
-                      <button onClick={() => handleDeleteComment(c.id)} style={{
-                        padding: '2px 6px', borderRadius: 4, border: '1px solid #ff6b6b30',
-                        background: 'transparent', color: '#ff6b6b', fontSize: 10, cursor: 'pointer',
-                        fontFamily: 'inherit', fontWeight: 600,
-                      }}>&times;</button>
-                    </div>
-                  ))}
                 </div>
               </div>
-            )}
-          </div>
-        </div>
 
-        {/* Footer */}
-        <div style={{
-          padding: '10px 16px', borderTop: '1px solid #26262e',
-          display: 'flex', gap: 8, alignItems: 'center', flexShrink: 0,
-        }}>
-          {viewMode === 'changes' && files.length > 0 && (
-            <>
-              <button onClick={() => selectedFile && handleRevertFile(selectedFile)} disabled={!selectedFile || reverting} style={{
-                padding: '6px 14px', borderRadius: 6, border: '1px solid #ff6b6b30',
-                background: 'transparent', color: selectedFile ? '#ff6b6b' : '#555',
-                fontSize: 12, fontWeight: 600, cursor: selectedFile ? 'pointer' : 'default', fontFamily: 'inherit',
-              }}>Revert File</button>
-              <button onClick={handleRevertAll} disabled={reverting} style={{
-                padding: '6px 14px', borderRadius: 6, border: '1px solid #ff6b6b30',
-                background: 'transparent', color: '#ff6b6b', fontSize: 12, fontWeight: 600,
-                cursor: 'pointer', fontFamily: 'inherit',
-              }}>Revert All</button>
-            </>
-          )}
-          {viewMode === 'browse' && repoRoot && (
-            <span style={{ fontSize: 11, color: '#999', fontFamily: "'Courier New', monospace", overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 300 }}>
-              {repoRoot}
-            </span>
-          )}
-          <div style={{ flex: 1 }} />
-          {comments.length > 0 && (
-            <span style={{ fontSize: 12, fontWeight: 600, display: 'flex', gap: 8 }}>
-              {unresolvedCount > 0 && <span style={{ color: '#fbbf24' }}>{unresolvedCount} open</span>}
-              {resolvedCount > 0 && <span style={{ color: '#51cf66' }}>{resolvedCount} resolved</span>}
-            </span>
-          )}
-          <button
-            onClick={() => handleSendToClaudeReview('discuss')}
-            disabled={unresolvedCount === 0 || sending}
-            style={{
-              padding: '8px 16px', borderRadius: 8,
-              border: '1px solid rgba(255, 255, 255, 0.1)',
-              background: unresolvedCount > 0 ? 'rgba(255, 255, 255, 0.06)' : '#222',
-              color: unresolvedCount > 0 ? '#ccc' : '#555',
-              fontSize: 13, fontWeight: 600,
-              cursor: unresolvedCount > 0 ? 'pointer' : 'default',
-              fontFamily: 'inherit', backdropFilter: 'blur(8px)',
-              opacity: sending ? 0.6 : 1, transition: 'all 0.15s',
-            }}
-          >Discuss</button>
-          <button
-            onClick={() => handleSendToClaudeReview('fix')}
-            disabled={unresolvedCount === 0 || sending}
-            style={{
-              padding: '8px 20px', borderRadius: 8, border: 'none',
-              background: unresolvedCount > 0 ? 'linear-gradient(135deg, #fbbf24, #f59e0b)' : '#222',
-              color: unresolvedCount > 0 ? '#000' : '#555',
-              fontSize: 13, fontWeight: 700,
-              cursor: unresolvedCount > 0 ? 'pointer' : 'default',
-              fontFamily: 'inherit', opacity: sending ? 0.6 : 1,
-            }}
-          >{sending ? 'Acting...' : 'Act'}</button>
-        </div>
-      </div>
+              {/* Editor + comments */}
+              <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
+                <div style={{ flex: 1, minHeight: 0, position: 'relative' }}>
+                  {!browseFile ? (
+                    <div style={{ height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', flexDirection: 'column', gap: 8 }}>
+                      <div style={{ fontSize: 14, color: '#555' }}>Search and select a file to view</div>
+                      <div style={{ fontSize: 12, color: '#444' }}>Highlight code to add review comments</div>
+                    </div>
+                  ) : browseError ? (
+                    <EditorError message={browseError} />
+                  ) : loadingBrowse || browseContent === null ? (
+                    <LoadingSpinner />
+                  ) : (
+                    <Editor
+                      value={browseContent}
+                      language={browseLanguage}
+                      theme={AGENT_MATRIX_THEME}
+                      onMount={browseAnnotations.handleEditorMount}
+                      options={monacoOpts}
+                      loading={<EditorLoading />}
+                    />
+                  )}
+                </div>
 
-      {/* ==================== FLOATING POPOVER ==================== */}
-      {popover && (
-        <>
-          <div onClick={dismissPopover} style={{ position: 'fixed', inset: 0, zIndex: 300 }} />
-          <div onClick={e => e.stopPropagation()} style={{
-            position: 'fixed', left: popover.x, top: popover.y, zIndex: 301, width: 340,
-            background: 'rgba(19, 19, 22, 0.85)', backdropFilter: 'blur(24px)', WebkitBackdropFilter: 'blur(24px)',
-            border: '1px solid rgba(255, 255, 255, 0.1)', borderRadius: 12,
-            boxShadow: '0 16px 48px rgba(0, 0, 0, 0.5), 0 0 0 1px rgba(255, 255, 255, 0.04) inset',
-            animation: 'glass-in 0.15s ease', overflow: 'hidden',
-          }}>
-            <div style={{
-              padding: '10px 14px 8px', display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-              borderBottom: '1px solid rgba(255, 255, 255, 0.06)',
-            }}>
-              <span style={{ fontSize: 12, fontWeight: 700, color: '#fbbf24', display: 'flex', alignItems: 'center', gap: 6 }}>
-                <span style={{ width: 6, height: 6, borderRadius: '50%', background: '#fbbf24', display: 'inline-block' }} />
-                {popover.line === popover.endLine ? `Line ${popover.line}` : `Lines ${popover.line}\u2013${popover.endLine}`}
-              </span>
-              <button onClick={dismissPopover} style={{
-                width: 22, height: 22, borderRadius: 6, border: '1px solid rgba(255,255,255,0.08)',
-                background: 'rgba(255,255,255,0.04)', color: '#888', fontSize: 11,
-                display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', transition: 'all 0.15s',
-              }}
-                onMouseEnter={e => { e.currentTarget.style.background = 'rgba(255,255,255,0.1)'; e.currentTarget.style.color = '#ccc'; }}
-                onMouseLeave={e => { e.currentTarget.style.background = 'rgba(255,255,255,0.04)'; e.currentTarget.style.color = '#888'; }}
-              >&times;</button>
-            </div>
-
-            {popover.mode === 'view' && popover.comment && (
-              <div style={{ padding: '12px 14px' }}>
-                {popover.comment.resolved && (
-                  <div style={{ fontSize: 11, fontWeight: 700, color: '#51cf66', marginBottom: 8, display: 'flex', alignItems: 'center', gap: 4 }}>
-                    <span style={{ fontSize: 13 }}>{'\u2713'}</span> Resolved
-                  </div>
+                {browseFile && browseContent !== null && (
+                  <CommentsPanel comments={browseFileComments} onDelete={browseAnnotations.handleDeleteComment} />
                 )}
-                <div style={{
-                  fontSize: 13, color: popover.comment.resolved ? '#999' : '#e0e0e0', lineHeight: 1.6,
-                  padding: '8px 10px', borderRadius: 8, background: 'rgba(255,255,255,0.03)',
-                  border: `1px solid ${popover.comment.resolved ? 'rgba(81,207,102,0.15)' : 'rgba(255,255,255,0.05)'}`,
-                  textDecoration: popover.comment.resolved ? 'line-through' : 'none',
-                }}>{popover.comment.text}</div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 10 }}>
-                  <span style={{ fontSize: 11, color: '#555' }}>
-                    {new Date(popover.comment.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                  </span>
-                  <div style={{ flex: 1 }} />
-                  <button onClick={() => handleDeleteComment(popover.comment!.id)} style={{
-                    padding: '4px 10px', borderRadius: 6, border: '1px solid rgba(255,107,107,0.2)',
-                    background: 'rgba(255,107,107,0.08)', color: '#ff6b6b', fontSize: 11, fontWeight: 600,
-                    cursor: 'pointer', fontFamily: 'inherit', transition: 'all 0.15s',
-                  }}
-                    onMouseEnter={e => e.currentTarget.style.background = 'rgba(255,107,107,0.15)'}
-                    onMouseLeave={e => e.currentTarget.style.background = 'rgba(255,107,107,0.08)'}
-                  >Delete</button>
-                  {!popover.comment.resolved && (
-                    <>
-                      <button onClick={() => handleSendSingleComment(popover.comment!, 'discuss')} disabled={sending} style={{
-                        padding: '4px 10px', borderRadius: 6, border: '1px solid rgba(255,255,255,0.1)',
-                        background: 'rgba(255,255,255,0.06)', color: '#ccc', fontSize: 11, fontWeight: 600,
-                        cursor: 'pointer', fontFamily: 'inherit', transition: 'all 0.15s',
-                      }}
-                        onMouseEnter={e => e.currentTarget.style.background = 'rgba(255,255,255,0.1)'}
-                        onMouseLeave={e => e.currentTarget.style.background = 'rgba(255,255,255,0.06)'}
-                      >Discuss</button>
-                      <button onClick={() => handleSendSingleComment(popover.comment!, 'fix')} disabled={sending} style={{
-                        padding: '4px 10px', borderRadius: 6, border: 'none',
-                        background: 'rgba(251,191,36,0.9)', color: '#000', fontSize: 11, fontWeight: 700,
-                        cursor: 'pointer', fontFamily: 'inherit', transition: 'all 0.15s',
-                      }}
-                        onMouseEnter={e => e.currentTarget.style.background = 'rgba(251,191,36,1)'}
-                        onMouseLeave={e => e.currentTarget.style.background = 'rgba(251,191,36,0.9)'}
-                      >Act</button>
-                    </>
-                  )}
-                </div>
               </div>
-            )}
+            </div>
 
-            {popover.mode === 'add' && (
-              <div style={{ padding: '10px 14px 12px' }}>
-                <textarea
-                  ref={floatingInputRef}
-                  value={commentText}
-                  onChange={e => setCommentText(e.target.value)}
-                  onKeyDown={e => {
-                    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleAddComment(); }
-                    if (e.key === 'Escape') dismissPopover();
-                  }}
-                  placeholder="Add a review comment..."
-                  rows={2}
-                  style={{
-                    width: '100%', resize: 'none', padding: '8px 10px', borderRadius: 8,
-                    border: '1px solid rgba(255,255,255,0.08)', background: 'rgba(255,255,255,0.04)',
-                    color: '#e0e0e0', fontSize: 13, fontFamily: 'inherit', outline: 'none', lineHeight: 1.5,
-                    transition: 'border-color 0.15s',
-                  }}
-                  onFocus={e => e.currentTarget.style.borderColor = 'rgba(251,191,36,0.3)'}
-                  onBlur={e => e.currentTarget.style.borderColor = 'rgba(255,255,255,0.08)'}
-                />
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: 8 }}>
-                  <span style={{ fontSize: 11, color: '#555' }}>Enter to add &middot; Esc to cancel</span>
-                  <button onClick={handleAddComment} disabled={!commentText.trim()} style={{
-                    padding: '5px 16px', borderRadius: 8, border: 'none',
-                    background: commentText.trim() ? 'rgba(251,191,36,0.9)' : 'rgba(255,255,255,0.06)',
-                    color: commentText.trim() ? '#000' : '#555', fontSize: 12, fontWeight: 700,
-                    cursor: commentText.trim() ? 'pointer' : 'default', fontFamily: 'inherit', transition: 'all 0.15s',
-                  }}>Add Comment</button>
-                </div>
-              </div>
+            {/* Footer */}
+            <div style={{
+              padding: '10px 16px', borderTop: '1px solid #26262e',
+              display: 'flex', gap: 8, alignItems: 'center', flexShrink: 0,
+            }}>
+              {repoRoot && (
+                <span style={{ fontSize: 11, color: '#999', fontFamily: "'Courier New', monospace", overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 300 }}>
+                  {repoRoot}
+                </span>
+              )}
+              <div style={{ flex: 1 }} />
+              <ReviewActions
+                totalComments={comments.length}
+                unresolvedCount={unresolvedCount}
+                resolvedCount={resolvedCount}
+                sending={browseSending}
+                onSend={handleBrowseSendAll}
+              />
+            </div>
+
+            {/* Browse popover */}
+            {browseAnnotations.popover && (
+              <CommentComposerPopover
+                popover={browseAnnotations.popover}
+                commentText={browseAnnotations.commentText}
+                setCommentText={browseAnnotations.setCommentText}
+                floatingInputRef={browseAnnotations.floatingInputRef}
+                sending={browseSending}
+                onAdd={browseAnnotations.handleAddComment}
+                onDismiss={browseAnnotations.dismissPopover}
+                onDelete={browseAnnotations.handleDeleteComment}
+                onSendComment={(comment, mode) => { browseAnnotations.setPopover(null); sendReviewComment(comment, mode); }}
+              />
             )}
           </div>
-        </>
-      )}
+        )}
+      </div>
     </>
   );
 }

@@ -6,9 +6,13 @@ import { SOCKET_PATH } from './lib/constants';
 import { startSessionScanner } from './lib/state/sessionScanner';
 import { existsSync } from 'fs';
 import { homedir } from 'os';
+import { ensureAgentMatrixMcpConfig } from './electron/services/mcpConfig';
 
 const dev = process.env.NODE_ENV !== 'production';
 const port = parseInt(process.env.PORT || '3000', 10);
+// Keep the standalone dev server consistent with the Electron host: both
+// supported CLIs receive the same inheriting AgentMatrix MCP definition.
+ensureAgentMatrixMcpConfig(port);
 
 // Keep all traffic on loopback — several API routes execute CLI commands and
 // this server can spawn shells over Socket.io, so an externally-reachable port

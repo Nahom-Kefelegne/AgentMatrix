@@ -1,6 +1,8 @@
 'use client';
 
 import { useCallback, useEffect, useRef } from 'react';
+import { createTerminalLinks } from '@/lib/terminal-links';
+import type { NavigationRequest } from '@/lib/navigation/types';
 
 // Debounce for container resize events. 150ms is the xterm.js community sweet
 // spot: prevents reflow storms during drag/animation while still feeling snappy.
@@ -23,6 +25,8 @@ export interface UseXtermOptions {
   scrollback?: number;
   cursorBlink?: boolean;
   cursorStyle?: 'bar' | 'block' | 'underline';
+  sessionId?: string;
+  onNavigate?: (request: NavigationRequest) => void;
 }
 
 export interface UseXtermHandle {
@@ -84,6 +88,14 @@ export function useXterm(options: UseXtermOptions): UseXtermHandle {
       if (disposed) return;
 
       const o = optsRef.current;
+      const terminalLinks = createTerminalLinks(() => {
+        const current = optsRef.current;
+        return current.sessionId ? {
+          sessionId: current.sessionId,
+          onNavigate: current.onNavigate,
+        } : undefined;
+      });
+
       const terminal = new Terminal({
         theme: o.theme,
         fontSize: o.fontSize ?? 16,
@@ -93,11 +105,13 @@ export function useXterm(options: UseXtermOptions): UseXtermHandle {
         cursorStyle: o.cursorStyle ?? 'bar',
         scrollback: o.scrollback ?? 5000,
         scrollOnUserInput: true,
+        linkHandler: terminalLinks.linkHandler,
       });
 
       const fitAddon = new FitAddon();
       terminal.loadAddon(fitAddon);
       terminal.open(container);
+      const terminalLinksDisposable = terminalLinks.register(terminal);
 
       // ── Renderer ladder: WebGL (GPU) → Canvas (CPU) → DOM ──
       // WebGL is fastest but grainy and context-flaky over Windows Remote
@@ -145,7 +159,12 @@ export function useXterm(options: UseXtermOptions): UseXtermHandle {
       }
 
       // Component may have unmounted while the renderer addon was importing.
-      if (disposed) { try { terminal.dispose(); } catch {} return; }
+      if (disposed) {
+        try { terminalLinksDisposable.dispose(); } catch {}
+        terminalLinks.dispose();
+        try { terminal.dispose(); } catch {}
+        return;
+      }
 
       termRef.current = terminal;
       fitRef.current = fitAddon;
@@ -232,6 +251,8 @@ export function useXterm(options: UseXtermOptions): UseXtermHandle {
         window.removeEventListener('focus', onWindowFocus);
         document.removeEventListener('visibilitychange', onVisibilityChange);
         try { onResizeDisposable.dispose(); } catch {}
+        try { terminalLinksDisposable.dispose(); } catch {}
+        terminalLinks.dispose();
         // Dispose the GPU/canvas renderer addon FIRST, while the terminal's
         // render service is still alive. Letting terminal.dispose() dispose it
         // implicitly hits an xterm addon-dispose ordering race that throws

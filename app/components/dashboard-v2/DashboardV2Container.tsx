@@ -1,19 +1,15 @@
 'use client';
 
 import dynamic from 'next/dynamic';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { deriveDashboardModel } from '@/lib/dashboard/attentionQueue';
 import { perfRender } from '@/lib/perf';
 import type { SessionData } from '@/lib/types';
+import { useContextCanvas } from '../context-canvas/useContextCanvas';
 import { useSocketContext } from '../SocketProvider';
 import DashboardV2 from './DashboardV2';
 import type { DashboardV2Navigation } from './types';
 import { useSessionChanges } from './useSessionChanges';
-
-const ChangesViewer = dynamic(() => import('../ChangesViewer'), {
-  ssr: false,
-  loading: () => <div className="mc-review-loading" role="status">Loading review workspace…</div>,
-});
 
 const FullscreenTerminal = dynamic(() => import('../FullscreenTerminal'), { ssr: false });
 
@@ -46,8 +42,10 @@ export default function DashboardV2Container({
   const [selectedSessionId, setSelectedSessionId] = useState<string | null>(() => (
     initialSessionId && sessions.has(initialSessionId) ? initialSessionId : null
   ));
-  const [reviewSessionId, setReviewSessionId] = useState<string | null>(null);
   const [fullscreenSessionId, setFullscreenSessionId] = useState<string | null>(null);
+  const canvas = useContextCanvas(selectedSessionId, socketRef);
+  const sessionsRef = useRef(sessions);
+  sessionsRef.current = sessions;
 
   useEffect(() => {
     const interval = window.setInterval(() => setNow(Date.now()), 30_000);
@@ -68,6 +66,16 @@ export default function DashboardV2Container({
   const handleSelectSession = useCallback((sessionId: string) => {
     setSelectedSessionId(sessionId);
     onSelectionChange?.(sessionId);
+    const session = sessionsRef.current.get(sessionId);
+    if (session?.status === 'done' || session?.status === 'attention') {
+      void fetch('/api/hooks/mcp-status', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ tool: '__clear_status', sessionId }),
+      }).then(response => {
+        if (!response.ok) console.error(`[dashboard-v2] Failed to clear status (${response.status})`);
+      }).catch(error => console.error('[dashboard-v2] Failed to clear status:', error));
+    }
   }, [onSelectionChange]);
 
   const selectedSession = selectedSessionId ? sessions.get(selectedSessionId) ?? null : null;
@@ -86,11 +94,10 @@ export default function DashboardV2Container({
     socketRef.current?.emit('session:summary' as any, { sessionId });
   }, [socketRef]);
 
-  const handleReviewChanges = useCallback((sessionId: string) => {
-    setReviewSessionId(sessionId);
-  }, []);
+  const handleReviewChanges = useCallback(() => {
+    canvas.openSessionDiff();
+  }, [canvas]);
 
-  const reviewSession = reviewSessionId ? sessions.get(reviewSessionId) : null;
   const fullscreenSession = fullscreenSessionId ? sessions.get(fullscreenSessionId) : null;
 
   return (
@@ -103,6 +110,7 @@ export default function DashboardV2Container({
         selectedContextUsage={selectedContextUsage}
         consoleVisible={!fullscreenSession}
         navigation={navigation}
+        canvas={canvas}
         changes={changes}
         onSelectSession={handleSelectSession}
         onOpenSession={onSelectSession}
@@ -110,15 +118,6 @@ export default function DashboardV2Container({
         onRequestSummary={handleRequestSummary}
         onFullscreenSession={setFullscreenSessionId}
       />
-      {reviewSession ? (
-        <ChangesViewer
-          sessionId={reviewSession.id}
-          sessionName={reviewSession.name}
-          cwd={reviewSession.cwd}
-          onClose={() => setReviewSessionId(null)}
-          socketRef={socketRef}
-        />
-      ) : null}
       {fullscreenSession ? (
         <FullscreenTerminal
           session={fullscreenSession}

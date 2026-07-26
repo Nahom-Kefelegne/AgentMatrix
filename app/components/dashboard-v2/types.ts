@@ -1,6 +1,7 @@
 import type { AttentionItem, DashboardModel } from '@/lib/dashboard/attentionQueue';
 import type { FileChange } from '@/lib/cli/transcript/types';
 import type { SessionData } from '@/lib/types';
+import type { ContextCanvasController } from '../context-canvas/useContextCanvas';
 
 export type DashboardV2ViewMode = 'dashboard' | 'office' | 'editor';
 
@@ -36,6 +37,7 @@ export interface DashboardV2ViewProps {
   selectedContextUsage: number | null;
   consoleVisible: boolean;
   navigation: DashboardV2Navigation;
+  canvas: ContextCanvasController;
   changes: ChangeSummaryState;
   onSelectSession: (sessionId: string) => void;
   onOpenSession: (sessionId: string) => void;

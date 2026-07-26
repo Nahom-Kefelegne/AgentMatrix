@@ -1,6 +1,6 @@
 # Dashboard V2 - Console-First Mission Control
 
-Status: **implemented foundation; Context Canvas planned**
+Status: **Dashboard V2 and Context Canvas MVP implemented**
 
 Implementation plan:
 [`../plans/dashboard-v2-context-canvas.md`](../plans/dashboard-v2-context-canvas.md)
@@ -402,41 +402,39 @@ OfficeView
           ReviewFeedbackComposer
       TelemetryRail
     FullscreenTerminal (on demand)
-    ChangesViewer compatibility wrapper (until DiffCore extraction)
+    ChangesViewer compatibility wrapper (shared DiffCore)
 ```
 
 ## 18. Integration with Existing Code
 
 ### Monaco
 
-- Reuse `lib/monacoTheme.ts`.
-- Extract duplicated language detection into `lib/editor/language.ts`.
-- Build a new read-only `CodePreview`; do not embed the full `EditorView` or
-  inherit `MonacoWrapper` auto-focus/save behavior.
+- `CodePreview` reuses `lib/monacoTheme.ts` and dynamically loads a read-only
+  Monaco editor without inheriting `EditorView` tabs/save/auto-focus behavior.
+- Language detection currently comes from the root-scoped NavigationService;
+  the older editor surfaces still retain their existing helpers.
 
 ### Diffs
 
 - Keep `lib/cli/transcript/` and `/api/sessions/changes` as the session-diff
   source.
-- Extract `DiffCore` from `ChangesViewer`.
-- Keep `ChangesViewer` as a compatibility modal wrapper until the Canvas review
-  workflow is complete.
-- Replace the current markdown + simulated terminal feedback path with typed,
-  snapshot-anchored feedback.
+- `SessionDiffCore` is extracted from `ChangesViewer` and renders both embedded
+  in Canvas and inside the compatibility modal.
+- Comments, live refresh, inline/split mode and revert remain shared.
+- Feedback currently uses the existing review artifact + session instruction
+  pipeline; typed snapshot/hash anchors remain a follow-up.
 
 ### Terminal links
 
-- Register one shared xterm link-provider implementation through `useXterm`.
-- Migrate legacy `TerminalPanel` to `useXterm` before enabling providers for both
-  CLIs.
-- Match only visible terminal lines; validate file targets asynchronously.
+- A shared terminal-link provider is registered through `useXterm` for Copilot
+  and through the same registrar in the legacy Claude lifecycle.
+- It matches visible xterm lines only and validates file targets asynchronously.
 
 ### MCP
 
-- Extend the existing local `mcp-server/index.mjs`, which currently contains
-  only status tools.
-- Bind every request to one session capability and registered root.
-- Add provider-owned configuration for both Claude and Copilot.
+- `mcp-server/index.mjs` exposes status plus six read-only navigation/review tools.
+- Every request is bound to one session capability and registered root.
+- AgentMatrix installs inheriting configuration for both Claude and Copilot.
 
 ### Security
 
@@ -455,12 +453,15 @@ Implemented:
 - Lazy review summary and ChangesViewer.
 - Fullscreen reuse.
 - V2-native command rail and full-viewport layout.
+- Context Canvas split, resize, pinning, queued opens and per-session history.
+- Lazy Monaco code/range preview.
+- Streamed asynchronous content/symbol search with cancellation and bounded caches.
+- Shared embedded DiffCore and compatibility ChangesViewer.
+- Terminal file/stack/OSC-8/HTTP links.
+- Capability-bound MCP navigation tools and root-scoped NavigationService.
 
 Planned:
 
-- Context Canvas shell.
-- Validated terminal links.
-- Navigation history.
-- AgentMatrix navigation service and MCP tools.
-- Shared DiffCore and structured feedback.
 - Overlap/worktree coordination.
+- Additional diff provenance sources (turn, working tree, branch/worktree,
+  checkpoint) and snapshot/hash-backed stale anchors.

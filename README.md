@@ -42,7 +42,7 @@ The setup script will:
 1. Verify prerequisites (Node, git, and at least one of Copilot/Claude)
 2. Configure Claude Code hooks in `~/.claude/settings.json` and Copilot hooks in `~/.copilot/hooks/agentmatrix.json` when Copilot is detected
 3. Clone this repo into an `AgentMatrix` folder
-4. Install dependencies — resilient to blocked public-npm networks: it fails fast and re-resolves through the registry in your `.npmrc` (e.g. a corporate Azure Artifacts mirror)
+4. Install dependencies through the checked-in Microsoft package proxy policy; lockfile tarballs are pinned to `packagefeedproxy.microsoft.io/npm/`, and npm update/audit/fund background requests are disabled
 5. Set up native modules (node-pty) — it verifies the shipped N-API prebuilt binary works under Electron and **skips the network-dependent `electron-rebuild`** unless the prebuilt genuinely can't spawn (in which case it tries a time-bounded rebuild)
 6. Launch the app
 
@@ -64,6 +64,11 @@ The start scripts **fast-forward to the latest code from `main` before launching
 (a failed pull — offline, local edits, blocked network — is non-fatal and the app
 still starts on the current version). If a pull changes dependencies, they'll tell
 you to run the update script below to reinstall.
+
+The repository's `.npmrc` and launch scripts keep npm traffic on
+`https://packagefeedproxy.microsoft.io/npm/`. They also disable npm's background
+update notifier, which otherwise triggers the corporate NPM URL block even when
+the app only runs `npm run electron:dev`.
 
 ### Update
 
@@ -132,6 +137,9 @@ lines. Everything is off by default — this only runs when `AM_PERF=1` is set.
 - **Embedded live CLI** — selecting a signal or quiet session switches the central workspace directly to that session's Copilot or Claude terminal
 - **Full-viewport workspace** — an integrated command rail replaces the floating dashboard menu so the selected CLI receives the maximum available space
 - **Fullscreen terminal** — expand the selected CLI into the existing multi-pane terminal workspace
+- **Context Canvas** — reveal code, streamed search results, exact source ranges, and session-attributed Monaco diffs beside the live CLI without stealing terminal focus
+- **Clickable terminal locations** — file paths, stack traces, OSC-8 links, and safe HTTP(S) links become actionable
+- **Agent-driven navigation** — managed Claude/Copilot sessions receive capability-bound `open_file`, `open_symbol`, `show_search_results`, `open_diff`, and `open_review` MCP tools
 - **Quiet telemetry rail** keeps healthy working/idle sessions visible without encouraging constant babysitting
 - **Inline review actions** open transcript-native diffs without making the legacy session modal the primary workflow
 - **Dashboard V1 remains available** from Settings → Interface; `?dashboardV2=0` temporarily forces V1 and `?dashboardV2=1` forces V2

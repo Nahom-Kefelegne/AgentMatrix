@@ -1,4 +1,5 @@
-import { app, BrowserWindow, Menu, Tray, nativeImage, ipcMain } from 'electron';
+import { app, BrowserWindow, Menu, Tray, nativeImage, ipcMain, session, shell } from 'electron';
+import { randomBytes } from 'crypto';
 import path from 'path';
 import { createServer } from 'http';
 import { Server as SocketIOServer } from 'socket.io';
@@ -15,7 +16,9 @@ import { spawnOrchestrator, killOrchestrator, isOrchestrator } from './services/
 import { reapOrphansOnStartup, logReapResult } from './services/OrphanReaper';
 import { migrateStateStorage } from '../lib/state/migrateStateStorage';
 import { ensureCopilotHooksConfig } from './services/copilotHooksConfig';
+import { ensureAgentMatrixMcpConfig } from './services/mcpConfig';
 import { getProvider } from '../lib/cli';
+import { setRendererApiToken } from '../lib/navigation/rendererAuth';
 
 // Dev vs prod is determined by whether Electron is running from a packaged
 // app bundle — NOT by NODE_ENV, which is unset when a packaged app is
@@ -57,12 +60,42 @@ const ptyManager = new PtyManager();
 // instead of hiding (Mac tray behavior).
 let shuttingDown = false;
 
+function isTrustedRendererUrl(value: string): boolean {
+  try {
+    const url = new URL(value);
+    return (url.protocol === 'http:' || url.protocol === 'https:')
+      && (url.hostname === LOOPBACK_HOST || url.hostname === 'localhost')
+      && url.port === String(port);
+  } catch {
+    return false;
+  }
+}
+
+function safeExternalUrl(value: string): URL | null {
+  try {
+    const url = new URL(value);
+    return url.protocol === 'http:' || url.protocol === 'https:' ? url : null;
+  } catch {
+    return null;
+  }
+}
+
 // Direct IPC for terminal keystrokes — bypasses Socket.io for zero-latency input
-ipcMain.on('terminal:write', (_event, sessionId: string, data: string) => {
+ipcMain.on('terminal:write', (event, sessionId: string, data: string) => {
+  if (!isTrustedRendererUrl(event.senderFrame?.url ?? event.sender.getURL())) return;
+  if (typeof sessionId !== 'string' || typeof data !== 'string' || data.length > 1024 * 1024) return;
   const session = ptyManager.getSession(sessionId);
   if (session && session.status !== 'closed') {
     session.pty.write(data);
   }
+});
+
+ipcMain.handle('shell:open-external', async (event, rawUrl: unknown) => {
+  if (!isTrustedRendererUrl(event.senderFrame?.url ?? event.sender.getURL()) || typeof rawUrl !== 'string') return false;
+  const url = safeExternalUrl(rawUrl);
+  if (!url) return false;
+  await shell.openExternal(url.href);
+  return true;
 });
 
 function createWindow() {
@@ -83,6 +116,12 @@ function createWindow() {
       // Office view) blank. Disabling throttling keeps them painting.
       backgroundThrottling: false,
     },
+  });
+
+  mainWindow.webContents.setWindowOpenHandler(({ url }) => {
+    const external = safeExternalUrl(url);
+    if (external) void shell.openExternal(external.href);
+    return { action: 'deny' };
   });
 
   // Show immediately with splash while server starts
@@ -345,6 +384,17 @@ app.whenReady().then(async () => {
   // Write the Copilot hook config so live sessions report activity to the
   // dashboard without depending on setup.sh having been run. Idempotent.
   ensureCopilotHooksConfig(port);
+  ensureAgentMatrixMcpConfig(port);
+
+  const rendererToken = randomBytes(32).toString('base64url');
+  setRendererApiToken(rendererToken);
+  session.defaultSession.webRequest.onBeforeSendHeaders((details, callback) => {
+    const requestHeaders = { ...details.requestHeaders };
+    if (isTrustedRendererUrl(details.url)) {
+      requestHeaders['X-AgentMatrix-Renderer-Token'] = rendererToken;
+    }
+    callback({ requestHeaders });
+  });
 
   createWindow();
   createTray();

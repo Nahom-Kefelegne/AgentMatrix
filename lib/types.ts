@@ -1,3 +1,5 @@
+import type { NavigationRequest, NavigationResult, ReviewFeedback } from './navigation/types';
+
 // ===== Review Comments =====
 
 export interface ReviewComment {
@@ -177,6 +179,12 @@ export interface ServerToClientEvents {
   'editor:terminal:data': (data: { id: string; data: string }) => void;
   'editor:terminal:exit': (data: { id: string; exitCode: number }) => void;
   'editor:terminal:ready': (data: { id: string }) => void;
+  // Context Canvas navigation lifecycle.
+  'navigation:requested': (request: NavigationRequest) => void;
+  'navigation:acknowledged': (result: NavigationResult) => void;
+  'navigation:applied': (result: NavigationResult) => void;
+  'navigation:failed': (result: NavigationResult) => void;
+  'review:feedback': (feedback: ReviewFeedback) => void;
 }
 
 export interface ClientToServerEvents {
@@ -215,4 +223,9 @@ export const SOCKET_EVENTS = {
   TERMINAL_RESIZE: 'terminal:resize',
   TERMINAL_EXIT: 'terminal:exit',
   TERMINAL_CONSENT: 'terminal:consent',
+  NAVIGATION_REQUESTED: 'navigation:requested',
+  NAVIGATION_ACKNOWLEDGED: 'navigation:acknowledged',
+  NAVIGATION_APPLIED: 'navigation:applied',
+  NAVIGATION_FAILED: 'navigation:failed',
+  REVIEW_FEEDBACK: 'review:feedback',
 } as const;

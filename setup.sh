@@ -5,6 +5,13 @@
 
 set -e
 
+export NPM_CONFIG_REGISTRY="https://packagefeedproxy.microsoft.io/npm/"
+export NPM_CONFIG_REPLACE_REGISTRY_HOST="never"
+export NPM_CONFIG_UPDATE_NOTIFIER="false"
+export NPM_CONFIG_AUDIT="false"
+export NPM_CONFIG_FUND="false"
+export NO_UPDATE_NOTIFIER="1"
+
 GREEN='\033[0;32m'
 RED='\033[0;31m'
 YELLOW='\033[1;33m'
@@ -180,26 +187,16 @@ fi
 
 # Install dependencies
 echo -e "${BLUE}Installing dependencies...${NC}"
-# package-lock.json pins tarball URLs on registry.npmjs.org. On networks where
-# the public npm registry is blocked (e.g. corporate/Microsoft), npm honors
-# those lockfile URLs and hangs. Fail fast (bounded fetch timeout/retries), then
-# fall back to re-resolving every dependency through the registry configured in
-# ~/.npmrc (e.g. an Azure Artifacts mirror) by dropping the lockfile.
+# Project .npmrc + the environment above force lockfile tarballs through the
+# Microsoft package proxy from the first request. Never probe public npm first.
 npm_install_resilient() {
-    npm install --fetch-timeout=60000 --fetch-retry-maxtimeout=60000 --fetch-retries=1 && return 0
-    echo -e "  ${WARN} npm install failed — the registry in package-lock.json"
-    echo -e "     (registry.npmjs.org) may be blocked on this network."
-    local reg; reg=$(npm config get registry 2>/dev/null)
-    echo -e "     Re-resolving dependencies through your configured registry:"
-    echo -e "     ${reg}"
-    rm -f package-lock.json
-    npm install --fetch-timeout=120000 --fetch-retry-maxtimeout=120000 --fetch-retries=2 && return 0
-    return 1
+    npm install --replace-registry-host=never \
+      --fetch-timeout=120000 --fetch-retry-maxtimeout=120000 --fetch-retries=2
 }
 if ! npm_install_resilient; then
     reg=$(npm config get registry 2>/dev/null)
     echo -e "  ${CROSS} Could not install dependencies."
-    echo -e "     Public npm appears blocked and your mirror isn't usable. Fix the mirror auth:"
+    echo -e "     The Microsoft package proxy isn't usable. Fix the mirror auth:"
     echo -e "       • Registry: ${reg}"
     echo -e "       • Azure Artifacts (macOS/Linux): create a PAT with Packaging (Read),"
     echo -e "         then run:  npx ado-npm-auth --config ~/.npmrc   (or add the token to ~/.npmrc)"

@@ -2,6 +2,7 @@
 
 import { memo } from 'react';
 import type { CliType } from '@/lib/types';
+import type { NavigationRequest } from '@/lib/navigation/types';
 import TerminalPanel from './TerminalPanel';
 import CopilotTerminalPanel from './CopilotTerminalPanel';
 
@@ -12,6 +13,7 @@ interface SessionConsoleProps {
   visible?: boolean;
   readOnly?: boolean;
   cliType?: CliType;
+  onNavigate?: (request: NavigationRequest) => void;
 }
 
 /**

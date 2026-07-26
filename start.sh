@@ -5,6 +5,17 @@
 # blocked network) is non-fatal — the app still launches on the current code.
 cd "$(dirname "$0")" || exit 1
 
+# Corporate-safe npm policy. `npm run` can perform its own update check even
+# when no install is requested, which triggers Microsoft Defender's NPM URL
+# block. Keep every npm request on the Microsoft proxy and disable background
+# registry checks.
+export NPM_CONFIG_REGISTRY="https://packagefeedproxy.microsoft.io/npm/"
+export NPM_CONFIG_REPLACE_REGISTRY_HOST="never"
+export NPM_CONFIG_UPDATE_NOTIFIER="false"
+export NPM_CONFIG_AUDIT="false"
+export NPM_CONFIG_FUND="false"
+export NO_UPDATE_NOTIFIER="1"
+
 if command -v git >/dev/null 2>&1 && [ -d .git ]; then
     echo "Pulling latest from git..."
     before="$(git rev-parse HEAD 2>/dev/null)"

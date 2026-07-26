@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useSocketContext } from './SocketProvider';
 import { useXterm } from '@/lib/hooks/useXterm';
+import type { NavigationRequest } from '@/lib/navigation/types';
 import { TERMINAL_THEME } from '@/lib/terminalTheme';
 import { perfEvent } from '@/lib/perf';
 
@@ -75,6 +76,7 @@ interface CopilotTerminalPanelProps {
   cwd?: string;
   visible?: boolean;
   readOnly?: boolean;
+  onNavigate?: (request: NavigationRequest) => void;
 }
 
 interface AcpActivity {
@@ -93,7 +95,7 @@ interface AcpActivity {
  * (PgUp/PgDn, Ctrl+O/E/T/F) untouched, and maps the mouse wheel to paging.
  * Shared xterm boilerplate lives in `useXterm`.
  */
-export default function CopilotTerminalPanel({ sessionId, sessionName, cwd, visible, readOnly }: CopilotTerminalPanelProps) {
+export default function CopilotTerminalPanel({ sessionId, sessionName, cwd, visible, readOnly, onNavigate }: CopilotTerminalPanelProps) {
   const { socketRef } = useSocketContext();
   const [status, setStatus] = useState<'idle' | 'connecting' | 'connected' | 'exited'>('idle');
   const statusRef = useRef(status);
@@ -186,6 +188,8 @@ export default function CopilotTerminalPanel({ sessionId, sessionName, cwd, visi
     onResize: emitResize,
     onReady: handleReady,
     customKeyHandler,
+    sessionId,
+    onNavigate,
   });
 
   // Session initializing state (summary generation on startup).

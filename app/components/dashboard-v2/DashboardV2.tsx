@@ -1,7 +1,6 @@
 'use client';
 
 import {
-  Activity,
   AlertTriangle,
   Bot,
   CheckCircle2,
@@ -13,6 +12,7 @@ import {
   Info,
   Maximize2,
   MessageSquareText,
+  PanelRightOpen,
   ScrollText,
   ShieldAlert,
   Terminal,
@@ -22,6 +22,7 @@ import { memo } from 'react';
 import type { AttentionItem, AttentionKind, LaneItem } from '@/lib/dashboard/attentionQueue';
 import type { SessionData } from '@/lib/types';
 import CliIcon from '../CliIcon';
+import ContextCanvas from '../context-canvas/ContextCanvas';
 import SessionConsole from '../SessionConsole';
 import DashboardV2Nav from './DashboardV2Nav';
 import type { DashboardV2ViewProps } from './types';
@@ -60,17 +61,6 @@ function timeAgo(timestamp?: number): string {
   const hours = Math.floor(minutes / 60);
   if (hours < 24) return relativeTime.format(-hours, 'hour');
   return relativeTime.format(-Math.floor(hours / 24), 'day');
-}
-
-function waitingFor(timestamp?: number): string {
-  if (!timestamp) return 'unknown';
-  const seconds = Math.max(0, Math.floor((Date.now() - timestamp) / 1000));
-  if (seconds < 60) return `${numberFormat.format(Math.max(1, seconds))}s`;
-  const minutes = Math.floor(seconds / 60);
-  if (minutes < 60) return `${numberFormat.format(minutes)}m`;
-  const hours = Math.floor(minutes / 60);
-  if (hours < 24) return `${numberFormat.format(hours)}h`;
-  return `${numberFormat.format(Math.floor(hours / 24))}d`;
 }
 
 function shortPath(path?: string): string {
@@ -198,6 +188,7 @@ function ConsoleWorkspace(props: DashboardV2ViewProps) {
     selectedAttention,
     selectedContextUsage,
     consoleVisible,
+    canvas,
     changes,
     onOpenSession,
     onReviewChanges,
@@ -219,8 +210,6 @@ function ConsoleWorkspace(props: DashboardV2ViewProps) {
     );
   }
 
-  const signalMeta = selectedAttention ? SIGNAL_META[selectedAttention.kind] : null;
-  const SignalIcon = signalMeta?.icon;
   const hasReview = selectedAttention?.kind === 'ready-to-review'
     || (selectedSession.filesModified?.length ?? 0) > 0;
   const changeCount = changes.data?.files.length ?? selectedSession.filesModified?.length ?? 0;
@@ -242,6 +231,15 @@ function ConsoleWorkspace(props: DashboardV2ViewProps) {
             </div>
           </div>
           <div className="mc-console-actions">
+            <button
+              type="button"
+              className="mc-icon-button"
+              onClick={() => canvas.openSearch('', false)}
+              aria-label="Open Context Canvas"
+              title="Open Context Canvas"
+            >
+              <PanelRightOpen size={16} aria-hidden="true" />
+            </button>
             {hasReview ? (
               <button
                 type="button"
@@ -288,15 +286,6 @@ function ConsoleWorkspace(props: DashboardV2ViewProps) {
           <MiniContext usage={selectedContextUsage} />
         </div>
 
-        <div className={`mc-console-signal mc-console-signal--${signalMeta?.tone || 'healthy'}`}>
-          {SignalIcon
-            ? <SignalIcon size={14} strokeWidth={1.8} aria-hidden="true" />
-            : <Activity size={14} strokeWidth={1.8} aria-hidden="true" />}
-          <strong>{signalMeta?.label || 'No Intervention Requested'}</strong>
-          <span>{selectedAttention?.detail || selectedSession.lastToolSummary || 'The CLI is ready.'}</span>
-          {selectedAttention ? <em>Waiting {waitingFor(selectedAttention.waitingSince)}</em> : null}
-        </div>
-
         {changes.error && hasReview ? (
           <div className="mc-console-error" role="alert">
             <AlertTriangle size={14} aria-hidden="true" />
@@ -305,23 +294,34 @@ function ConsoleWorkspace(props: DashboardV2ViewProps) {
         ) : null}
       </header>
 
-      <section className="mc-console-frame" aria-label={`${selectedSession.name} CLI`}>
-        <div className="mc-console-frame-label">
-          <span><span className="mc-live-dot mc-live-dot--working" /> Interactive CLI</span>
-          <span>Live PTY · Input Enabled</span>
-        </div>
-        <div className="mc-console-stage">
-          {consoleVisible ? (
-            <SessionConsole
-              sessionId={selectedSession.id}
-              sessionName={selectedSession.name}
-              cwd={selectedSession.cwd}
-              visible
-              cliType={selectedSession.cliType}
-            />
-          ) : null}
-        </div>
-      </section>
+      <div className={`mc-session-surface ${canvas.isOpen ? 'mc-session-surface--canvas' : ''}`}>
+        <section className="mc-console-frame" aria-label={`${selectedSession.name} CLI`}>
+          <div className="mc-console-frame-label">
+            <span><span className="mc-live-dot mc-live-dot--working" /> Interactive CLI</span>
+            <span>Live PTY · Input Enabled</span>
+          </div>
+          <div className="mc-console-stage">
+            {consoleVisible ? (
+              <SessionConsole
+                sessionId={selectedSession.id}
+                sessionName={selectedSession.name}
+                cwd={selectedSession.cwd}
+                visible
+                cliType={selectedSession.cliType}
+                onNavigate={canvas.openRequest}
+              />
+            ) : null}
+          </div>
+        </section>
+        {canvas.isOpen ? (
+          <ContextCanvas
+            sessionId={selectedSession.id}
+            sessionName={selectedSession.name}
+            cwd={selectedSession.cwd}
+            controller={canvas}
+          />
+        ) : null}
+      </div>
     </main>
   );
 }

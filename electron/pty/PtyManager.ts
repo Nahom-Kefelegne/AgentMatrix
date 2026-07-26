@@ -4,6 +4,11 @@ import { join } from 'path';
 import type { IPty } from 'node-pty';
 import { OutputParser, type PtyState, type StateInfo } from './OutputParser';
 import type { CliProvider, CliType } from '../../lib/cli/CliProvider';
+import {
+  clearNavigationCapability,
+  issueNavigationCapability,
+  type NavigationCapability,
+} from '../../lib/navigation/rootRegistry';
 
 // Opt-in raw PTY stream tee — set AGENTMATRIX_DEBUG_PTY=1 to dump every
 // chunk to ~/.agentmatrix/debug/<sessionId>.bin. Used to diagnose TUI
@@ -212,13 +217,19 @@ export class PtyManager {
       console.log(`[pty:exit] id=${id.slice(0, 12)} code=${exitCode}`);
       session.status = 'closed';
       this.sessions.delete(id);
+      clearNavigationCapability(id);
     });
 
     this.sessions.set(id, session);
     return session;
   }
 
-  private spawnPty(cwd: string, cliArgs: string[], cliType?: CliType): IPty {
+  private spawnPty(
+    cwd: string,
+    cliArgs: string[],
+    cliType?: CliType,
+    navigationIdentity?: NavigationCapability,
+  ): IPty {
     const pty = require('node-pty');
     const provider = this.getProviderForType(cliType);
     const { existsSync } = require('fs');
@@ -232,6 +243,11 @@ export class PtyManager {
     // hooks (session/tool/agent activity) never arrive. Harmless for Claude, but
     // scope it to Copilot to be explicit. See docs/design/copilot-hooks-reference.md.
     if (provider.type === 'copilot') env.COPILOT_HOOK_ALLOW_LOCALHOST = '1';
+    if (navigationIdentity) {
+      env.AGENTMATRIX_SESSION_ID = navigationIdentity.sessionId;
+      env.AGENTMATRIX_NAVIGATION_CAPABILITY = navigationIdentity.capability;
+      env.AGENTMATRIX_REPO_IDENTITY = navigationIdentity.repoIdentity;
+    }
 
     // Check if Agency mode is enabled
     const { getSettings } = require('../../lib/state/appSettings');
@@ -342,7 +358,13 @@ export class PtyManager {
     });
 
     console.log(`[spawnNew] id=${id.slice(0, 8)} requestedCli=${opts.cliType} actualProvider=${provider.type} args=${args.join(' ')}`);
-    return this.createPtySession(id, this.spawnPty(opts.cwd, args, cliType), cliType);
+    const navigationIdentity = issueNavigationCapability(id, opts.cwd);
+    try {
+      return this.createPtySession(id, this.spawnPty(opts.cwd, args, cliType, navigationIdentity), cliType);
+    } catch (error) {
+      clearNavigationCapability(id);
+      throw error;
+    }
   }
 
   spawnResume(id: string, opts: {
@@ -371,7 +393,13 @@ export class PtyManager {
       args.push('--append-system-prompt', oneLine);
     }
 
-    return this.createPtySession(id, this.spawnPty(cwd, args, cliType), cliType);
+    const navigationIdentity = issueNavigationCapability(id, cwd);
+    try {
+      return this.createPtySession(id, this.spawnPty(cwd, args, cliType, navigationIdentity), cliType);
+    } catch (error) {
+      clearNavigationCapability(id);
+      throw error;
+    }
   }
 
   sendPrompt(sessionId: string, prompt: string): void {
@@ -408,6 +436,7 @@ export class PtyManager {
     try { session.pty.kill(); } catch {}
     session.status = 'closed';
     this.sessions.delete(sessionId);
+    clearNavigationCapability(sessionId);
   }
 
   hasPty(sessionId: string): boolean { return this.sessions.has(sessionId); }
@@ -499,6 +528,7 @@ export class PtyManager {
         try { session.pty.kill(); forced++; } catch {}
         session.status = 'closed';
         this.sessions.delete(session.id);
+        clearNavigationCapability(session.id);
       }
     }
     if (forced > 0) console.log(`[shutdown] Force-killed ${forced} stragglers`);

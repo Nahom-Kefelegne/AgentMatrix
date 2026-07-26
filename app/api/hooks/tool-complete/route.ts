@@ -4,6 +4,7 @@ import { SOCKET_EVENTS } from '@/lib/types';
 import { addAction, updateSession, getSession, getAgentName } from '@/lib/state/sessionStore';
 import { emitToClients } from '@/lib/state/socketEmitter';
 import { ASK_USER_TOOLS } from '@/lib/constants/askUserTools';
+import { getNavigationService } from '@/lib/navigation/NavigationService';
 
 export async function POST(request: Request) {
   try {
@@ -54,6 +55,7 @@ export async function POST(request: Request) {
     // Nudge the changes viewer to re-fetch when a file-mutating tool finishes.
     const FILE_TOOLS = ['Write', 'Edit', 'MultiEdit', 'create', 'edit', 'apply_patch'];
     if (FILE_TOOLS.includes(payload.tool_name)) {
+      getNavigationService().invalidateSession(payload.session_id);
       emitToClients('session:files-changed', { sessionId: payload.session_id });
     }
 

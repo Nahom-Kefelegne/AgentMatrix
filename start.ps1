@@ -4,6 +4,15 @@
 # blocked network) is non-fatal — the app still launches on the current code.
 Set-Location (Split-Path -Parent $MyInvocation.MyCommand.Path)
 
+# Keep npm on Microsoft's approved proxy and suppress npm's launch-time update
+# check, which otherwise triggers the corporate NPM URL block notification.
+$env:NPM_CONFIG_REGISTRY = "https://packagefeedproxy.microsoft.io/npm/"
+$env:NPM_CONFIG_REPLACE_REGISTRY_HOST = "never"
+$env:NPM_CONFIG_UPDATE_NOTIFIER = "false"
+$env:NPM_CONFIG_AUDIT = "false"
+$env:NPM_CONFIG_FUND = "false"
+$env:NO_UPDATE_NOTIFIER = "1"
+
 if ((Get-Command git -ErrorAction SilentlyContinue) -and (Test-Path .git)) {
     Write-Host "Pulling latest from git..." -ForegroundColor Blue
     $before = (git rev-parse HEAD 2>$null)

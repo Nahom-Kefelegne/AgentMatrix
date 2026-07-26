@@ -3,6 +3,8 @@
 import { useEffect, useRef, useState } from 'react';
 import { useSocketContext } from './SocketProvider';
 import type { CliType } from '@/lib/types';
+import type { NavigationRequest } from '@/lib/navigation/types';
+import { createTerminalLinks } from '@/lib/terminal-links';
 import { TERMINAL_THEME } from '@/lib/terminalTheme';
 
 interface TerminalPanelProps {
@@ -12,17 +14,20 @@ interface TerminalPanelProps {
   visible?: boolean;
   readOnly?: boolean;
   cliType?: CliType;
+  onNavigate?: (request: NavigationRequest) => void;
 }
 
 // Debounce for container resize events. 150ms is the xterm.js community sweet
 // spot: prevents reflow storms during drag/animation while still feeling snappy.
 const RESIZE_DEBOUNCE_MS = 150;
 
-export default function TerminalPanel({ sessionId, sessionName, cwd, visible, readOnly, cliType }: TerminalPanelProps) {
+export default function TerminalPanel({ sessionId, sessionName, cwd, visible, readOnly, cliType, onNavigate }: TerminalPanelProps) {
   const { socketRef } = useSocketContext();
   const containerRef = useRef<HTMLDivElement>(null);
   const termRef = useRef<any>(null);
   const fitRef = useRef<any>(null);
+  const onNavigateRef = useRef(onNavigate);
+  onNavigateRef.current = onNavigate;
   const [status, setStatus] = useState<'idle' | 'connecting' | 'connected' | 'exited'>('idle');
   const statusRef = useRef(status);
   statusRef.current = status;
@@ -66,6 +71,11 @@ export default function TerminalPanel({ sessionId, sessionName, cwd, visible, re
 
       if (disposed) return;
 
+      const terminalLinks = createTerminalLinks(() => ({
+        sessionId,
+        onNavigate: onNavigateRef.current,
+      }));
+
       const terminal = new Terminal({
         theme: TERMINAL_THEME,
         fontSize: 16,
@@ -75,11 +85,13 @@ export default function TerminalPanel({ sessionId, sessionName, cwd, visible, re
         cursorStyle: 'bar',
         scrollback: 5000,
         scrollOnUserInput: true,
+        linkHandler: terminalLinks.linkHandler,
       });
 
       const fitAddon = new FitAddon();
       terminal.loadAddon(fitAddon);
       terminal.open(container);
+      const terminalLinksDisposable = terminalLinks.register(terminal);
 
       // WebGL renderer for GPU-accelerated rendering. Skipped on Windows
       // (remote desktop makes GPU text grainy — canvas renderer looks better).
@@ -315,6 +327,8 @@ export default function TerminalPanel({ sessionId, sessionName, cwd, visible, re
         socket.off('terminal:data' as any, handleData);                      // 5. Remove socket listeners
         socket.off('terminal:exit' as any, handleExit);
         try { onResizeDisposable.dispose(); } catch {}                       // 6. Dispose xterm event sub
+        try { terminalLinksDisposable.dispose(); } catch {}
+        terminalLinks.dispose();
         // 7. Dispose the WebGL renderer addon FIRST, while the render service
         // is still alive — disposing it implicitly during terminal.dispose()
         // hits an xterm addon-dispose race ("reading '_isDisposed'").

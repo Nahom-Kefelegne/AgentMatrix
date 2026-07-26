@@ -6,4 +6,5 @@ contextBridge.exposeInMainWorld('electronAPI', {
   terminalWrite: (sessionId: string, data: string) => {
     ipcRenderer.send('terminal:write', sessionId, data);
   },
+  openExternal: (url: string) => ipcRenderer.invoke('shell:open-external', url),
 });

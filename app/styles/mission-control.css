@@ -669,55 +669,6 @@
 .mc-console-context-fill--warning { background: var(--mc-warning); }
 .mc-console-context-fill--critical { background: var(--mc-critical); }
 
-.mc-console-signal {
-  display: flex;
-  gap: 7px;
-  align-items: center;
-  min-width: 0;
-  margin-top: 7px;
-  padding: 6px 8px;
-  border-left: 2px solid var(--mc-healthy);
-  color: var(--mc-muted);
-  background: linear-gradient(90deg, color-mix(in srgb, var(--mc-healthy) 6%, transparent), transparent 74%);
-}
-
-.mc-console-signal strong {
-  flex-shrink: 0;
-  color: var(--mc-ink);
-  font-size: 10px;
-}
-
-.mc-console-signal > span {
-  overflow: hidden;
-  font-size: 10px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.mc-console-signal em {
-  flex-shrink: 0;
-  margin-left: auto;
-  color: var(--mc-faint);
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-  font-size: 8px;
-  font-style: normal;
-}
-
-.mc-console-signal--critical {
-  border-left-color: var(--mc-critical);
-  background: linear-gradient(90deg, color-mix(in srgb, var(--mc-critical) 7%, transparent), transparent 74%);
-}
-
-.mc-console-signal--warning {
-  border-left-color: var(--mc-warning);
-  background: linear-gradient(90deg, color-mix(in srgb, var(--mc-warning) 7%, transparent), transparent 74%);
-}
-
-.mc-console-signal--review {
-  border-left-color: var(--mc-review);
-  background: linear-gradient(90deg, color-mix(in srgb, var(--mc-review) 7%, transparent), transparent 74%);
-}
-
 .mc-console-error {
   display: flex;
   gap: 7px;

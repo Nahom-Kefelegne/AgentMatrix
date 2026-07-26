@@ -4,6 +4,13 @@
 
 $ErrorActionPreference = "Stop"
 
+$env:NPM_CONFIG_REGISTRY = "https://packagefeedproxy.microsoft.io/npm/"
+$env:NPM_CONFIG_REPLACE_REGISTRY_HOST = "never"
+$env:NPM_CONFIG_UPDATE_NOTIFIER = "false"
+$env:NPM_CONFIG_AUDIT = "false"
+$env:NPM_CONFIG_FUND = "false"
+$env:NO_UPDATE_NOTIFIER = "1"
+
 Write-Host ""
 Write-Host "  ================================" -ForegroundColor Blue
 Write-Host "       Agent Matrix Setup         " -ForegroundColor Blue
@@ -182,26 +189,16 @@ if (-not (Test-Path (Join-Path $scriptDir "electron\main.ts"))) {
 
 # Install dependencies
 Write-Host "Installing dependencies..." -ForegroundColor Blue
-# package-lock.json pins tarball URLs on registry.npmjs.org. On networks where
-# public npm is blocked (e.g. corporate/Microsoft), npm honors those URLs and
-# hangs. Fail fast (bounded timeout/retries), then fall back to re-resolving
-# every dependency through the registry configured in .npmrc (e.g. an Azure
-# Artifacts mirror) by dropping the lockfile.
+# Project .npmrc + the environment above force lockfile tarballs through the
+# Microsoft package proxy from the first request. Never probe public npm first.
 function Invoke-NpmInstallResilient {
-    npm install --fetch-timeout=60000 --fetch-retry-maxtimeout=60000 --fetch-retries=1 2>&1 | Out-Host
-    if ($LASTEXITCODE -eq 0) { return $true }
-    $reg = (npm config get registry 2>$null)
-    Write-Host "  [!] npm install failed — the registry in package-lock.json" -ForegroundColor Yellow
-    Write-Host "      (registry.npmjs.org) may be blocked on this network." -ForegroundColor Yellow
-    Write-Host "      Re-resolving dependencies through your configured registry: $reg"
-    Remove-Item -Force package-lock.json -ErrorAction SilentlyContinue
-    npm install --fetch-timeout=120000 --fetch-retry-maxtimeout=120000 --fetch-retries=2 2>&1 | Out-Host
+    npm install --replace-registry-host=never --fetch-timeout=120000 --fetch-retry-maxtimeout=120000 --fetch-retries=2 2>&1 | Out-Host
     return ($LASTEXITCODE -eq 0)
 }
 if (-not (Invoke-NpmInstallResilient)) {
     $reg = (npm config get registry 2>$null)
     Write-Host "  [X] Could not install dependencies." -ForegroundColor Red
-    Write-Host "      Public npm appears blocked and your mirror isn't usable. Fix the mirror auth:"
+    Write-Host "      The Microsoft package proxy isn't usable. Fix the mirror auth:"
     Write-Host "        - Registry: $reg"
     Write-Host "        - Azure Artifacts (Windows): npx vsts-npm-auth -config .npmrc -F"
     Write-Host "          (or add a Packaging-read PAT to your user .npmrc), then re-run this script."

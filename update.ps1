@@ -2,6 +2,13 @@
 
 $ErrorActionPreference = "Stop"
 
+$env:NPM_CONFIG_REGISTRY = "https://packagefeedproxy.microsoft.io/npm/"
+$env:NPM_CONFIG_REPLACE_REGISTRY_HOST = "never"
+$env:NPM_CONFIG_UPDATE_NOTIFIER = "false"
+$env:NPM_CONFIG_AUDIT = "false"
+$env:NPM_CONFIG_FUND = "false"
+$env:NO_UPDATE_NOTIFIER = "1"
+
 Write-Host ""
 Write-Host "  ================================" -ForegroundColor Blue
 Write-Host "       Agent Matrix Update        " -ForegroundColor Blue
@@ -33,22 +40,15 @@ Write-Host ""
 
 # Install dependencies
 Write-Host "Installing dependencies..." -ForegroundColor Blue
-# See setup.ps1: fail fast if public npm is blocked, then re-resolve through the
-# registry configured in .npmrc (e.g. a corporate mirror) by dropping the lockfile.
+# See setup.ps1: use the Microsoft package proxy from the first request.
 function Invoke-NpmInstallResilient {
-    npm install --fetch-timeout=60000 --fetch-retry-maxtimeout=60000 --fetch-retries=1 2>&1 | Out-Host
-    if ($LASTEXITCODE -eq 0) { return $true }
-    $reg = (npm config get registry 2>$null)
-    Write-Host "  [!] npm install failed (registry.npmjs.org may be blocked)." -ForegroundColor Yellow
-    Write-Host "      Re-resolving through your configured registry: $reg"
-    Remove-Item -Force package-lock.json -ErrorAction SilentlyContinue
-    npm install --fetch-timeout=120000 --fetch-retry-maxtimeout=120000 --fetch-retries=2 2>&1 | Out-Host
+    npm install --replace-registry-host=never --fetch-timeout=120000 --fetch-retry-maxtimeout=120000 --fetch-retries=2 2>&1 | Out-Host
     return ($LASTEXITCODE -eq 0)
 }
 if (-not (Invoke-NpmInstallResilient)) {
     $reg = (npm config get registry 2>$null)
-    Write-Host "  [X] Could not install dependencies. If public npm is blocked, authenticate" -ForegroundColor Red
-    Write-Host "      your mirror ($reg) — e.g. npx vsts-npm-auth -config .npmrc -F — then re-run."
+    Write-Host "  [X] Could not install dependencies through $reg." -ForegroundColor Red
+    Write-Host "      Authenticate the Microsoft mirror, then re-run."
     exit 1
 }
 Write-Host "  [OK] Dependencies installed" -ForegroundColor Green

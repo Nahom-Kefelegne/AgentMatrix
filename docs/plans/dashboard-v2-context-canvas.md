@@ -1,6 +1,6 @@
 # Dashboard V2 and Context Canvas - Implementation Plan
 
-Status: **Phase 0 implemented; Context Canvas phases planned**
+Status: **Context Canvas MVP implemented; parallel-coordination phases planned**
 
 Related design: [`../design/dashboard-v2.md`](../design/dashboard-v2.md)
 
@@ -588,7 +588,7 @@ Deliver:
 - Compact quiet rail.
 - Fullscreen button using existing `FullscreenTerminal`.
 
-### Phase 1 - Manual Context Canvas MVP
+### Phase 1 - Manual Context Canvas MVP (implemented)
 
 Deliver:
 
@@ -602,7 +602,7 @@ Deliver:
 
 No MCP required to validate the interaction model.
 
-### Phase 2 - Agent navigation tools
+### Phase 2 - Agent navigation tools and session review (implemented)
 
 Deliver:
 
@@ -613,17 +613,23 @@ Deliver:
 - Ambiguous symbol result picker.
 - Audit trail.
 
-### Phase 3 - Session-native review
+Delivered:
 
-Deliver:
+- Root-scoped NavigationService and content APIs.
+- MCP `open_file`, `reveal_range`, `open_symbol`, `show_search_results`,
+  `open_diff`, and `open_review`.
+- Clickable xterm file/stack/OSC-8/HTTP links.
+- Shared embedded `SessionDiffCore`; legacy modal remains compatible.
+- Inline comments, revert, live refresh, and feedback delivery to the owning
+  session.
+- Streamed, cancellable, bounded and cached repository/symbol search.
 
-- Extract `DiffCore` from `ChangesViewer`.
-- This Turn and This Session review.
-- Working-tree/branch/checkpoint source selector.
-- Structured inline feedback to the owning session.
-- Review state and stale-anchor handling.
+Remaining review-source expansion:
 
-### Phase 4 - Parallel coordination
+- This Turn, working-tree, branch/worktree, and checkpoint diff sources.
+- Snapshot/hash-backed stale-anchor handling.
+
+### Phase 3 - Parallel coordination
 
 Deliver:
 
