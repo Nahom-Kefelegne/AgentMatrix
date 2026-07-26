@@ -1,7 +1,7 @@
 'use client';
 
-import { useState, useEffect, useCallback, useRef, useMemo, memo } from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
+import { useState, useCallback, useRef, useMemo, memo } from 'react';
+import { motion } from 'framer-motion';
 import type { SessionData } from '@/lib/types';
 import { useSocketContext } from './SocketProvider';
 import { perfRender } from '@/lib/perf';
@@ -19,6 +19,70 @@ const STATUS: Record<string, { label: string; dotClass: string }> = {
   done: { label: 'Done', dotClass: 'status-dot--done' },
 };
 
+// Per-status accent used for the card's left border, the status label, and the
+// section header stripe — instant visual triage across the whole dashboard.
+const STATUS_ACCENT: Record<string, string> = {
+  working: '#34d399', meeting: '#a78bfa', attention: '#ef4444',
+  done: '#3b82f6', idle: '#6b7280',
+};
+
+// Section order for the status-grouped dashboard — "Needs You" pinned to the top.
+const GROUP_ORDER: { key: string; label: string }[] = [
+  { key: 'attention', label: 'Needs You' },
+  { key: 'working', label: 'Working' },
+  { key: 'meeting', label: 'In Meeting' },
+  { key: 'idle', label: 'Idle' },
+  { key: 'done', label: 'Done' },
+];
+
+/** Compact "time since" label (e.g. "2m ago"), or null when no timestamp. */
+function timeAgo(ts?: number): string | null {
+  if (!ts) return null;
+  const d = Math.floor((Date.now() - ts) / 1000);
+  if (d < 5) return 'just now';
+  if (d < 60) return `${d}s ago`;
+  if (d < 3600) return `${Math.floor(d / 60)}m ago`;
+  if (d < 86400) return `${Math.floor(d / 3600)}h ago`;
+  return `${Math.floor(d / 86400)}d ago`;
+}
+
+/** Compact elapsed label (e.g. "12m"), or null. Used for session age. */
+function durationSince(ts?: number): string | null {
+  if (!ts) return null;
+  const d = Math.floor((Date.now() - ts) / 1000);
+  if (d < 60) return `${d}s`;
+  if (d < 3600) return `${Math.floor(d / 60)}m`;
+  if (d < 86400) return `${Math.floor(d / 3600)}h`;
+  return `${Math.floor(d / 86400)}d`;
+}
+
+interface FleetStats {
+  total: number; working: number; attention: number;
+  idle: number; done: number; meeting: number; files: number; avgCtx: number | null;
+}
+
+/** Fleet pulse: a slim strip of aggregate stats above the grid. */
+function StatsStrip({ stats }: { stats: FleetStats }) {
+  const cells: { label: string; value: string | number; color: string; alert?: boolean }[] = [
+    { label: 'Sessions', value: stats.total, color: '#e4e4e7' },
+    { label: 'Working', value: stats.working, color: STATUS_ACCENT.working },
+    { label: 'Needs You', value: stats.attention, color: STATUS_ACCENT.attention, alert: stats.attention > 0 },
+    { label: 'Idle', value: stats.idle, color: '#9ca3af' },
+    { label: 'Done', value: stats.done, color: STATUS_ACCENT.done },
+    { label: 'Files changed', value: stats.files, color: '#e4e4e7' },
+    ...(stats.avgCtx !== null ? [{ label: 'Avg context', value: `${stats.avgCtx}%`, color: '#e4e4e7' }] : []),
+  ];
+  return (
+    <div className="stats-strip">
+      {cells.map(c => (
+        <div key={c.label} className={`stat-cell ${c.alert ? 'stat-cell--alert' : ''}`}>
+          <span className="stat-value" style={{ color: c.color }}>{c.value}</span>
+          <span className="stat-label">{c.label}</span>
+        </div>
+      ))}
+    </div>
+  );
+}
 
 interface Props {
   sessions: Map<string, SessionData>;
@@ -29,77 +93,43 @@ interface Props {
 export default function DashboardView({ sessions, contextMap, onSelectSession }: Props) {
   perfRender('DashboardView');
   const { socketRef } = useSocketContext();
-  const all = Array.from(sessions.values());
+  const all = useMemo(() => Array.from(sessions.values()), [sessions]);
   const [filter, setFilter] = useState('all');
-  const [order, setOrder] = useState<string[]>([]);
-  const dragItem = useRef<string | null>(null);
-  const dragOverItem = useRef<string | null>(null);
-  const [dragId, setDragId] = useState<string | null>(null);
-  const [dragOverId, setDragOverId] = useState<string | null>(null);
-  // Stable refs so the card callbacks below never change identity, keeping
+  // Stable ref so handleSelect never changes identity, keeping
   // React.memo(SessionCard) effective across context-map / parent re-renders.
-  // (The old 5s `tick` re-render was removed — it only existed to refresh an
-  // `ago()` relative timestamp that is no longer rendered.)
-  const dragIdRef = useRef(dragId); dragIdRef.current = dragId;
   const onSelectRef = useRef(onSelectSession); onSelectRef.current = onSelectSession;
+  const handleSelect = useCallback((id: string) => { onSelectRef.current(id); }, []);
 
-  const sessionIds = all.map(s => s.id).join(',');
-  useEffect(() => {
-    const ids = sessionIds.split(',').filter(Boolean);
-    const currentIds = new Set(ids);
-    setOrder(prev => {
-      const kept = prev.filter(id => currentIds.has(id));
-      const newIds = ids.filter(id => !prev.includes(id));
-      const merged = [...kept, ...newIds];
-      if (merged.length === prev.length && merged.every((id, i) => prev[i] === id)) return prev;
-      return merged;
-    });
-  }, [sessionIds]);
-
-  const filtered = filter === 'all' ? all : all.filter(s => s.status === filter);
-  const filteredIds = new Set(filtered.map(s => s.id));
-  const orderedList = order.filter(id => filteredIds.has(id)).map(id => sessions.get(id)!).filter(Boolean);
+  // Fleet aggregates for the stats strip — one glance at the whole fleet.
+  const stats = useMemo<FleetStats>(() => {
+    const by = (st: string) => all.filter(s => s.status === st).length;
+    let files = 0;
+    for (const s of all) files += s.filesModified?.length ?? 0;
+    const ctx = all.map(s => contextMap[s.id]).filter((v): v is number => typeof v === 'number');
+    const avgCtx = ctx.length ? Math.round(ctx.reduce((a, b) => a + b, 0) / ctx.length) : null;
+    return { total: all.length, working: by('working'), attention: by('attention'),
+      idle: by('idle'), done: by('done'), meeting: by('meeting'), files, avgCtx };
+  }, [all, contextMap]);
 
   const counts: Record<string, number> = {
-    all: all.length, working: all.filter(s => s.status === 'working').length,
-    idle: all.filter(s => s.status === 'idle').length, meeting: all.filter(s => s.status === 'meeting').length,
+    all: all.length, working: stats.working, idle: stats.idle, meeting: stats.meeting,
   };
   const filters = [
     { key: 'all', label: 'All' }, { key: 'working', label: 'Working' },
     { key: 'idle', label: 'Idle' }, { key: 'meeting', label: 'Meeting' },
   ].filter(f => f.key === 'all' || counts[f.key] > 0);
 
-  const handleSelect = useCallback((id: string) => {
-    if (!dragIdRef.current) onSelectRef.current(id);
-  }, []);
-  const handleDragStart = useCallback((e: React.DragEvent, id: string) => {
-    dragItem.current = id;
-    setDragId(id);
-    e.dataTransfer.effectAllowed = 'move';
-  }, []);
-  const handleDragOver = useCallback((e: React.DragEvent, id: string) => {
-    e.preventDefault();
-    e.dataTransfer.dropEffect = 'move';
-    if (!dragItem.current || dragItem.current === id) { setDragOverId(null); return; }
-    setDragOverId(id);
-    if (dragOverItem.current === id) return;
-    dragOverItem.current = id;
-    setOrder(prev => {
-      const from = prev.indexOf(dragItem.current!);
-      const to = prev.indexOf(id);
-      if (from === -1 || to === -1) return prev;
-      const next = [...prev];
-      next.splice(from, 1);
-      next.splice(to, 0, dragItem.current!);
-      return next;
-    });
-  }, []);
-  const handleDragEnd = useCallback(() => {
-    dragItem.current = null;
-    dragOverItem.current = null;
-    setDragId(null);
-    setDragOverId(null);
-  }, []);
+  const filtered = filter === 'all' ? all : all.filter(s => s.status === filter);
+  // Newest-active first within any list.
+  const byRecent = (a: SessionData, b: SessionData) =>
+    (b.lastActivity ?? b.createdAt ?? 0) - (a.lastActivity ?? a.createdAt ?? 0);
+
+  // Status-grouped sections (only when unfiltered) — replaces manual drag order.
+  const groups = useMemo(() => GROUP_ORDER
+    .map(g => ({ ...g, accent: STATUS_ACCENT[g.key], items: filtered.filter(s => s.status === g.key).sort(byRecent) }))
+    .filter(g => g.items.length > 0), [filtered]);
+
+  const isEmpty = filtered.length === 0;
 
   return (
     <div data-scroll-area style={{ height: '100vh', position: 'relative' }}
@@ -107,32 +137,44 @@ export default function DashboardView({ sessions, contextMap, onSelectSession }:
       {/* Efficient orbs: cheap gradient-only drift (see ambient-orbs.css). */}
       <AmbientOrbs />
       <div className="noise-overlay" />
-      <div style={{ maxWidth: 1200, margin: '0 auto', padding: '72px 36px 80px', position: 'relative', zIndex: 2 }}>
-        <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="filter-bar">
+      <div style={{ maxWidth: 1200, margin: '0 auto', padding: '56px 36px 80px', position: 'relative', zIndex: 2 }}>
+        {stats.total > 0 && <StatsStrip stats={stats} />}
+
+        <div className="filter-bar">
           {filters.map(f => (
             <button key={f.key} onClick={() => setFilter(f.key)}
               className={`filter-btn ${filter === f.key ? 'filter-btn--active' : ''}`}>
               {f.label}<span className="filter-count">{counts[f.key]}</span>
             </button>
           ))}
-        </motion.div>
+        </div>
 
-        {orderedList.length === 0 ? (
+        {isEmpty ? (
           <div style={{ textAlign: 'center', padding: '140px 0' }} className="subtle-text">
             <div style={{ fontSize: 48, marginBottom: 16 }}>○</div>
             <div style={{ fontSize: 16 }}>{all.length ? 'No matches' : 'No sessions running'}</div>
           </div>
+        ) : filter === 'all' ? (
+          groups.map(g => (
+            <section key={g.key} className="dash-section">
+              <div className="dash-section-header">
+                <span className="dash-section-accent" style={{ background: g.accent }} />
+                <span className="dash-section-title">{g.label}</span>
+                <span className="dash-section-count">{g.items.length}</span>
+              </div>
+              <div className="dash-grid">
+                {g.items.map(s => (
+                  <SessionCard key={s.id} s={s} contextUsage={contextMap[s.id] ?? null}
+                    onSelect={handleSelect} socketRef={socketRef} />
+                ))}
+              </div>
+            </section>
+          ))
         ) : (
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(420px, 1fr))', gap: 20 }}>
-            {orderedList.map((s) => (
-              <SessionCard key={s.id} s={s}
-                contextUsage={contextMap[s.id] ?? null}
-                onSelect={handleSelect}
-                socketRef={socketRef}
-                isDragging={dragId === s.id}
-                onDragStartCard={handleDragStart}
-                onDragOverCard={handleDragOver}
-                onDragEnd={handleDragEnd} />
+          <div className="dash-grid">
+            {[...filtered].sort(byRecent).map(s => (
+              <SessionCard key={s.id} s={s} contextUsage={contextMap[s.id] ?? null}
+                onSelect={handleSelect} socketRef={socketRef} />
             ))}
           </div>
         )}
@@ -141,18 +183,15 @@ export default function DashboardView({ sessions, contextMap, onSelectSession }:
   );
 }
 
-const SessionCard = memo(function SessionCard({ s, contextUsage, onSelect, socketRef, isDragging, onDragStartCard, onDragOverCard, onDragEnd }: {
+const SessionCard = memo(function SessionCard({ s, contextUsage, onSelect, socketRef }: {
   s: SessionData; contextUsage: number | null;
   onSelect: (id: string) => void; socketRef: React.RefObject<any>;
-  isDragging?: boolean;
-  onDragStartCard?: (e: React.DragEvent, id: string) => void;
-  onDragOverCard?: (e: React.DragEvent, id: string) => void;
-  onDragEnd?: () => void;
 }) {
   perfRender('SessionCard');
   const meta = STATUS[s.status] || STATUS.idle;
   const working = s.status === 'working';
   const isActive = working || s.status === 'meeting' || s.status === 'attention';
+  const accent = STATUS_ACCENT[s.status] ?? STATUS_ACCENT.idle;
   const [summaryRequested, setSummaryRequested] = useState(false);
   const hasSummary = s.summaryBullets && s.summaryBullets.length > 0;
   const loading = summaryRequested && !hasSummary;
@@ -163,22 +202,22 @@ const SessionCard = memo(function SessionCard({ s, contextUsage, onSelect, socke
     socketRef.current?.emit('session:summary' as any, { sessionId: s.id });
   }, [socketRef, s.id]);
 
-  const statusColor = working ? '#34d399' : s.status === 'meeting' ? '#a78bfa'
-    : s.status === 'attention' ? '#ef4444' : s.status === 'done' ? '#3b82f6' : undefined;
+  const statusColor = STATUS_ACCENT[s.status];
+  const filesCount = s.filesModified?.length ?? 0;
+  const toolCount = s.recentActions?.length ?? 0;
+  const agentCount = s.agents?.length ?? 0;
+  const relTime = timeAgo(s.lastActivity ?? s.createdAt);
+  const age = durationSince(s.createdAt);
+  const hasChips = age || filesCount > 0 || toolCount > 0 || agentCount > 0;
 
   return (
     <motion.div
       layout
-      initial={{ opacity: 0, y: 16 }}
-      animate={{ opacity: isDragging ? 0.3 : 1, y: 0, scale: isDragging ? 0.98 : 1 }}
-      exit={{ opacity: 0, y: -8 }}
+      initial={{ opacity: 0, y: 12 }}
+      animate={{ opacity: 1, y: 0 }}
       transition={{ layout: { type: 'spring', stiffness: 500, damping: 35 }, default: { duration: 0.15 } }}
-      {...{ draggable: true,
-        onDragStart: (onDragStartCard ? ((e: React.DragEvent) => onDragStartCard(e, s.id)) : undefined) as any,
-        onDragOver: (onDragOverCard ? ((e: React.DragEvent) => onDragOverCard(e, s.id)) : undefined) as any,
-        onDragEnd: onDragEnd as any }}
       onClick={() => onSelect(s.id)}
-      style={{ cursor: isDragging ? 'grabbing' : 'grab' }}
+      style={{ cursor: 'pointer', borderLeft: `3px solid ${accent}` }}
       className={`session-card ${s.status === 'attention' ? 'session-card--attention' : ''} ${s.status === 'done' ? 'session-card--done' : ''} ${isActive ? 'session-card--active' : ''}`}
     >
       {/* Matrix rain behind content — only mounted for ACTIVE cards, which are
@@ -190,10 +229,10 @@ const SessionCard = memo(function SessionCard({ s, contextUsage, onSelect, socke
       {isActive && <MatrixRain sessionId={s.id} />}
 
       <div className="session-card-body">
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 6, flex: 1, marginRight: 16 }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, flex: 1, marginRight: 12, minWidth: 0 }}>
             <CliIcon cliType={s.cliType} />
-            <h3 className="session-name" style={{ margin: 0 }}>{s.name}</h3>
+            <h3 className="session-name" style={{ margin: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{s.name}</h3>
           </div>
           <div className="status-badge">
             <span className="status-label" style={{ color: statusColor }}>{meta.label}</span>
@@ -201,7 +240,10 @@ const SessionCard = memo(function SessionCard({ s, contextUsage, onSelect, socke
           </div>
         </div>
 
-        <div className="session-path">{s.cwd || '~'}</div>
+        <div className="session-subline">
+          <span className="session-path">{s.cwd || '~'}</span>
+          {relTime && <span className="session-reltime">· {relTime}</span>}
+        </div>
 
         {s.statusReason && (s.status === 'attention' || s.status === 'done') && (
           <div className={`status-reason ${s.status === 'attention' ? 'status-reason--attention' : 'status-reason--done'}`}>
@@ -209,8 +251,17 @@ const SessionCard = memo(function SessionCard({ s, contextUsage, onSelect, socke
           </div>
         )}
 
+        {hasChips && (
+          <div className="card-chips">
+            {age && <span className="chip" title="Session age">⏱ {age}</span>}
+            {filesCount > 0 && <span className="chip" title="Files modified">▸ {filesCount} {filesCount === 1 ? 'file' : 'files'}</span>}
+            {toolCount > 0 && <span className="chip" title="Recent tool calls">⚙ {toolCount}</span>}
+            {agentCount > 0 && <span className="chip" title="Subagents">⧉ {agentCount} {agentCount === 1 ? 'agent' : 'agents'}</span>}
+          </div>
+        )}
+
         {contextUsage !== null && (
-          <div style={{ marginTop: 14 }}>
+          <div style={{ marginTop: 12 }}>
             <ContextBar usage={contextUsage} compact />
           </div>
         )}
@@ -223,7 +274,7 @@ const SessionCard = memo(function SessionCard({ s, contextUsage, onSelect, socke
         )}
 
         {hasSummary && (
-          <div style={{ marginTop: 14 }}>
+          <div style={{ marginTop: 12 }}>
             {s.summaryBullets!.map((b, j) => (
               <div key={j} className="summary-bullet">
                 <span className="summary-bullet-dot">●</span>{b}
