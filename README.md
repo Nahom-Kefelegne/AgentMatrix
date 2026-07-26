@@ -128,8 +128,11 @@ lines. Everything is off by default — this only runs when `AM_PERF=1` is set.
 - **Fired animation** — end a session and watch the character pack up and walk out
 
 ### Professional Dashboard
-- **Card grid** with session status, context usage bars, and work summaries
-- **Filter** by status (Working / Idle / Meeting)
+- **Mission Control is the default dashboard** — a prioritized attention queue surfaces only sessions that need a decision, review, context reset, or intervention
+- **Embedded live CLI** — selecting a signal or quiet session switches the central workspace directly to that session's Copilot or Claude terminal
+- **Quiet telemetry rail** keeps healthy working/idle sessions visible without encouraging constant babysitting
+- **Inline review actions** open transcript-native diffs without making the legacy session modal the primary workflow
+- **Dashboard V1 remains available** from Settings → Interface; `?dashboardV2=0` temporarily forces V1 and `?dashboardV2=1` forces V2
 - **AI-generated work summaries** — the session's CLI summarizes what it has done in 3 bullet points
 - **One-click actions** — open any session's terminal, view tasks, or transfer context
 

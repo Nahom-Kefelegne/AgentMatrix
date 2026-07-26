@@ -9,6 +9,7 @@ export interface AppSettings {
   appendSystemPrompt: string;
   defaultCli?: 'claude' | 'copilot';
   useAgency?: boolean;
+  dashboardV2?: boolean;
 }
 
 const DEFAULTS: AppSettings = {

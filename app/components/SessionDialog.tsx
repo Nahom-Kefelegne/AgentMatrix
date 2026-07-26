@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
+import dynamic from 'next/dynamic';
 import type { SessionData, Action, CliType } from '@/lib/types';
 import SessionConsole from './SessionConsole';
 import HandoffModal from './HandoffModal';
@@ -8,10 +9,11 @@ import FullscreenTerminal from './FullscreenTerminal';
 import ContextBar from './ContextBar';
 import { useSocketContext } from './SocketProvider';
 import { useSessionContext } from '@/lib/hooks/useSessionContext';
-import ChangesViewer from './ChangesViewer';
 import { buildResumeShellCommand } from '@/lib/cli/uiMetadata';
 import { cachedGetJson, invalidateCache } from '@/lib/clientCache';
 import { perfRender } from '@/lib/perf';
+
+const ChangesViewer = dynamic(() => import('./ChangesViewer'), { ssr: false });
 
 /** CLI icon metadata */
 const CLI_BADGE_META: Record<string, { svg: string; color: string; name: string }> = {

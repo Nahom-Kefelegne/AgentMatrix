@@ -1,9 +1,10 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { useSocketContext } from './SocketProvider';
 import { Modal, FormField, OptionGroup, OptionButton, TextArea, SelectInput } from './ui/Modal';
 import type { CliType } from '@/lib/types';
+import type { AppSettings } from '@/lib/state/appSettings';
 
 interface CliHealthInfo {
   type: CliType;
@@ -13,20 +14,13 @@ interface CliHealthInfo {
   error?: string;
 }
 
-interface AppSettings {
-  autoResume: boolean;
-  defaultModel: string;
-  defaultPermissionMode: string;
-  defaultEffort: string;
-  appendSystemPrompt: string;
-  defaultCli?: CliType;
-  useAgency?: boolean;
-}
-
 interface AppSettingsModalProps {
   isOpen: boolean;
   onClose: () => void;
   onViewOrchestrator?: (sessionId: string) => void;
+  dashboardV2Enabled: boolean;
+  dashboardV2Override: boolean | null;
+  onDashboardV2Change: (enabled: boolean) => void;
 }
 
 const MODELS = [
@@ -67,7 +61,14 @@ const CLI_ICON_META: Record<string, { svg: string; color: string; name: string }
   },
 };
 
-export default function AppSettingsModal({ isOpen, onClose, onViewOrchestrator }: AppSettingsModalProps) {
+export default function AppSettingsModal({
+  isOpen,
+  onClose,
+  onViewOrchestrator,
+  dashboardV2Enabled,
+  dashboardV2Override,
+  onDashboardV2Change,
+}: AppSettingsModalProps) {
   const { socketRef, connected } = useSocketContext();
   const [settings, setSettings] = useState<AppSettings>({
     autoResume: true, defaultModel: '', defaultPermissionMode: 'bypassPermissions',
@@ -75,9 +76,13 @@ export default function AppSettingsModal({ isOpen, onClose, onViewOrchestrator }
   });
   const [loaded, setLoaded] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
+  const [lastSaveSucceeded, setLastSaveSucceeded] = useState(false);
   const [orchestratorId, setOrchestratorId] = useState<string | null>(null);
   const [cliHealth, setCliHealth] = useState<CliHealthInfo[]>([]);
   const [healthLoading, setHealthLoading] = useState(false);
+  const saveQueueRef = useRef<Promise<unknown>>(Promise.resolve());
+  const pendingSavesRef = useRef(0);
 
   useEffect(() => {
     const socket = socketRef.current;
@@ -117,20 +122,45 @@ export default function AppSettingsModal({ isOpen, onClose, onViewOrchestrator }
       .catch(() => setHealthLoading(false));
   }, []);
 
-  const save = useCallback(async (partial: Partial<AppSettings>) => {
-    const updated = { ...settings, ...partial };
-    setSettings(updated);
+  const save = useCallback((partial: Partial<AppSettings>) => {
+    pendingSavesRef.current += 1;
     setSaving(true);
-    await fetch('/api/settings', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(partial) }).catch(() => {});
-    setSaving(false);
-  }, [settings]);
+    const request = saveQueueRef.current.then(async () => {
+      setSaveError(null);
+      setLastSaveSucceeded(false);
+      try {
+        const response = await fetch('/api/settings', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(partial),
+        });
+        const data = await response.json().catch(() => null);
+        if (!response.ok) {
+          setSaveError(typeof data?.error === 'string' ? data.error : 'Failed to save settings');
+          return null;
+        }
+        setSettings(prev => ({ ...prev, ...(data as Partial<AppSettings> | null) }));
+        setLastSaveSucceeded(true);
+        return data as AppSettings;
+      } catch (error) {
+        console.error('[settings] Save failed:', error);
+        setSaveError('Failed to save settings');
+        return null;
+      }
+    });
+    saveQueueRef.current = request.then(() => undefined, () => undefined);
+    return request.finally(() => {
+      pendingSavesRef.current -= 1;
+      if (pendingSavesRef.current === 0) setSaving(false);
+    });
+  }, []);
 
   return (
     <Modal isOpen={isOpen} onClose={onClose} title="Settings" maxWidth={520}
       footer={
         <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
-          <span className={saving ? 'subtle-text' : 'muted-text'} style={{ fontSize: 13 }}>
-            {saving ? 'Saving...' : 'Auto-saved'}
+          <span aria-live="polite" className={saveError ? 'subtle-text' : saving ? 'subtle-text' : 'muted-text'} style={{ fontSize: 13, color: saveError ? '#ff8787' : undefined }}>
+            {saving ? 'Saving...' : saveError || (lastSaveSucceeded ? 'Auto-saved' : 'Changes auto-save')}
           </span>
         </div>
       }>
@@ -238,6 +268,41 @@ export default function AppSettingsModal({ isOpen, onClose, onViewOrchestrator }
             />
           </div>
         )}
+      </div>
+
+      <hr className="divider" />
+
+      <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 16, padding: '14px 0' }}>
+        <div style={{ flex: 1 }}>
+          <div className="section-title" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <span>Interface</span>
+            <span className="subtle-text" style={{ fontSize: 11, letterSpacing: 0.4, textTransform: 'uppercase' }}>Preview</span>
+          </div>
+          <div style={{ fontSize: 14, fontWeight: 600, marginTop: 6 }}>Dashboard V2</div>
+          <div className="section-desc" style={{ marginBottom: 0 }}>
+            Switch the dashboard to the attention-queue Mission Control layout. Dashboard V1 remains available.
+          </div>
+          {dashboardV2Override !== null && (
+            <div className="subtle-text" style={{ fontSize: 12, marginTop: 8 }}>
+              URL override controls this run. This toggle can persist your preference, but the current display stays overridden.
+            </div>
+          )}
+        </div>
+        <button
+          type="button"
+          role="switch"
+          aria-checked={dashboardV2Enabled}
+          aria-label="Use Dashboard V2"
+          disabled={saving}
+          className={`toggle-switch ${dashboardV2Enabled ? 'toggle-switch--on' : 'toggle-switch--off'}`}
+          onClick={async () => {
+            const next = !dashboardV2Enabled;
+            const saved = await save({ dashboardV2: next });
+            if (saved) onDashboardV2Change(next);
+          }}
+        >
+          <div className="toggle-switch-knob" style={{ left: dashboardV2Enabled ? 25 : 3 }} />
+        </button>
       </div>
 
       <hr className="divider" />

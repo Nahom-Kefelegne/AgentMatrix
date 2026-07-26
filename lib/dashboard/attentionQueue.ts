@@ -256,7 +256,7 @@ function toLaneItem(
     contextUsage: contextOf(s, contextMap),
     sparkline: activitySparkline(s.recentActions, now, t.sparklineBuckets, t.sparklineWindowMs),
     lastActivity: lastActivityOf(s),
-    lastAction: s.currentTool || s.lastToolSummary || s.recentActions?.[s.recentActions.length - 1]?.summary,
+    lastAction: s.currentTool || s.lastToolSummary || s.recentActions?.[0]?.summary,
   };
 }
 

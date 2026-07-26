@@ -6,6 +6,7 @@
 @import "./styles/noise.css";
 @import "./styles/activity-ticker.css";
 @import "./styles/matrix-rain.css";
+@import "./styles/mission-control.css";
 
 @custom-variant dark (&:is(.dark *));
 

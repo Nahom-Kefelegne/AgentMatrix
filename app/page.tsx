@@ -1,9 +1,10 @@
 'use client';
 
-import { useState, useCallback, useRef, useEffect } from 'react';
+import { useState, useCallback, useRef, useEffect, type ComponentProps } from 'react';
 import dynamic from 'next/dynamic';
 import type { CharacterData } from '@/lib/types';
 import { useSessionContext } from '@/lib/hooks/useSessionContext';
+import { useDashboardV2Flag } from '@/lib/hooks/useDashboardV2Flag';
 import { SocketProvider, useSocketContext } from './components/SocketProvider';
 import { ThemeProvider } from './components/ThemeProvider';
 import HeaderBar from './components/HeaderBar';
@@ -22,14 +23,31 @@ import SplashScreen from './components/SplashScreen';
 import { initPerfMonitor } from '@/lib/perf';
 
 const EditorView = dynamic(() => import('./components/editor/EditorView'), { ssr: false });
+interface DashboardV2Props extends ComponentProps<typeof DashboardView> {
+  initialSessionId?: string | null;
+  onSelectionChange?: (sessionId: string | null) => void;
+}
+
+const DashboardV2Container = dynamic<DashboardV2Props>(
+  () => import('./components/dashboard-v2/DashboardV2Container'),
+  { ssr: false },
+);
 
 function OfficeView() {
   const { connected, sessions, onEvent, socketRef } = useSocketContext();
   const contextMap = useSessionContext(socketRef, connected);
+  const {
+    enabled: dashboardV2Enabled,
+    storedEnabled: storedDashboardV2Enabled,
+    override: dashboardV2Override,
+    loaded: dashboardV2Loaded,
+    setStoredEnabled: setStoredDashboardV2Enabled,
+  } = useDashboardV2Flag();
 
   const [hoveredChar, setHoveredChar] = useState<CharacterData | null>(null);
   const [hoverPos, setHoverPos] = useState({ x: 0, y: 0 });
   const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null);
+  const [dashboardV2SessionId, setDashboardV2SessionId] = useState<string | null>(null);
   const [showSetup, setShowSetup] = useState(false);
   const [showTaskBoard, setShowTaskBoard] = useState(false);
   const [openTaskId, setOpenTaskId] = useState<string | null>(null);
@@ -43,6 +61,17 @@ function OfficeView() {
 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
+      const target = e.target;
+      if (
+        target instanceof HTMLElement
+        && (
+          target.isContentEditable
+          || target.tagName === 'INPUT'
+          || target.tagName === 'TEXTAREA'
+          || target.tagName === 'SELECT'
+          || target.closest('.xterm')
+        )
+      ) return;
       if (e.code === 'KeyE' && e.shiftKey && (e.ctrlKey || e.metaKey)) {
         e.preventDefault();
         setEditorUnlocked(prev => {
@@ -83,6 +112,15 @@ function OfficeView() {
       setSelectedSessionId(null);
     }
   }, [selectedSessionId, sessions]);
+
+  // Dashboard V2 keeps its selected console across the optional legacy dialog.
+  // Track prev/next/session switches made inside that dialog so closing it returns
+  // to the same session instead of remounting the previous console selection.
+  useEffect(() => {
+    if (dashboardV2Enabled && selectedSessionId) {
+      setDashboardV2SessionId(selectedSessionId);
+    }
+  }, [dashboardV2Enabled, selectedSessionId]);
 
   // Clear done/attention status when user opens a session
   useEffect(() => {
@@ -157,7 +195,24 @@ function OfficeView() {
         </div>
       )}
 
-      {viewMode === 'dashboard' && (
+      {viewMode === 'dashboard' && !dashboardV2Loaded && (
+        <div className="dashboard-bg" style={{ height: '100vh', position: 'relative' }}>
+          <div className="noise-overlay" />
+          <div style={{ position: 'relative', zIndex: 1, maxWidth: 1200, margin: '0 auto', padding: '72px 36px 80px' }} />
+        </div>
+      )}
+
+      {viewMode === 'dashboard' && dashboardV2Loaded && dashboardV2Enabled && !selectedSessionId && (
+        <DashboardV2Container
+          sessions={sessions}
+          contextMap={contextMap}
+          onSelectSession={(id) => setSelectedSessionId(id)}
+          initialSessionId={dashboardV2SessionId}
+          onSelectionChange={setDashboardV2SessionId}
+        />
+      )}
+
+      {viewMode === 'dashboard' && dashboardV2Loaded && !dashboardV2Enabled && (
         <div style={{ display: selectedSessionId ? 'none' : 'contents' }}>
           <DashboardView sessions={sessions} contextMap={contextMap} onSelectSession={(id) => setSelectedSessionId(id)} />
         </div>
@@ -188,7 +243,14 @@ function OfficeView() {
         <ResumeModal isOpen onClose={() => setShowResume(false)} onResumeInApp={(sid, cliType) => { setSelectedSessionId(sid); socketRef?.current?.emit('terminal:resume' as any, { sessionId: sid, cliType }); }} />
       )}
       <SpawnModal isOpen={showSpawn} onClose={() => setShowSpawn(false)} onSessionSpawned={(sid) => setSelectedSessionId(sid)} />
-      <AppSettingsModal isOpen={showSettings} onClose={() => setShowSettings(false)} onViewOrchestrator={(id) => setOrchestratorViewId(id)} />
+      <AppSettingsModal
+        isOpen={showSettings}
+        onClose={() => setShowSettings(false)}
+        onViewOrchestrator={(id) => setOrchestratorViewId(id)}
+        dashboardV2Enabled={storedDashboardV2Enabled}
+        dashboardV2Override={dashboardV2Override}
+        onDashboardV2Change={setStoredDashboardV2Enabled}
+      />
 
       {orchestratorViewId && (() => {
         const orchSessions = new Map(sessions);
