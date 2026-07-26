@@ -2,6 +2,20 @@ import type { AttentionItem, DashboardModel } from '@/lib/dashboard/attentionQue
 import type { FileChange } from '@/lib/cli/transcript/types';
 import type { SessionData } from '@/lib/types';
 
+export type DashboardV2ViewMode = 'dashboard' | 'office' | 'editor';
+
+export interface DashboardV2Navigation {
+  connected: boolean;
+  sessionCount: number;
+  editorUnlocked: boolean;
+  onViewChange: (mode: DashboardV2ViewMode) => void;
+  onNewSession: () => void;
+  onResume: () => void;
+  onTasks: () => void;
+  onSettings: () => void;
+  onSetup: () => void;
+}
+
 export interface ChangeSummary {
   files: FileChange[];
   totalAdditions: number;
@@ -20,9 +34,12 @@ export interface DashboardV2ViewProps {
   selectedAttention: AttentionItem | null;
   selectedSessionId: string | null;
   selectedContextUsage: number | null;
+  consoleVisible: boolean;
+  navigation: DashboardV2Navigation;
   changes: ChangeSummaryState;
   onSelectSession: (sessionId: string) => void;
   onOpenSession: (sessionId: string) => void;
   onReviewChanges: (sessionId: string) => void;
   onRequestSummary: (sessionId: string) => void;
+  onFullscreenSession: (sessionId: string) => void;
 }

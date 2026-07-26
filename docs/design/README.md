@@ -97,6 +97,7 @@ flowchart LR
 
 | Document | Scope | Key Topics |
 |----------|-------|------------|
+| [Dashboard V2](dashboard-v2.md) | Console-first dashboard and planned Context Canvas | Native command rail, attention routing, embedded CLI, fullscreen, Monaco code/diff preview, navigation tools, focus and security contracts |
 | [Frontend/UI](frontend-ui.md) | React components, views, modals | Component hierarchy, 3 view modes (Dashboard/Office/Editor), session dialog, terminal panels, canvas engine, real-time socket handling, splash screen |
 | [Backend/Server](backend-server.md) | Server, APIs, Socket.io, hooks | Server startup, 30+ API endpoints, 22 socket events, CLI hook system, session lifecycle, ADO integration, state stores |
 | [Electron/PTY](electron-pty.md) | Electron main process, terminals | Window/tray lifecycle, PTY spawning, prompt injection system, terminal bridge, auto-resume, session naming, production build |

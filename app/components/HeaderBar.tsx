@@ -6,12 +6,10 @@ import { useThemeContext } from './ThemeProvider';
 
 interface HeaderBarProps {
   connected: boolean;
-  sessionCount: number;
   onSettingsClick: () => void;
   onSetupClick: () => void;
   onTasksClick: () => void;
   onResumeClick: () => void;
-  onSessionsClick: () => void;
   onNewSessionClick: () => void;
   viewMode: 'office' | 'dashboard' | 'editor';
   onViewChange: (mode: 'office' | 'dashboard' | 'editor') => void;
@@ -33,8 +31,8 @@ function MagneticButton({ children, className, onClick, title, style }: {
 }
 
 export default function HeaderBar({
-  connected, sessionCount, onSettingsClick, onSetupClick, onTasksClick,
-  onResumeClick, onSessionsClick, onNewSessionClick, viewMode, onViewChange, editorUnlocked,
+  connected, onSettingsClick, onSetupClick, onTasksClick,
+  onResumeClick, onNewSessionClick, viewMode, onViewChange, editorUnlocked,
 }: HeaderBarProps) {
   const [menuOpen, setMenuOpen] = useState(false);
   const [scrolled, setScrolled] = useState(false);
@@ -87,11 +85,6 @@ export default function HeaderBar({
       {/* Right pill — actions */}
       <div className={`nav-pill nav-pill-right ${scrolled ? 'nav-pill--scrolled' : ''}`}>
         <MagneticButton className="nav-action" onClick={onNewSessionClick}>+ New</MagneticButton>
-        <div className="nav-divider" />
-        <MagneticButton className="nav-action" onClick={onSessionsClick}>
-          Sessions
-          {sessionCount > 0 && <span className="nav-badge-inline">{sessionCount}</span>}
-        </MagneticButton>
         <div className="nav-divider" />
         <MagneticButton className="nav-action" onClick={onResumeClick}>Resume</MagneticButton>
         <div className="nav-divider" />

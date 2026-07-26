@@ -130,6 +130,8 @@ lines. Everything is off by default — this only runs when `AM_PERF=1` is set.
 ### Professional Dashboard
 - **Mission Control is the default dashboard** — a prioritized attention queue surfaces only sessions that need a decision, review, context reset, or intervention
 - **Embedded live CLI** — selecting a signal or quiet session switches the central workspace directly to that session's Copilot or Claude terminal
+- **Full-viewport workspace** — an integrated command rail replaces the floating dashboard menu so the selected CLI receives the maximum available space
+- **Fullscreen terminal** — expand the selected CLI into the existing multi-pane terminal workspace
 - **Quiet telemetry rail** keeps healthy working/idle sessions visible without encouraging constant babysitting
 - **Inline review actions** open transcript-native diffs without making the legacy session modal the primary workflow
 - **Dashboard V1 remains available** from Settings → Interface; `?dashboardV2=0` temporarily forces V1 and `?dashboardV2=1` forces V2

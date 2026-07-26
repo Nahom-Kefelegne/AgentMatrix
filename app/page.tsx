@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useCallback, useRef, useEffect, type ComponentProps } from 'react';
+import { useState, useCallback, useRef, useEffect, useMemo, type ComponentProps } from 'react';
 import dynamic from 'next/dynamic';
 import type { CharacterData } from '@/lib/types';
 import { useSessionContext } from '@/lib/hooks/useSessionContext';
@@ -19,6 +19,7 @@ import SessionDialog from './components/SessionDialog';
 import SpawnModal from './components/SpawnModal';
 import AppSettingsModal from './components/AppSettingsModal';
 import SplashScreen from './components/SplashScreen';
+import type { DashboardV2Navigation } from './components/dashboard-v2/types';
 
 import { initPerfMonitor } from '@/lib/perf';
 
@@ -26,6 +27,7 @@ const EditorView = dynamic(() => import('./components/editor/EditorView'), { ssr
 interface DashboardV2Props extends ComponentProps<typeof DashboardView> {
   initialSessionId?: string | null;
   onSelectionChange?: (sessionId: string | null) => void;
+  navigation: DashboardV2Navigation;
 }
 
 const DashboardV2Container = dynamic<DashboardV2Props>(
@@ -152,26 +154,52 @@ function OfficeView() {
     setSelectedSessionId(sessionList[idx].id);
   }, [sessionList, currentSessionIndex]);
 
-  const handleSessionsCycle = useCallback(() => {
-    if (sessionList.length === 0) return;
-    setSelectedSessionId(sessionList[0].id);
-  }, [sessionList]);
+  const handleViewChange = useCallback((mode: 'office' | 'dashboard' | 'editor') => setViewMode(mode), []);
+  const handleOpenSettings = useCallback(() => setShowSettings(true), []);
+  const handleOpenSetup = useCallback(() => setShowSetup(true), []);
+  const handleOpenTasks = useCallback(() => setShowTaskBoard(true), []);
+  const handleOpenResume = useCallback(() => setShowResume(true), []);
+  const handleOpenSpawn = useCallback(() => setShowSpawn(true), []);
+
+  const dashboardV2Navigation = useMemo<DashboardV2Navigation>(() => ({
+    connected,
+    sessionCount: sessions.size,
+    editorUnlocked,
+    onViewChange: handleViewChange,
+    onNewSession: handleOpenSpawn,
+    onResume: handleOpenResume,
+    onTasks: handleOpenTasks,
+    onSettings: handleOpenSettings,
+    onSetup: handleOpenSetup,
+  }), [
+    connected,
+    editorUnlocked,
+    handleOpenResume,
+    handleOpenSettings,
+    handleOpenSetup,
+    handleOpenSpawn,
+    handleOpenTasks,
+    handleViewChange,
+    sessions.size,
+  ]);
+
+  const dashboardV2Active = viewMode === 'dashboard' && dashboardV2Loaded && dashboardV2Enabled;
 
   return (
     <>
-      <HeaderBar
-        connected={connected}
-        sessionCount={sessions.size}
-        onSettingsClick={() => setShowSettings(true)}
-        onSetupClick={() => setShowSetup(true)}
-        onTasksClick={() => setShowTaskBoard(true)}
-        onResumeClick={() => setShowResume(true)}
-        onNewSessionClick={() => setShowSpawn(true)}
-        onSessionsClick={handleSessionsCycle}
-        viewMode={viewMode}
-        onViewChange={(mode) => setViewMode(mode)}
-        editorUnlocked={editorUnlocked}
-      />
+      {!dashboardV2Active && (
+        <HeaderBar
+          connected={connected}
+          onSettingsClick={handleOpenSettings}
+          onSetupClick={handleOpenSetup}
+          onTasksClick={handleOpenTasks}
+          onResumeClick={handleOpenResume}
+          onNewSessionClick={handleOpenSpawn}
+          viewMode={viewMode}
+          onViewChange={handleViewChange}
+          editorUnlocked={editorUnlocked}
+        />
+      )}
 
       {/* Office view is enabled but mounted ONLY while it's the active view: its
           GameEngine runs a 60fps requestAnimationFrame render loop, so keeping
@@ -209,6 +237,7 @@ function OfficeView() {
           onSelectSession={(id) => setSelectedSessionId(id)}
           initialSessionId={dashboardV2SessionId}
           onSelectionChange={setDashboardV2SessionId}
+          navigation={dashboardV2Navigation}
         />
       )}
 

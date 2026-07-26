@@ -7,6 +7,7 @@ import { perfRender } from '@/lib/perf';
 import type { SessionData } from '@/lib/types';
 import { useSocketContext } from '../SocketProvider';
 import DashboardV2 from './DashboardV2';
+import type { DashboardV2Navigation } from './types';
 import { useSessionChanges } from './useSessionChanges';
 
 const ChangesViewer = dynamic(() => import('../ChangesViewer'), {
@@ -14,12 +15,15 @@ const ChangesViewer = dynamic(() => import('../ChangesViewer'), {
   loading: () => <div className="mc-review-loading" role="status">Loading review workspace…</div>,
 });
 
-interface DashboardV2ContainerProps {
+const FullscreenTerminal = dynamic(() => import('../FullscreenTerminal'), { ssr: false });
+
+export interface DashboardV2ContainerProps {
   sessions: Map<string, SessionData>;
   contextMap: Record<string, number>;
   onSelectSession: (id: string) => void;
   initialSessionId?: string | null;
   onSelectionChange?: (sessionId: string | null) => void;
+  navigation: DashboardV2Navigation;
 }
 
 export default function DashboardV2Container({
@@ -28,6 +32,7 @@ export default function DashboardV2Container({
   onSelectSession,
   initialSessionId,
   onSelectionChange,
+  navigation,
 }: DashboardV2ContainerProps) {
   perfRender('DashboardV2Container');
   const { socketRef } = useSocketContext();
@@ -42,6 +47,7 @@ export default function DashboardV2Container({
     initialSessionId && sessions.has(initialSessionId) ? initialSessionId : null
   ));
   const [reviewSessionId, setReviewSessionId] = useState<string | null>(null);
+  const [fullscreenSessionId, setFullscreenSessionId] = useState<string | null>(null);
 
   useEffect(() => {
     const interval = window.setInterval(() => setNow(Date.now()), 30_000);
@@ -85,6 +91,7 @@ export default function DashboardV2Container({
   }, []);
 
   const reviewSession = reviewSessionId ? sessions.get(reviewSessionId) : null;
+  const fullscreenSession = fullscreenSessionId ? sessions.get(fullscreenSessionId) : null;
 
   return (
     <>
@@ -94,11 +101,14 @@ export default function DashboardV2Container({
         selectedAttention={selectedAttention}
         selectedSessionId={selectedSessionId}
         selectedContextUsage={selectedContextUsage}
+        consoleVisible={!fullscreenSession}
+        navigation={navigation}
         changes={changes}
         onSelectSession={handleSelectSession}
         onOpenSession={onSelectSession}
         onReviewChanges={handleReviewChanges}
         onRequestSummary={handleRequestSummary}
+        onFullscreenSession={setFullscreenSessionId}
       />
       {reviewSession ? (
         <ChangesViewer
@@ -107,6 +117,13 @@ export default function DashboardV2Container({
           cwd={reviewSession.cwd}
           onClose={() => setReviewSessionId(null)}
           socketRef={socketRef}
+        />
+      ) : null}
+      {fullscreenSession ? (
+        <FullscreenTerminal
+          session={fullscreenSession}
+          sessions={sessions}
+          onExit={() => setFullscreenSessionId(null)}
         />
       ) : null}
     </>

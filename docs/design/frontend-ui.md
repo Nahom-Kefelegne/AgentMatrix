@@ -1,5 +1,11 @@
 # Agent Matrix - Frontend/UI Architecture
 
+> **Dashboard note (2026-07-26):** Dashboard V2 is now the default console-first
+> workspace. The legacy card grid and SessionDialog sections below remain relevant
+> to Dashboard V1 and compatibility flows. See
+> [`dashboard-v2.md`](dashboard-v2.md) for the current Dashboard V2 architecture
+> and planned Context Canvas.
+
 ## Overview
 
 Agent Matrix is a Next.js 16 + Electron desktop application that provides a real-time visual interface for managing multiple CLI coding-agent sessions (GitHub Copilot CLI and Claude Code). The frontend renders three distinct view modes -- a Dashboard card grid, a pixel-art Office canvas, and a Monaco-based Editor -- all connected to the backend via Socket.io for live updates.

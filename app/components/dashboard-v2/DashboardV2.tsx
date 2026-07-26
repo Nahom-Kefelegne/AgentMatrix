@@ -11,6 +11,7 @@ import {
   ExternalLink,
   GitCompareArrows,
   Info,
+  Maximize2,
   MessageSquareText,
   ScrollText,
   ShieldAlert,
@@ -22,6 +23,7 @@ import type { AttentionItem, AttentionKind, LaneItem } from '@/lib/dashboard/att
 import type { SessionData } from '@/lib/types';
 import CliIcon from '../CliIcon';
 import SessionConsole from '../SessionConsole';
+import DashboardV2Nav from './DashboardV2Nav';
 import type { DashboardV2ViewProps } from './types';
 
 const SIGNAL_META: Record<AttentionKind, {
@@ -195,10 +197,12 @@ function ConsoleWorkspace(props: DashboardV2ViewProps) {
     selectedSession,
     selectedAttention,
     selectedContextUsage,
+    consoleVisible,
     changes,
     onOpenSession,
     onReviewChanges,
     onRequestSummary,
+    onFullscreenSession,
   } = props;
 
   if (!selectedSession) {
@@ -239,17 +243,38 @@ function ConsoleWorkspace(props: DashboardV2ViewProps) {
           </div>
           <div className="mc-console-actions">
             {hasReview ? (
-              <button type="button" className="mc-button mc-button--secondary" onClick={() => onReviewChanges(selectedSession.id)}>
+              <button
+                type="button"
+                className="mc-button mc-button--secondary"
+                onClick={() => onReviewChanges(selectedSession.id)}
+                aria-label={changeCount > 0 ? `Review ${numberFormat.format(changeCount)} changed files` : 'Review diff'}
+                title={changeCount > 0 ? `Review ${numberFormat.format(changeCount)} Changed Files` : 'Review Diff'}
+              >
                 <GitCompareArrows size={14} aria-hidden="true" />
-                Review {changeCount > 0 ? `${numberFormat.format(changeCount)} Files` : 'Diff'}
+                <span>Review {changeCount > 0 ? `${numberFormat.format(changeCount)} Files` : 'Diff'}</span>
               </button>
             ) : null}
             {!selectedSession.summaryBullets?.length ? (
-              <button type="button" className="mc-button mc-button--secondary" onClick={() => onRequestSummary(selectedSession.id)}>
+              <button
+                type="button"
+                className="mc-button mc-button--secondary"
+                onClick={() => onRequestSummary(selectedSession.id)}
+                aria-label="Request session summary"
+                title="Request Summary"
+              >
                 <ScrollText size={14} aria-hidden="true" />
-                Request Summary
+                <span>Request Summary</span>
               </button>
             ) : null}
+            <button
+              type="button"
+              className="mc-icon-button"
+              onClick={() => onFullscreenSession(selectedSession.id)}
+              aria-label="Open terminal fullscreen"
+              title="Fullscreen Terminal"
+            >
+              <Maximize2 size={16} aria-hidden="true" />
+            </button>
             <button type="button" className="mc-icon-button" onClick={() => onOpenSession(selectedSession.id)} aria-label="Open legacy session details" title="Session Details">
               <Info size={16} aria-hidden="true" />
             </button>
@@ -286,13 +311,15 @@ function ConsoleWorkspace(props: DashboardV2ViewProps) {
           <span>Live PTY · Input Enabled</span>
         </div>
         <div className="mc-console-stage">
-          <SessionConsole
-            sessionId={selectedSession.id}
-            sessionName={selectedSession.name}
-            cwd={selectedSession.cwd}
-            visible
-            cliType={selectedSession.cliType}
-          />
+          {consoleVisible ? (
+            <SessionConsole
+              sessionId={selectedSession.id}
+              sessionName={selectedSession.name}
+              cwd={selectedSession.cwd}
+              visible
+              cliType={selectedSession.cliType}
+            />
+          ) : null}
         </div>
       </section>
     </main>
@@ -366,37 +393,12 @@ function TelemetryRail({
   );
 }
 
-function FleetHorizon({ props }: { props: DashboardV2ViewProps }) {
-  const { stats } = props.model;
-  const clear = stats.needsYou === 0;
-  return (
-    <header className={`mc-horizon ${clear ? 'mc-horizon--clear' : 'mc-horizon--alert'}`}>
-      <div className="mc-horizon-copy">
-        <span className="mc-eyebrow">Mission Control</span>
-        <h1>
-          {stats.total === 0
-            ? 'The Fleet Is Empty.'
-            : clear
-              ? 'Every Agent Can Keep Going.'
-              : `${numberFormat.format(stats.needsYou)} ${stats.needsYou === 1 ? 'Agent Needs' : 'Agents Need'} Your Judgment.`}
-        </h1>
-      </div>
-      <div className="mc-horizon-stats" aria-label="Fleet Summary">
-        <span><b>{numberFormat.format(stats.needsYou)}</b> Signals</span>
-        <span><b>{numberFormat.format(stats.working + stats.meeting)}</b> Active</span>
-        <span><b>{numberFormat.format(stats.filesChanged)}</b> Files</span>
-        <span><b>{stats.peakContext === null ? '—' : `${numberFormat.format(stats.peakContext)}%`}</b> Peak Ctx</span>
-      </div>
-    </header>
-  );
-}
-
 export default function DashboardV2(props: DashboardV2ViewProps) {
   return (
     <div className="mc-shell" data-scroll-area>
       <a className="mc-skip-link" href="#mc-console-workspace">Skip to CLI</a>
       <div className="mc-frame">
-        <FleetHorizon props={props} />
+        <DashboardV2Nav {...props.navigation} />
         <div className="mc-workspace">
           <SignalQueue
             queue={props.model.queue}
