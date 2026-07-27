@@ -34,7 +34,8 @@ export function useDashboardV2Flag() {
       })
       .then(data => {
         if (!active || requestRevision !== localRevisionRef.current) return;
-        setStoredEnabledState(Boolean(data.dashboardV2));
+        // Missing/older settings payloads must preserve the product default.
+        setStoredEnabledState(data.dashboardV2 !== false);
       })
       .catch(error => {
         if (!active || controller.signal.aborted) return;

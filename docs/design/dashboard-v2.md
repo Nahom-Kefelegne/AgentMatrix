@@ -362,9 +362,13 @@ Dashboard V2 is the effective default.
 Precedence:
 
 1. `?dashboardV2=1|0`.
-2. Explicit persisted `settings.dashboardV2`.
+2. Explicit current-version persisted `settings.dashboardV2`.
 3. `AM_DASHBOARD_V2=0` disables the default.
 4. Default `true`.
+
+Legacy unversioned dashboard preferences migrate to the current default once.
+Choosing Dashboard V1 afterward writes the current preference version and
+continues to persist normally.
 
 Dashboard V1 remains unchanged and independently renderable.
 

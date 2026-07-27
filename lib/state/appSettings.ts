@@ -10,7 +10,10 @@ export interface AppSettings {
   defaultCli?: 'claude' | 'copilot';
   useAgency?: boolean;
   dashboardV2?: boolean;
+  dashboardV2PreferenceVersion?: number;
 }
+
+export const DASHBOARD_V2_PREFERENCE_VERSION = 1;
 
 const DEFAULTS: AppSettings = {
   autoResume: true,
@@ -19,6 +22,19 @@ const DEFAULTS: AppSettings = {
   defaultEffort: '',
   appendSystemPrompt: '',
 };
+
+export function resolveDashboardV2Preference(
+  settings: AppSettings,
+  defaultEnabled: boolean,
+): boolean {
+  if (
+    settings.dashboardV2PreferenceVersion === DASHBOARD_V2_PREFERENCE_VERSION
+    && typeof settings.dashboardV2 === 'boolean'
+  ) {
+    return settings.dashboardV2;
+  }
+  return defaultEnabled;
+}
 
 export function getSettings(): AppSettings {
   try {
