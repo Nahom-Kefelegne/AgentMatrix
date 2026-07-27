@@ -435,6 +435,9 @@ OfficeView
 - `mcp-server/index.mjs` exposes status plus six read-only navigation/review tools.
 - Every request is bound to one session capability and registered root.
 - AgentMatrix installs inheriting configuration for both Claude and Copilot.
+- Every managed new/resumed session receives the usage contract automatically:
+  Claude through `--append-system-prompt`, Copilot through a SessionStart
+  `additionalContext` hook.
 
 ### Security
 

@@ -140,6 +140,7 @@ lines. Everything is off by default — this only runs when `AM_PERF=1` is set.
 - **Context Canvas** — reveal code, streamed search results, exact source ranges, and session-attributed Monaco diffs beside the live CLI without stealing terminal focus
 - **Clickable terminal locations** — file paths, stack traces, OSC-8 links, and safe HTTP(S) links become actionable
 - **Agent-driven navigation** — managed Claude/Copilot sessions receive capability-bound `open_file`, `open_symbol`, `show_search_results`, `open_diff`, and `open_review` MCP tools
+- **Tools are known by default** — every managed new/resumed session receives the AgentMatrix status and Context Canvas usage contract in its model context
 - **Quiet telemetry rail** keeps healthy working/idle sessions visible without encouraging constant babysitting
 - **Inline review actions** open transcript-native diffs without making the legacy session modal the primary workflow
 - **Dashboard V1 remains available** from Settings → Interface; `?dashboardV2=0` temporarily forces V1 and `?dashboardV2=1` forces V2

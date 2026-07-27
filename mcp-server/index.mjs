@@ -13,6 +13,7 @@ import {
   CallToolRequestSchema,
   ListToolsRequestSchema,
 } from '@modelcontextprotocol/sdk/types.js';
+import { AGENTMATRIX_MCP_INSTRUCTIONS } from './instructions.mjs';
 
 const port = process.env.AGENTMATRIX_PORT || '3000';
 const baseUrl = `http://127.0.0.1:${port}`;
@@ -21,7 +22,10 @@ const capability = process.env.AGENTMATRIX_NAVIGATION_CAPABILITY || '';
 
 const server = new Server(
   { name: 'agentmatrix', version: '1.1.0' },
-  { capabilities: { tools: {} } },
+  {
+    capabilities: { tools: {} },
+    instructions: AGENTMATRIX_MCP_INSTRUCTIONS,
+  },
 );
 
 const rangeProperties = {

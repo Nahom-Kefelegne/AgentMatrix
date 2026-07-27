@@ -386,10 +386,19 @@ export class PtyManager {
       fork: opts.fork,
     });
 
-    // For Claude, append system prompt on resume if provided. Shell-quoting is
-    // applied uniformly at spawn, so just collapse to one line here.
-    if (cliType === 'claude' && opts.systemPrompt) {
-      const oneLine = opts.systemPrompt.replace(/\n/g, ' ').replace(/\s+/g, ' ').trim();
+    // Claude's MCP server instructions are not a CLI launch flag, so append the
+    // shared AgentMatrix contract on EVERY resume (including auto-resume/fork).
+    // Copilot receives the same contract from MCP initialization instructions
+    // via --allow-all-mcp-server-instructions in CopilotProvider.
+    let resumeSystemPrompt = opts.systemPrompt;
+    if (provider.supportsMcp) {
+      const { MCP_SYSTEM_PROMPT: mcpInstructions } = require('../../lib/constants/mcpPrompt');
+      resumeSystemPrompt = resumeSystemPrompt
+        ? `${mcpInstructions} ${resumeSystemPrompt}`
+        : mcpInstructions;
+    }
+    if (cliType === 'claude' && resumeSystemPrompt) {
+      const oneLine = resumeSystemPrompt.replace(/\n/g, ' ').replace(/\s+/g, ' ').trim();
       args.push('--append-system-prompt', oneLine);
     }
 

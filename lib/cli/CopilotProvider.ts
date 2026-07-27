@@ -149,7 +149,10 @@ export class CopilotProvider implements CliProvider {
   readonly iconSvg = COPILOT_ICON_SVG;
   readonly iconColor = '#6E40C9';
 
-  readonly supportsMcp = false;          // No MCP system-prompt injection until verified.
+  // Copilot receives AgentMatrix context through MCP server initialization
+  // instructions (enabled explicitly in spawn/resume args), not Claude's
+  // --append-system-prompt mechanism.
+  readonly supportsMcp = false;
   readonly supportsFork = false;         // No --fork-session equivalent.
   readonly supportsContextTracking = true;  // getContextUsage reads session-store.db.
   readonly supportsSubagents = true;     // /fleet + subagent hooks supported.
@@ -611,4 +614,3 @@ function collectLiveCopilotPids(): Set<number> {
   }
   return livePidsCache.pids;
 }
-
