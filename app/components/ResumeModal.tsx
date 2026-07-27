@@ -6,12 +6,13 @@ import { Modal, OptionGroup, OptionButton, TextInput } from './ui/Modal';
 import { useThemeContext } from './ThemeProvider';
 import { FolderPicker } from './ui/FolderPicker';
 import { buildResumeShellCommand } from '@/lib/cli/uiMetadata';
-import type { CliType } from '@/lib/types';
+import type { CliType, ResumeSessionRequest } from '@/lib/types';
 import CliIcon from './CliIcon';
 
 interface SessionInfo {
   id: string;
   name: string;
+  cwd?: string;
   slug: string;
   projectDir?: string;
   lastModified: number;
@@ -22,7 +23,7 @@ interface SessionInfo {
 interface ResumeModalProps {
   isOpen: boolean;
   onClose: () => void;
-  onResumeInApp?: (sessionId: string, cliType?: CliType) => void;
+  onResumeInApp?: (session: ResumeSessionRequest) => void;
 }
 
 type SearchMode = 'project' | 'all' | 'deep';
@@ -38,7 +39,7 @@ function formatTimeAgo(ms: number): string {
 }
 
 function SessionRow({ s, globalSearch, onResumeInApp, onClose }: {
-  s: SessionInfo; globalSearch: boolean; onResumeInApp?: (id: string, cliType?: CliType) => void; onClose: () => void;
+  s: SessionInfo; globalSearch: boolean; onResumeInApp?: (session: ResumeSessionRequest) => void; onClose: () => void;
 }) {
   const { theme } = useThemeContext();
   const dark = theme === 'dark';
@@ -55,15 +56,18 @@ function SessionRow({ s, globalSearch, onResumeInApp, onClose }: {
         </div>
         <span style={{ fontSize: 12, color: dark ? '#52525b' : '#a1a1aa' }}>{formatTimeAgo(s.lastModified)}</span>
       </div>
-      {s.projectDir && globalSearch && (
+      {s.cwd && globalSearch && (
         <div style={{ fontSize: 12, color: dark ? '#52525b' : '#a1a1aa', marginBottom: 6, fontFamily: 'monospace' }}>
-          {s.projectDir.replace(/^-/, '/').replace(/-/g, '/')}
+          {s.cwd}
         </div>
       )}
       <div style={{ fontSize: 12, color: dark ? '#3f3f46' : '#d4d4d8', marginBottom: 12, fontFamily: 'monospace' }}>{s.id.slice(0, 12)}...</div>
       <div style={{ display: 'flex', gap: 8 }}>
         {onResumeInApp && (
-          <button className="btn-primary" onClick={() => { onResumeInApp(s.id, s.cliType); onClose(); }}>Resume in App</button>
+          <button className="btn-primary" onClick={() => {
+            onResumeInApp({ sessionId: s.id, name: s.name, cwd: s.cwd, cliType: s.cliType });
+            onClose();
+          }}>Resume in App</button>
         )}
         <button className="btn-outline" onClick={() => {
           navigator.clipboard.writeText(
@@ -117,12 +121,18 @@ export default function ResumeModal({ isOpen, onClose, onResumeInApp }: ResumeMo
 
   const handleCwdChange = (path: string) => { setCwd(path); if (mode === 'project') loadSessions(path, false); };
 
-  const resolveSessionCwd = async (id: string): Promise<string | null> => {
+  const resolveSession = async (id: string): Promise<ResumeSessionRequest | null> => {
     try {
       const res = await fetch(`/api/sessions/resolve?id=${encodeURIComponent(id)}`);
       if (!res.ok) return null;
       const data = await res.json();
-      return data.cwd || null;
+      if (!data.cwd) return null;
+      return {
+        sessionId: id,
+        name: typeof data.name === 'string' ? data.name : undefined,
+        cwd: data.cwd,
+        cliType: data.cliType === 'copilot' || data.cliType === 'claude' ? data.cliType : undefined,
+      };
     } catch { return null; }
   };
 
@@ -132,23 +142,13 @@ export default function ResumeModal({ isOpen, onClose, onResumeInApp }: ResumeMo
     if (!/^[0-9a-f-]{8,}$/i.test(id)) { setDirectIdError('Invalid session ID format'); return; }
     setDirectIdError('');
     setResolving(true);
-    const sessionCwd = await resolveSessionCwd(id);
+    const session = await resolveSession(id);
     setResolving(false);
-    if (!sessionCwd) { setDirectIdError('Session not found'); return; }
-    if (onResumeInApp) { onResumeInApp(id); onClose(); }
+    if (!session?.cwd) { setDirectIdError('Session not found'); return; }
+    if (onResumeInApp) { onResumeInApp(session); onClose(); }
     else {
-      // resolveSessionCwd via /api/sessions/resolve returns cliType too;
-      // fetch it again here so the copy reflects the right CLI.
-      let cliType: CliType = 'claude';
-      try {
-        const res = await fetch(`/api/sessions/resolve?id=${encodeURIComponent(id)}`);
-        if (res.ok) {
-          const data = await res.json();
-          if (data.cliType === 'copilot' || data.cliType === 'claude') cliType = data.cliType;
-        }
-      } catch { /* default to claude */ }
       navigator.clipboard.writeText(
-        `cd ${sessionCwd} && ${buildResumeShellCommand({ cliType, resumeId: id })}`,
+        `cd ${session.cwd} && ${buildResumeShellCommand({ cliType: session.cliType || 'claude', resumeId: id })}`,
       );
       setCopied(id);
       setTimeout(() => setCopied(null), 3000);
@@ -185,7 +185,16 @@ export default function ResumeModal({ isOpen, onClose, onResumeInApp }: ResumeMo
         const res = await fetch(`/api/sessions/resolve?id=${encodeURIComponent(id)}`);
         if (!res.ok) return null;
         const data = await res.json();
-        return { id, name: data.name || `Session-${id.slice(0, 8)}`, slug: '', projectDir: data.projectDir, lastModified: Date.now(), active: false } as SessionInfo;
+        return {
+          id,
+          name: data.name || `Session-${id.slice(0, 8)}`,
+          cwd: data.cwd,
+          slug: '',
+          projectDir: data.projectDir,
+          lastModified: Date.now(),
+          active: false,
+          cliType: data.cliType,
+        } as SessionInfo;
       } catch { return null; }
     }));
     setDeepResults(resolved.filter(Boolean) as SessionInfo[]);

@@ -63,7 +63,10 @@ export async function GET(request: Request) {
         if (!global && cwd && s.cwd !== cwd) continue;
         all.push({
           id: s.id,
-          name: getCachedName(s.id) || s.name || `Session-${s.id.slice(0, 8)}`,
+          // Provider-owned metadata is authoritative when available (Copilot
+          // persists `-n` names in workspace.yaml). Cache remains the fallback
+          // for CLIs whose on-disk discovery does not expose a name.
+          name: s.name || getCachedName(s.id) || `Session-${s.id.slice(0, 8)}`,
           cwd: s.cwd || '',
           lastModified: s.lastModified ?? 0,
           active: active.has(s.id),

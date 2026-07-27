@@ -26,7 +26,15 @@ export async function GET(request: Request) {
     for (const provider of providers) {
       const cwd = provider.findSessionCwd(sessionId);
       if (cwd) {
-        const name = getCachedName(sessionId) || `Session-${sessionId.slice(0, 8)}`;
+        let discovered;
+        try {
+          discovered = provider.discoverSessions()
+            .filter(session => session.id === sessionId)
+            .sort((a, b) => (b.lastModified ?? 0) - (a.lastModified ?? 0))[0];
+        } catch {
+          discovered = undefined;
+        }
+        const name = discovered?.name || getCachedName(sessionId) || `Session-${sessionId.slice(0, 8)}`;
         return NextResponse.json({
           id: sessionId,
           cwd,

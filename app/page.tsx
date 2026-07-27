@@ -295,7 +295,14 @@ function OfficeView() {
         <TaskBoard isOpen onClose={() => { setShowTaskBoard(false); setOpenTaskId(null); }} onOpenSession={(id) => setSelectedSessionId(id)} initialTaskId={openTaskId} />
       )}
       {showResume && (
-        <ResumeModal isOpen onClose={() => setShowResume(false)} onResumeInApp={(sid, cliType) => { setSelectedSessionId(sid); socketRef?.current?.emit('terminal:resume' as any, { sessionId: sid, cliType }); }} />
+        <ResumeModal
+          isOpen
+          onClose={() => setShowResume(false)}
+          onResumeInApp={(session) => {
+            setSelectedSessionId(session.sessionId);
+            socketRef?.current?.emit('terminal:resume' as any, session);
+          }}
+        />
       )}
       <SpawnModal isOpen={showSpawn} onClose={() => setShowSpawn(false)} onSessionSpawned={(sid) => setSelectedSessionId(sid)} />
       <AppSettingsModal

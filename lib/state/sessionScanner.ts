@@ -14,15 +14,29 @@ import {
   getNextDeskIndex,
   isAppManaged,
 } from './sessionStore';
-import { resolveSessionName, checkForRename } from './sessionName';
+import { resolveSessionName, checkForRename, isGeneratedSessionName } from './sessionName';
 import { getCachedName, setCachedName } from './nameCache';
+import { setActiveSessionName } from './activeSessionsCache';
 import { allProviders } from '../cli';
-import type { CliProvider, ActiveProcessInfo } from '../cli/CliProvider';
+import type { CliProvider, ActiveProcessInfo, DiscoveredSession } from '../cli/CliProvider';
 
 const SCAN_INTERVAL_MS = 10_000;
 
 interface ActiveProcess extends ActiveProcessInfo {
   cliType: CliType;
+}
+
+function findDiscoveredSession(provider: CliProvider, sessionId: string): DiscoveredSession | undefined {
+  try {
+    let latest: DiscoveredSession | undefined;
+    for (const session of provider.discoverSessions()) {
+      if (session.id !== sessionId) continue;
+      if (!latest || (session.lastModified ?? 0) > (latest.lastModified ?? 0)) latest = session;
+    }
+    return latest;
+  } catch {
+    return undefined;
+  }
 }
 
 /**
@@ -55,12 +69,15 @@ function createSessionFromProcess(
   proc: ActiveProcess,
   provider: CliProvider,
 ): SessionData {
-  const cwd = provider.findSessionCwd(proc.sessionId);
+  const discovered = findDiscoveredSession(provider, proc.sessionId);
+  const cwd = discovered?.cwd || provider.findSessionCwd(proc.sessionId);
 
-  // Priority: --resume name > cached name > slug/cwd fallback > session ID.
+  // Priority: --resume name > provider metadata > cached name > transcript/cwd
+  // fallback > session ID.
   const name = proc.resumeName
+    || discovered?.name
     || getCachedName(proc.sessionId)
-    || resolveSessionName(undefined, cwd, proc.sessionId);
+    || resolveSessionName(discovered?.transcriptPath, cwd, proc.sessionId);
 
   const deskIndex = getNextDeskIndex();
   const isDesk = deskIndex < DESK_POSITIONS.length;
@@ -124,7 +141,19 @@ export function scanActiveSessions(): {
     if (proc.resumeName && existing.name !== proc.resumeName) {
       updateSession(proc.sessionId, { name: proc.resumeName });
       setCachedName(proc.sessionId, proc.resumeName);
+      setActiveSessionName(proc.sessionId, proc.resumeName);
       updated.push({ sessionId: proc.sessionId, name: proc.resumeName });
+    } else if (proc.cliType === 'copilot' && isGeneratedSessionName(existing.name, proc.sessionId)) {
+      // Copilot's process list carries only the UUID on resume, while its real
+      // display name lives in workspace.yaml. Upgrade synthetic scanner names
+      // once metadata becomes available so already-running moved sessions heal.
+      const discovered = findDiscoveredSession(provider, proc.sessionId);
+      if (discovered?.name && discovered.name !== existing.name) {
+        updateSession(proc.sessionId, { name: discovered.name });
+        setCachedName(proc.sessionId, discovered.name);
+        setActiveSessionName(proc.sessionId, discovered.name);
+        updated.push({ sessionId: proc.sessionId, name: discovered.name });
+      }
     }
 
     if (!existing.cwd) {
@@ -162,6 +191,7 @@ export function scanActiveSessions(): {
     if (renamed && renamed !== existing.name) {
       updateSession(proc.sessionId, { name: renamed });
       setCachedName(proc.sessionId, renamed);
+      setActiveSessionName(proc.sessionId, renamed);
       updated.push({ sessionId: proc.sessionId, name: renamed });
     }
   }

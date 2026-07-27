@@ -3,10 +3,10 @@ import { PtyManager } from './pty/PtyManager';
 import { randomUUID } from 'crypto';
 import { homedir } from 'os';
 import { addSession, getAllSessions, getSession, removeSession, updateSession } from '../lib/state/sessionStore';
-import { setCachedName } from '../lib/state/nameCache';
-import { getActiveSessions, saveActiveSessions } from '../lib/state/activeSessionsCache';
+import { getCachedName, setCachedName } from '../lib/state/nameCache';
+import { getActiveSessions, saveActiveSessions, setActiveSessionName } from '../lib/state/activeSessionsCache';
 import { SOCKET_EVENTS } from '../lib/types';
-import type { SessionData } from '../lib/types';
+import type { ResumeSessionRequest, SessionData } from '../lib/types';
 import {
   DESK_POSITIONS, OVERFLOW_POSITIONS, ENTRANCE_POINT, CHARACTER_COLORS,
 } from '../lib/constants';
@@ -92,6 +92,20 @@ function createSessionEntry(id: string, name: string, cwd: string, cliType?: Cli
     createdAt: Date.now(),
     cliType,
   };
+}
+
+function discoveredSessionName(cliType: CliType | undefined, sessionId: string): string | undefined {
+  if (!cliType) return undefined;
+  try {
+    let latest: { name?: string; lastModified?: number } | undefined;
+    for (const session of getProvider(cliType).discoverSessions()) {
+      if (session.id !== sessionId) continue;
+      if (!latest || (session.lastModified ?? 0) > (latest.lastModified ?? 0)) latest = session;
+    }
+    return latest?.name;
+  } catch {
+    return undefined;
+  }
 }
 
 export function setupTerminalBridge(io: SocketIOServer, ptyManager: PtyManager): void {
@@ -237,8 +251,28 @@ export function setupTerminalBridge(io: SocketIOServer, ptyManager: PtyManager):
     });
 
     // Resume a past session by ID
-    socket.on('terminal:resume', ({ sessionId, cliType: requestedCliType }: { sessionId: string; cliType?: CliType }) => {
+    socket.on('terminal:resume', ({
+      sessionId,
+      name: requestedNameValue,
+      cliType: requestedCliType,
+    }: ResumeSessionRequest) => {
       try {
+        const requestedName = typeof requestedNameValue === 'string'
+          ? requestedNameValue.trim().replace(/\s+/g, ' ').slice(0, 120) || undefined
+          : undefined;
+        const tracked = getSession(sessionId);
+        if (requestedName) {
+          setCachedName(sessionId, requestedName);
+          setActiveSessionName(sessionId, requestedName);
+          if (tracked && tracked.name !== requestedName) {
+            updateSession(sessionId, { name: requestedName });
+            io.emit(SOCKET_EVENTS.SESSION_UPDATE, {
+              sessionId,
+              changes: { name: requestedName },
+            });
+          }
+        }
+
         // Refuse to resume a session that's mid-teardown. Without this, a
         // click on the sprite during the close animation reconnects (warm
         // path) or reaps+respawns a new CLI process (cold path), resurrecting
@@ -293,7 +327,6 @@ export function setupTerminalBridge(io: SocketIOServer, ptyManager: PtyManager):
           return;
         }
 
-        const { getCachedName: getName } = require('../lib/state/nameCache');
         const existing = getSession(sessionId);
         // Resolve which CLI owns this session. Prefer the caller's explicit
         // hint (the Resume modal knows it from discovery), then any tracked
@@ -305,7 +338,11 @@ export function setupTerminalBridge(io: SocketIOServer, ptyManager: PtyManager):
           (ptyManager.findSessionCwd(sessionId, 'copilot') ? 'copilot'
             : ptyManager.findSessionCwd(sessionId, 'claude') ? 'claude'
             : undefined);
-        const name = existing?.name || getName(sessionId) || `Session-${sessionId.slice(0, 8)}`;
+        const name = requestedName
+          || discoveredSessionName(resolvedCliType, sessionId)
+          || existing?.name
+          || getCachedName(sessionId)
+          || `Session-${sessionId.slice(0, 8)}`;
         const foundCwd = ptyManager.findSessionCwd(sessionId, resolvedCliType);
         const cwd = existing?.cwd || foundCwd || homedir();
 
@@ -314,7 +351,11 @@ export function setupTerminalBridge(io: SocketIOServer, ptyManager: PtyManager):
           const sessionData = createSessionEntry(sessionId, name, cwd, resolvedCliType);
           addSession(sessionData);
           io.emit(SOCKET_EVENTS.SESSION_START, sessionData);
+        } else if (existing.name !== name) {
+          updateSession(sessionId, { name });
+          io.emit(SOCKET_EVENTS.SESSION_UPDATE, { sessionId, changes: { name } });
         }
+        setCachedName(sessionId, name);
 
         console.log(`[terminal:resume] ${name} (${sessionId.slice(0, 8)})`);
 

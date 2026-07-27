@@ -3,6 +3,7 @@ import { setCachedName } from '@/lib/state/nameCache';
 import { updateSession, getSession } from '@/lib/state/sessionStore';
 import { getProvider } from '@/lib/cli';
 import { emitToClients } from '@/lib/state/socketEmitter';
+import { setActiveSessionName } from '@/lib/state/activeSessionsCache';
 import { SOCKET_EVENTS } from '@/lib/types';
 import type { CliType } from '@/lib/types';
 
@@ -29,6 +30,7 @@ export async function POST(request: Request) {
 
     // Update the persistent cache (drives the UI display for both CLIs)
     setCachedName(sessionId, trimmed);
+    setActiveSessionName(sessionId, trimmed);
 
     // Update the in-memory session store
     if (session) {

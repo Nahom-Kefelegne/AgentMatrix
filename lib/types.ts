@@ -66,6 +66,13 @@ export interface SessionData {
   reviewComments?: ReviewComment[];
 }
 
+export interface ResumeSessionRequest {
+  sessionId: string;
+  name?: string;
+  cwd?: string;
+  cliType?: CliType;
+}
+
 // ===== UI Data (exposed to React) =====
 
 export interface CharacterData {
@@ -191,6 +198,7 @@ export interface ClientToServerEvents {
   'prompt:send': (data: { sessionId: string; prompt: string }) => void;
   'terminal:input': (data: { sessionId: string; data: string }) => void;
   'terminal:spawn': (data: { sessionId: string }) => void;
+  'terminal:resume': (data: ResumeSessionRequest) => void;
   'terminal:resize': (data: { sessionId: string; cols: number; rows: number }) => void;
   // Editor shell terminals
   'editor:terminal:spawn': (data: { id: string; cwd: string }) => void;

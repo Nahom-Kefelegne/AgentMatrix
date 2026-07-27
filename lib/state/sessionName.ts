@@ -95,3 +95,8 @@ export function checkForRename(transcriptPath: string): string | undefined {
   }
   return undefined;
 }
+
+export function isGeneratedSessionName(name: string, sessionId: string): boolean {
+  return name === `Session-${sessionId.slice(0, 6)}`
+    || name === `Session-${sessionId.slice(0, 8)}`;
+}

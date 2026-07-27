@@ -22,3 +22,11 @@ export function saveActiveSessions(sessions: CachedSession[]): void {
     writeFileSync(CACHE_PATH, JSON.stringify(sessions, null, 2));
   } catch {}
 }
+
+export function setActiveSessionName(sessionId: string, name: string): void {
+  const sessions = getActiveSessions();
+  const index = sessions.findIndex(session => session.id === sessionId);
+  if (index < 0 || sessions[index].name === name) return;
+  sessions[index] = { ...sessions[index], name };
+  saveActiveSessions(sessions);
+}
