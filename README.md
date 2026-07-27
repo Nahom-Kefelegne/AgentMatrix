@@ -61,9 +61,11 @@ From wherever you ran the setup command:
 ```
 
 The start scripts **fast-forward to the latest code from `main` before launching**
-(a failed pull — offline, local edits, blocked network — is non-fatal and the app
-still starts on the current version). If a pull changes dependencies, they'll tell
-you to run the update script below to reinstall.
+and print the exact revision. Offline launches may use the local checkout, but an
+online update blocked by local edits stops instead of silently launching an old
+dashboard. On macOS/Linux, `start.sh` gracefully restarts an existing dev instance.
+On Windows, fully quit the existing tray app before running `start.ps1`. If a pull
+changes dependencies, the launcher will tell you to run the update script below.
 
 The repository's `.npmrc` and launch scripts keep npm traffic on
 `https://packagefeedproxy.microsoft.io/npm/`. They also disable npm's background

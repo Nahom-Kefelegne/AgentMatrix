@@ -14,7 +14,7 @@ export async function POST(request: Request) {
     // would hide that the session needs the user. Attention clears when the
     // user acts (their next prompt flips the session back to 'working').
     const session = getSession(payload.session_id);
-    if (session?.status === 'attention') {
+    if (session?.status === 'attention' || session?.status === 'done') {
       return NextResponse.json({ ok: true });
     }
 

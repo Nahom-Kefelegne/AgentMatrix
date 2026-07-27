@@ -3,7 +3,6 @@ import type { ToolCompletePayload } from '@/lib/types';
 import { SOCKET_EVENTS } from '@/lib/types';
 import { addAction, updateSession, getSession, getAgentName } from '@/lib/state/sessionStore';
 import { emitToClients } from '@/lib/state/socketEmitter';
-import { ASK_USER_TOOLS } from '@/lib/constants/askUserTools';
 import { getNavigationService } from '@/lib/navigation/NavigationService';
 
 export async function POST(request: Request) {
@@ -22,25 +21,13 @@ export async function POST(request: Request) {
 
     const lastActivity = Date.now();
 
-    // Return status to 'idle' so the UI doesn't appear stuck "working"
-    // between tool calls. Skip when subagents are still running or this
-    // event is itself from a subagent — those keep the parent at 'working'
-    // until SubagentStop arrives. Claude also flips back via its
-    // prompt-ready PTY signal, but Copilot does not — fixes that gap.
-    // Also skip when THIS completing tool is an ask-user tool: Copilot fires
-    // PostToolUse immediately after presenting the question (before the user
-    // answers), so idling here would wipe the "needs you" state that tool-use
-    // just set. (Permission prompts differ — the completing tool there is the
-    // real tool, so those still idle normally once approved.)
-    const hasActiveAgents = !!(session && session.agents.length > 0);
-    const isAgentEvent = !!payload.agent_id;
-    const isAskUserComplete = ASK_USER_TOOLS.has(payload.tool_name || payload.toolName || '');
-    const shouldIdle = !hasActiveAgents && !isAgentEvent && !isAskUserComplete;
-
+    // Tool completion is not turn completion. Keep the session's current status
+    // (normally working, or attention for ask-user flows) until the Stop hook
+    // closes the turn. This prevents the session list flickering idle between
+    // consecutive agent tool calls.
     updateSession(payload.session_id, {
       currentTool: undefined,
       lastActivity,
-      ...(shouldIdle ? { status: 'idle' as const } : {}),
     });
 
     const agentName = payload.agent_id ? getAgentName(payload.agent_id) : null;
@@ -67,7 +54,6 @@ export async function POST(request: Request) {
           currentTool: undefined,
           lastActivity,
           recentActions: updated.recentActions,
-          ...(shouldIdle ? { status: 'idle' as const } : {}),
         },
       });
     }

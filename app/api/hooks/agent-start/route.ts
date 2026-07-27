@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server';
 import type { AgentData } from '@/lib/types';
 import { SOCKET_EVENTS } from '@/lib/types';
 import { CHARACTER_COLORS, MEETING_POSITIONS } from '@/lib/constants';
-import { addAgent, getSession, getAllSessions, isAgentTypeExited, registerAgentId } from '@/lib/state/sessionStore';
+import { addAgent, getSession, getAllSessions, isAgentTypeExited, registerAgentId, updateSession } from '@/lib/state/sessionStore';
 import { emitToClients } from '@/lib/state/socketEmitter';
 
 export async function POST(request: Request) {
@@ -35,6 +35,16 @@ export async function POST(request: Request) {
 
     addAgent(parentSessionId, agent);
     registerAgentId(payload.agent_id, agentName);
+    const parentChanges = {
+      status: 'working' as const,
+      lastActivity: Date.now(),
+      ...(payload.team_name ? { teamId: payload.team_name } : {}),
+    };
+    updateSession(parentSessionId, parentChanges);
+    emitToClients(SOCKET_EVENTS.SESSION_UPDATE, {
+      sessionId: parentSessionId,
+      changes: parentChanges,
+    });
 
     emitToClients(SOCKET_EVENTS.AGENT_START, {
       sessionId: parentSessionId,

@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { SOCKET_EVENTS } from '@/lib/types';
-import { removeAgent, removeAgentByName, getSession, markAgentTypeExited, getAgentName } from '@/lib/state/sessionStore';
+import { removeAgent, removeAgentByName, getSession, markAgentTypeExited, getAgentName, updateSession } from '@/lib/state/sessionStore';
 import { emitToClients } from '@/lib/state/socketEmitter';
 
 export async function POST(request: Request) {
@@ -27,12 +27,15 @@ export async function POST(request: Request) {
       agentName,
     });
 
-    // If all agents are gone, end the meeting
+    // If all agents are gone, end the meeting presentation but keep the parent
+    // working. Subagent completion is still inside the parent's agent turn;
+    // only Stop may transition the session back to idle.
     const parentSession = getSession(parentSessionId);
     if (parentSession && parentSession.agents.length === 0) {
+      updateSession(parentSessionId, { teamId: undefined });
       emitToClients(SOCKET_EVENTS.SESSION_UPDATE, {
         sessionId: parentSessionId,
-        changes: { status: 'idle', teamId: undefined },
+        changes: { teamId: undefined },
       });
     }
 

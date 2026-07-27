@@ -8,10 +8,9 @@ import {
 } from '@/lib/state/appSettings';
 
 function withEffectiveDashboardV2(settings: AppSettings) {
-  const envDefault = process.env.AM_DASHBOARD_V2 === '0' ? false : true;
   return {
     ...settings,
-    dashboardV2: resolveDashboardV2Preference(settings, envDefault),
+    dashboardV2: resolveDashboardV2Preference(settings, true),
     dashboardV2PreferenceVersion: DASHBOARD_V2_PREFERENCE_VERSION,
   };
 }
