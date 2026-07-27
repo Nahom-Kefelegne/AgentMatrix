@@ -329,23 +329,20 @@ export default function TerminalPanel({ sessionId, sessionName, cwd, visible, re
         try { onResizeDisposable.dispose(); } catch {}                       // 6. Dispose xterm event sub
         try { terminalLinksDisposable.dispose(); } catch {}
         terminalLinks.dispose();
-        // 7. Dispose the WebGL renderer addon FIRST, while the render service
-        // is still alive — disposing it implicitly during terminal.dispose()
-        // hits an xterm addon-dispose race ("reading '_isDisposed'").
-        try { rendererAddon?.dispose(); } catch {}
+        // Let Terminal dispose loaded renderer/Fit addons in its own internal
+        // order. Clearing the renderer first can race queued viewport work and
+        // leave RenderService.dimensions undefined.
         rendererAddon = null;
-        try { fitAddon.dispose(); } catch {}                                 // 8. Dispose fit addon
-        try { terminal.dispose(); } catch {}                                 // 9. Terminal last
+        try { terminal.dispose(); } catch {}
       };
     })();
 
     return () => {
       disposed = true;
-      if (termRef.current?.__cleanup) {
-        termRef.current.__cleanup();
-        termRef.current = null;
-      }
+      const terminal = termRef.current;
+      termRef.current = null;
       fitRef.current = null;
+      if (terminal?.__cleanup) terminal.__cleanup();
     };
   }, [sessionId, socketRef]);
 

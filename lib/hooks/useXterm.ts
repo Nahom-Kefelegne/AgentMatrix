@@ -57,6 +57,7 @@ export function useXterm(options: UseXtermOptions): UseXtermHandle {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const termRef = useRef<any>(null);
   const fitRef = useRef<any>(null);
+  const acceptingWritesRef = useRef(true);
   // Buffers writes that arrive before the async terminal creation finishes so
   // no early PTY output is dropped.
   const pendingWritesRef = useRef<string[]>([]);
@@ -65,6 +66,7 @@ export function useXterm(options: UseXtermOptions): UseXtermHandle {
   optsRef.current = options;
 
   useEffect(() => {
+    acceptingWritesRef.current = true;
     const container = containerRef.current;
     if (!container) return;
 
@@ -257,39 +259,45 @@ export function useXterm(options: UseXtermOptions): UseXtermHandle {
         // render service is still alive. Letting terminal.dispose() dispose it
         // implicitly hits an xterm addon-dispose ordering race that throws
         // "Cannot read properties of undefined (reading '_isDisposed')".
-        try { rendererAddon?.dispose(); } catch {}
+        // Let Terminal own loaded-addon disposal. Explicitly clearing the
+        // renderer before Terminal.dispose() leaves queued viewport work with
+        // no dimensions provider (`RenderService.dimensions` crash).
         rendererAddon = null;
-        try { fitAddon.dispose(); } catch {}
         try { terminal.dispose(); } catch {}
       };
     })();
 
     return () => {
       disposed = true;
-      if (termRef.current?.__cleanup) {
-        termRef.current.__cleanup();
-        termRef.current = null;
-      }
+      acceptingWritesRef.current = false;
+      const terminal = termRef.current;
+      termRef.current = null;
       fitRef.current = null;
       pendingWritesRef.current = [];
+      if (terminal?.__cleanup) terminal.__cleanup();
     };
     // Create once per mount — callbacks are read live from optsRef.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const write = useCallback((data: string) => {
-    if (termRef.current) termRef.current.write(data);
-    else pendingWritesRef.current.push(data);
+    if (!acceptingWritesRef.current) return;
+    if (termRef.current) {
+      try { termRef.current.write(data); } catch { /* disposed during teardown */ }
+    } else {
+      pendingWritesRef.current.push(data);
+    }
   }, []);
 
   const fit = useCallback(() => {
+    if (!acceptingWritesRef.current) return;
     const term = termRef.current;
     if (term?.__safeFit) term.__safeFit();
     else { try { fitRef.current?.fit(); } catch {} }
   }, []);
 
   const focus = useCallback(() => {
-    if (!optsRef.current.readOnly) termRef.current?.focus();
+    if (acceptingWritesRef.current && !optsRef.current.readOnly) termRef.current?.focus();
   }, []);
 
   const getTerminal = useCallback(() => termRef.current, []);
