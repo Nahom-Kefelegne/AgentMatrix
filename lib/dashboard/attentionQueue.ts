@@ -131,6 +131,8 @@ export interface DashboardModel {
   stats: FleetStats;
   /** Sorted, one entry per session that needs attention. */
   queue: AttentionItem[];
+  /** Every managed session, including queued ones. Newest-active first. */
+  fleet: LaneItem[];
   /** Active but healthy (working/meeting, not stuck, not otherwise queued). Newest-active first. */
   working: LaneItem[];
   /** Idle and quiet (not queued). Newest-active first. */
@@ -343,8 +345,11 @@ export function deriveDashboardModel(
   }
   working.sort(sortLaneByRecent);
   idle.sort(sortLaneByRecent);
+  const fleet = sessions
+    .map(session => toLaneItem(session, contextMap, now, t))
+    .sort(sortLaneByRecent);
 
   const stats = computeFleetStats(sessions, contextMap, queue.length);
 
-  return { stats, queue, working, idle };
+  return { stats, queue, fleet, working, idle };
 }

@@ -124,11 +124,13 @@ function OfficeView() {
     }
   }, [dashboardV2Enabled, selectedSessionId]);
 
-  // Clear done/attention status when user opens a session
+  // Opening a completed session acknowledges it. Attention is intentionally
+  // NOT cleared here: it remains visible until the user actually responds and
+  // Copilot/Claude emits new prompt/tool activity.
   useEffect(() => {
     if (!selectedSessionId) return;
     const session = sessions.get(selectedSessionId);
-    if (session && (session.status === 'done' || session.status === 'attention')) {
+    if (session?.status === 'done') {
       fetch('/api/hooks/mcp-status', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },

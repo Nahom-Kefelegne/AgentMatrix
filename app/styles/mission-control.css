@@ -781,6 +781,20 @@
   background: color-mix(in srgb, var(--mc-review) 7%, transparent);
 }
 
+.mc-telemetry-item--attention {
+  background: color-mix(in srgb, var(--mc-critical) 12%, transparent);
+  box-shadow: inset 3px 0 0 var(--mc-critical);
+}
+
+.mc-telemetry-item--attention:hover,
+.mc-telemetry-item--attention.mc-telemetry-item--selected {
+  background: color-mix(in srgb, var(--mc-critical) 18%, transparent);
+}
+
+.mc-telemetry-item--attention .mc-telemetry-name {
+  color: #fca5a5;
+}
+
 .mc-live-dot {
   align-self: center;
   width: 6px;

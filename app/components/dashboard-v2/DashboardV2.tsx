@@ -339,13 +339,17 @@ const TelemetryItem = memo(function TelemetryItem({
   return (
     <button
       type="button"
-      className={`mc-telemetry-item ${selected ? 'mc-telemetry-item--selected' : ''}`}
+      className={`mc-telemetry-item ${session.status === 'attention' ? 'mc-telemetry-item--attention' : ''} ${selected ? 'mc-telemetry-item--selected' : ''}`}
       onClick={() => onSelect(session.id)}
       aria-label={`Open ${session.name} CLI`}
     >
       <span className={`mc-live-dot mc-live-dot--${session.status}`} />
       <span className="mc-telemetry-name">{session.name}</span>
-      <span className="mc-telemetry-action">{item.lastAction || STATUS_LABEL[session.status]}</span>
+      <span className="mc-telemetry-action">
+        {session.status === 'attention'
+          ? session.statusReason || 'Needs your input'
+          : item.lastAction || STATUS_LABEL[session.status]}
+      </span>
       <Sparkline values={item.sparkline} />
       <span className="mc-telemetry-context">
         {item.contextUsage === null ? 'ctx —' : `ctx ${numberFormat.format(item.contextUsage)}%`}
@@ -355,25 +359,27 @@ const TelemetryItem = memo(function TelemetryItem({
 });
 
 function TelemetryRail({
-  working,
-  idle,
+  items,
+  attentionCount,
   selectedSessionId,
   onSelect,
 }: {
-  working: LaneItem[];
-  idle: LaneItem[];
+  items: LaneItem[];
+  attentionCount: number;
   selectedSessionId: string | null;
   onSelect: (sessionId: string) => void;
 }) {
-  const items = [...working, ...idle];
   return (
     <section className="mc-telemetry" aria-labelledby="mc-telemetry-title">
       <div className="mc-telemetry-heading">
         <div>
-          <span className="mc-eyebrow">Quiet Rail</span>
-          <h2 id="mc-telemetry-title">Running Without You</h2>
+          <span className="mc-eyebrow">Sessions</span>
+          <h2 id="mc-telemetry-title">Session List</h2>
         </div>
-        <span>{numberFormat.format(working.length)} Active · {numberFormat.format(idle.length)} Quiet</span>
+        <span>
+          {numberFormat.format(items.length)} Total
+          {attentionCount > 0 ? ` · ${numberFormat.format(attentionCount)} Need You` : ''}
+        </span>
       </div>
       {items.length > 0 ? (
         <div className="mc-telemetry-track">
@@ -387,7 +393,7 @@ function TelemetryRail({
           ))}
         </div>
       ) : (
-        <div className="mc-telemetry-empty">Sessions needing attention are shown above.</div>
+        <div className="mc-telemetry-empty">No sessions yet.</div>
       )}
     </section>
   );
@@ -408,8 +414,8 @@ export default function DashboardV2(props: DashboardV2ViewProps) {
           <ConsoleWorkspace {...props} />
         </div>
         <TelemetryRail
-          working={props.model.working}
-          idle={props.model.idle}
+          items={props.model.fleet}
+          attentionCount={props.model.queue.length}
           selectedSessionId={props.selectedSessionId}
           onSelect={props.onSelectSession}
         />
