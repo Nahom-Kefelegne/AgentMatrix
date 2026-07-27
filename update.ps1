@@ -32,26 +32,87 @@ Set-Location $repoDir
 Write-Host "  Repo: $repoDir"
 Write-Host ""
 
-# Pull latest
-Write-Host "Pulling latest..." -ForegroundColor Blue
-git pull
-Write-Host "  [OK] Code updated" -ForegroundColor Green
-Write-Host ""
-
-# Install dependencies
-Write-Host "Installing dependencies..." -ForegroundColor Blue
-# See setup.ps1: use the Microsoft package proxy from the first request.
-function Invoke-NpmInstallResilient {
-    npm install --replace-registry-host=never --fetch-timeout=120000 --fetch-retry-maxtimeout=120000 --fetch-retries=2 2>&1 | Out-Host
-    return ($LASTEXITCODE -eq 0)
-}
-if (-not (Invoke-NpmInstallResilient)) {
-    $reg = (npm config get registry 2>$null)
-    Write-Host "  [X] Could not install dependencies through $reg." -ForegroundColor Red
-    Write-Host "      Authenticate the Microsoft mirror, then re-run."
+# Updating node_modules while Electron is running is unreliable on Windows
+# because native binaries may be locked.
+$existingListener = Get-NetTCPConnection -LocalPort 3000 -State Listen -ErrorAction SilentlyContinue |
+    Select-Object -First 1
+if ($existingListener) {
+    Write-Host "  Agent Matrix is running (PID $($existingListener.OwningProcess))." -ForegroundColor Red
+    Write-Host "  Quit it completely from the tray, then run .\update.ps1 again." -ForegroundColor Yellow
     exit 1
 }
-Write-Host "  [OK] Dependencies installed" -ForegroundColor Green
+
+function Backup-GeneratedLockfile {
+    git diff --quiet HEAD -- package-lock.json 2>$null
+    if ($LASTEXITCODE -eq 0) { return $false }
+
+    $backupDir = Join-Path $env:USERPROFILE ".agentmatrix\update-backups"
+    New-Item -ItemType Directory -Path $backupDir -Force | Out-Null
+    $backupFile = Join-Path $backupDir "$(Get-Date -Format 'yyyyMMdd-HHmmss')-package-lock.patch"
+    $patch = (git diff --binary HEAD -- package-lock.json | Out-String)
+    [System.IO.File]::WriteAllText($backupFile, $patch, [System.Text.UTF8Encoding]::new($false))
+    git restore --source=HEAD --staged --worktree -- package-lock.json
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host "  [X] Could not restore generated package-lock.json." -ForegroundColor Red
+        exit 1
+    }
+    Write-Host "  [OK] Backed up generated package-lock changes to $backupFile" -ForegroundColor Green
+    return $true
+}
+
+function Install-AgentMatrixDependencies {
+    Write-Host "Installing dependencies from the Microsoft mirror..." -ForegroundColor Blue
+    & npm --no-update-notifier ci `
+        --registry="$env:NPM_CONFIG_REGISTRY" `
+        --replace-registry-host=never `
+        --prefer-offline `
+        --fetch-timeout=30000 `
+        --fetch-retry-maxtimeout=30000 `
+        --fetch-retries=1 `
+        --no-audit --no-fund --no-progress
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host "  [X] Could not install dependencies through $env:NPM_CONFIG_REGISTRY." -ForegroundColor Red
+        Write-Host "      Authenticate the Microsoft mirror, then re-run." -ForegroundColor Yellow
+        exit 1
+    }
+    Write-Host "  [OK] Dependencies installed" -ForegroundColor Green
+}
+
+$branch = (git rev-parse --abbrev-ref HEAD 2>$null)
+if ($LASTEXITCODE -ne 0 -or $branch -ne "main") {
+    Write-Host "  [X] Update must run from the main branch." -ForegroundColor Red
+    Write-Host "      Run: git switch main" -ForegroundColor Yellow
+    exit 1
+}
+
+$before = (git rev-parse HEAD 2>$null)
+$null = Backup-GeneratedLockfile
+
+Write-Host "Pulling latest..." -ForegroundColor Blue
+git fetch --quiet origin main
+if ($LASTEXITCODE -ne 0) {
+    Write-Host "  [X] Could not fetch origin/main. Check network access and try again." -ForegroundColor Red
+    exit 1
+}
+git merge --ff-only origin/main
+if ($LASTEXITCODE -ne 0) {
+    Write-Host "  [X] Could not fast-forward to origin/main." -ForegroundColor Red
+    Write-Host "      Commit or stash the local files shown by 'git status', then retry." -ForegroundColor Yellow
+    exit 1
+}
+$after = (git rev-parse HEAD 2>$null)
+Write-Host "  [OK] Code updated to $($after.Substring(0, 7))" -ForegroundColor Green
+Write-Host ""
+
+$dependenciesChanged = -not (Test-Path node_modules)
+git diff --quiet $before $after -- package.json package-lock.json 2>$null
+if ($LASTEXITCODE -ne 0) { $dependenciesChanged = $true }
+
+if ($dependenciesChanged) {
+    Install-AgentMatrixDependencies
+} else {
+    Write-Host "Dependencies unchanged - keeping existing node_modules." -ForegroundColor DarkGray
+}
 Write-Host ""
 
 # ── Native modules (node-pty) ─────────────────────────────────────────────
@@ -80,7 +141,11 @@ if (Test-PtyWorks) {
 } else {
     Write-Host "  [!] Prebuilt node-pty can't spawn — attempting a time-bounded rebuild..." -ForegroundColor Yellow
     $repoDir = (Get-Location).Path
-    $job = Start-Job -ScriptBlock { param($d) Set-Location $d; npx electron-rebuild -f -w node-pty } -ArgumentList $repoDir
+    $job = Start-Job -ScriptBlock {
+        param($d)
+        Set-Location $d
+        npm --no-update-notifier exec -- electron-rebuild -f -w node-pty
+    } -ArgumentList $repoDir
     if (Wait-Job $job -Timeout 180) { Receive-Job $job | Out-Host } else {
         Stop-Job $job
         Write-Host "  [!] Rebuild timed out (likely blocked network) — the prebuilt binary should still work." -ForegroundColor Yellow

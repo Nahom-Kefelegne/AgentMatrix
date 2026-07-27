@@ -7,6 +7,7 @@ export async function GET() {
     name: s.name,
     status: s.status,
     cwd: s.cwd,
+    contextUsage: s.contextUsage,
   }));
   return NextResponse.json({ sessions });
 }

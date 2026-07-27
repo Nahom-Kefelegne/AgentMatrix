@@ -64,13 +64,15 @@ The start scripts **fast-forward to the latest code from `main` before launching
 and print the exact revision. Offline launches may use the local checkout, but an
 online update blocked by local edits stops instead of silently launching an old
 dashboard. On macOS/Linux, `start.sh` gracefully restarts an existing dev instance.
-On Windows, fully quit the existing tray app before running `start.ps1`. If a pull
-changes dependencies, the launcher will tell you to run the update script below.
+On Windows, fully quit the existing tray app before running `start.ps1`. A locally
+generated `package-lock.json` is backed up under `~/.agentmatrix/update-backups/`
+and restored before the fast-forward. If dependency manifests changed, the
+launcher runs deterministic `npm ci` automatically.
 
 The repository's `.npmrc` and launch scripts keep npm traffic on
 `https://packagefeedproxy.microsoft.io/npm/`. They also disable npm's background
-update notifier, which otherwise triggers the corporate NPM URL block even when
-the app only runs `npm run electron:dev`.
+update notifier both in configuration and with `--no-update-notifier`, which
+prevents npm's package metadata update check during app shutdown.
 
 ### Update
 
@@ -86,7 +88,10 @@ For a full update (pull + reinstall dependencies + refresh CLI hooks):
 bash AgentMatrix/update.sh
 ```
 
-This pulls the latest code, reinstalls dependencies, and updates CLI hooks.
+This safely backs up generated lockfile drift, verifies the fast-forward,
+reinstalls dependencies only when manifests changed, and updates CLI hooks. A
+failed fetch, merge, or install exits immediately and is never reported as a
+successful update.
 
 ### Running over Remote Desktop (RDP)
 

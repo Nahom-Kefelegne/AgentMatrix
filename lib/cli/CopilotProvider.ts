@@ -50,6 +50,72 @@ function contextWindowForModel(_model: string): number {
   return DEFAULT_CONTEXT_WINDOW;
 }
 
+function execText(command: string, args: string[], timeout = 2500): Promise<string | null> {
+  return new Promise(resolve => {
+    execFile(
+      command,
+      args,
+      { timeout, windowsHide: true, encoding: 'utf8' },
+      (error, stdout) => resolve(error ? null : stdout.trim()),
+    );
+  });
+}
+
+async function readLatestUsageRow(sessionId: string): Promise<string | null> {
+  const sql =
+    `SELECT input_tokens, model FROM assistant_usage_events ` +
+    `WHERE session_id='${sessionId}' ORDER BY id DESC LIMIT 1;`;
+
+  const sqliteRow = await execText(
+    'sqlite3',
+    ['-readonly', '-separator', '|', COPILOT_SESSION_STORE_DB, sql],
+  );
+  if (sqliteRow) return sqliteRow;
+
+  // Windows installations commonly have modern Node (npm 11 ships with Node
+  // 22/24) but no sqlite3.exe. Use Node's built-in SQLite in a child process so
+  // the synchronous query never blocks Electron's main thread.
+  const nodeScript = [
+    `const { DatabaseSync } = require('node:sqlite');`,
+    `const db = new DatabaseSync(process.argv[1], { readOnly: true });`,
+    `try {`,
+    `  const row = db.prepare('SELECT input_tokens, model FROM assistant_usage_events WHERE session_id=? ORDER BY id DESC LIMIT 1').get(process.argv[2]);`,
+    `  if (row) process.stdout.write(String(row.input_tokens) + '|' + String(row.model || ''));`,
+    `} finally { db.close(); }`,
+  ].join('');
+  const nodeRow = await execText(
+    'node',
+    ['--no-warnings', '--experimental-sqlite', '-e', nodeScript, COPILOT_SESSION_STORE_DB, sessionId],
+  );
+  if (nodeRow) return nodeRow;
+
+  // Python's standard library is a final dependency-free fallback for machines
+  // with an older Node runtime.
+  const pythonScript = [
+    `import sqlite3,sys\n`,
+    `db=sqlite3.connect('file:'+sys.argv[1]+'?mode=ro', uri=True, timeout=1)\n`,
+    `try:\n`,
+    ` row=db.execute('SELECT input_tokens, model FROM assistant_usage_events WHERE session_id=? ORDER BY id DESC LIMIT 1',(sys.argv[2],)).fetchone()\n`,
+    ` if row: print(str(row[0])+'|'+str(row[1] or ''),end='')\n`,
+    `finally:\n db.close()\n`,
+  ].join('');
+  const pythonCandidates: Array<[string, string[]]> = process.platform === 'win32'
+    ? [
+        ['py', ['-3', '-c', pythonScript, COPILOT_SESSION_STORE_DB, sessionId]],
+        ['python', ['-c', pythonScript, COPILOT_SESSION_STORE_DB, sessionId]],
+        ['python3', ['-c', pythonScript, COPILOT_SESSION_STORE_DB, sessionId]],
+      ]
+    : [
+        ['python3', ['-c', pythonScript, COPILOT_SESSION_STORE_DB, sessionId]],
+        ['python', ['-c', pythonScript, COPILOT_SESSION_STORE_DB, sessionId]],
+      ];
+  for (const [command, args] of pythonCandidates) {
+    const row = await execText(command, args);
+    if (row) return row;
+  }
+  return null;
+}
+
 const TRUST_PROMPT_PATTERNS = [
   'Do you trust the files',
   'Confirm folder trust',
@@ -269,10 +335,19 @@ export class CopilotProvider implements CliProvider {
   }
 
   buildResumeArgs(opts: ResumeOptions): string[] {
-    // Copilot remembers permission state on resume; no --yolo or --fork.
-    // --mouse enables alt-screen mouse tracking for line-by-line wheel
-    // scrolling (see buildSpawnArgs) — resumed sessions need it too.
-    return ['--resume', opts.resumeId, '--mouse'];
+    const args = ['--resume', opts.resumeId, '--mouse'];
+    if (opts.permissionMode === 'bypassPermissions') args.push('--allow-all');
+    if (opts.copilotMode && opts.copilotMode !== 'interactive') {
+      args.push('--mode', opts.copilotMode);
+    }
+    if (opts.model) args.push('--model', opts.model);
+    if (opts.effort) args.push('--reasoning-effort', opts.effort);
+    if (opts.allowedTools) {
+      for (const tool of opts.allowedTools.split(',').map(value => value.trim()).filter(Boolean)) {
+        args.push(`--allow-tool=${tool}`);
+      }
+    }
+    return args;
   }
 
   buildResumeShellCommand(opts: ResumeOptions): string {
@@ -307,27 +382,16 @@ export class CopilotProvider implements CliProvider {
    * `input_tokens` is the running context total (the full context sent to the
    * model), so `input_tokens / windowForModel` is the fill level.
    *
-   * Uses the `sqlite3` CLI in `-readonly` mode (WAL-safe: works while Copilot
-   * writes) via async execFile so it never blocks the main thread. Returns null
-   * on any failure (no `sqlite3` binary — e.g. some Windows setups —, no data
-   * yet, malformed id, or read error), which cleanly hides the bar.
+   * Reads asynchronously through the first available system runtime: sqlite3,
+   * modern Node's built-in SQLite, or Python's standard sqlite3 module. All run
+   * in child processes, so live WAL reads never block Electron's main thread.
+   * Returns null when no compatible runtime or usage row is available.
    */
   async getContextUsage(sessionId: string): Promise<number | null> {
     if (!UUID_RE.test(sessionId)) return null;
     if (!existsSync(COPILOT_SESSION_STORE_DB)) return null;
 
-    const sql =
-      `SELECT input_tokens, model FROM assistant_usage_events ` +
-      `WHERE session_id='${sessionId}' ORDER BY turn_index DESC, created_at DESC LIMIT 1;`;
-
-    const row = await new Promise<string | null>((resolve) => {
-      execFile(
-        'sqlite3',
-        ['-readonly', '-separator', '|', COPILOT_SESSION_STORE_DB, sql],
-        { timeout: 2000, windowsHide: true },
-        (err, stdout) => resolve(err ? null : stdout.trim()),
-      );
-    });
+    const row = await readLatestUsageRow(sessionId);
     if (!row) return null;
 
     const [inputStr, model] = row.split('|');

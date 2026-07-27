@@ -380,7 +380,8 @@ export class PtyManager {
 
   spawnResume(id: string, opts: {
     cwd?: string; resumeId: string; fork?: boolean; systemPrompt?: string;
-    cliType?: CliType;
+    cliType?: CliType; permissionMode?: string; model?: string; effort?: string;
+    allowedTools?: string; copilotMode?: string;
   }): PtySession {
     if (this.sessions.has(id)) throw new Error(`Session ${id} already exists`);
 
@@ -395,6 +396,11 @@ export class PtyManager {
       cwd,
       resumeId: opts.resumeId,
       fork: opts.fork,
+      permissionMode: opts.permissionMode,
+      model: opts.model,
+      effort: opts.effort,
+      allowedTools: opts.allowedTools,
+      copilotMode: opts.copilotMode,
     });
 
     // Claude's MCP server instructions are not a CLI launch flag, so append the

@@ -161,11 +161,15 @@ echo -e "${BLUE}Installing dependencies...${NC}"
 # Project .npmrc + the environment above force lockfile tarballs through the
 # Microsoft package proxy from the first request. Never probe public npm first.
 npm_install_resilient() {
-    npm install --replace-registry-host=never \
-      --fetch-timeout=120000 --fetch-retry-maxtimeout=120000 --fetch-retries=2
+    npm --no-update-notifier ci \
+      --registry="$NPM_CONFIG_REGISTRY" \
+      --replace-registry-host=never \
+      --prefer-offline \
+      --fetch-timeout=30000 --fetch-retry-maxtimeout=30000 --fetch-retries=1 \
+      --no-audit --no-fund --no-progress
 }
 if ! npm_install_resilient; then
-    reg=$(npm config get registry 2>/dev/null)
+    reg=$(npm --no-update-notifier config get registry 2>/dev/null)
     echo -e "  ${CROSS} Could not install dependencies."
     echo -e "     The Microsoft package proxy isn't usable. Fix the mirror auth:"
     echo -e "       • Registry: ${reg}"
@@ -233,7 +237,7 @@ else
         xcode-select --install 2>/dev/null || true
     fi
     # Bounded so a blocked Electron-header download fails fast instead of hanging.
-    run_bounded 180 npx electron-rebuild -f -w node-pty || \
+    run_bounded 180 npm --no-update-notifier exec -- electron-rebuild -f -w node-pty || \
         run_bounded 180 npm rebuild node-pty || true
     find node_modules/node-pty/prebuilds -name spawn-helper -exec chmod +x {} \; 2>/dev/null || true
     [ -f node_modules/node-pty/build/Release/spawn-helper ] && \

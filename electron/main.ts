@@ -8,7 +8,7 @@ import { SOCKET_PATH } from '../lib/constants';
 import { getAllSessions, addSession, updateSession } from '../lib/state/sessionStore';
 import { getCachedName } from '../lib/state/nameCache';
 import { getSettings } from '../lib/state/appSettings';
-import { getActiveSessions } from '../lib/state/activeSessionsCache';
+import { getActiveSessions, saveActiveSessions } from '../lib/state/activeSessionsCache';
 import { PtyManager } from './pty/PtyManager';
 import { OutputParser } from './pty/OutputParser';
 import { setupTerminalBridge, requestSummary } from './terminalBridge';
@@ -248,6 +248,15 @@ async function startServer(): Promise<void> {
         if (settings.autoResume && !SMOKE_TEST) {
           const cached = getActiveSessions();
           if (cached.length > 0) {
+            let migratedPermissions = false;
+            for (const session of cached) {
+              if (!session.permissionMode) {
+                session.permissionMode = settings.defaultPermissionMode;
+                migratedPermissions = true;
+              }
+            }
+            if (migratedPermissions) saveActiveSessions(cached);
+
             console.log(`[auto-resume] Resuming ${cached.length} session(s)...`);
             const resumeStaggerMs = settings.useAgency ? 1500 : 0;
             const resumeOne = (s: typeof cached[number]) => {
@@ -271,7 +280,16 @@ async function startServer(): Promise<void> {
                 addSession(sessionData);
                 io!.emit(SOCKET_EVENTS.SESSION_START, sessionData);
 
-                ptyManager.spawnResume(s.id, { cwd: s.cwd, resumeId: s.id, cliType: s.cliType || 'claude' });
+                ptyManager.spawnResume(s.id, {
+                  cwd: s.cwd,
+                  resumeId: s.id,
+                  cliType: s.cliType || 'claude',
+                  permissionMode: s.permissionMode,
+                  model: s.model,
+                  effort: s.effort,
+                  allowedTools: s.allowedTools,
+                  copilotMode: s.copilotMode,
+                });
                 const pty = ptyManager.getSession(s.id);
                 if (pty) {
                   pty.onStateChange = (info) => io!.emit('session:state', { sessionId: s.id, ...info });

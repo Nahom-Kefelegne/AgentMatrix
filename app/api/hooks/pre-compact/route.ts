@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { SOCKET_EVENTS } from '@/lib/types';
 import { getSession, updateSession } from '@/lib/state/sessionStore';
 import { emitToClients } from '@/lib/state/socketEmitter';
+import { refreshSessionContextUsage } from '@/lib/state/contextUsage';
 
 /**
  * Copilot `PreCompact` hook. Fires just before context compaction. Shows a
@@ -23,6 +24,9 @@ export async function POST(request: Request) {
     };
     updateSession(sessionId, changes);
     emitToClients(SOCKET_EVENTS.SESSION_UPDATE, { sessionId, changes });
+    void refreshSessionContextUsage(sessionId).catch(error => {
+      console.warn(`[pre-compact] Context refresh failed for ${sessionId.slice(0, 8)}:`, error);
+    });
 
     return NextResponse.json({ ok: true });
   } catch (error) {

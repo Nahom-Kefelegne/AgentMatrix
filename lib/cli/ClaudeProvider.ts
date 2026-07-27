@@ -201,7 +201,15 @@ export class ClaudeProvider implements CliProvider {
   }
 
   buildResumeArgs(opts: ResumeOptions): string[] {
-    const args = ['--resume', opts.resumeId, '--dangerously-skip-permissions'];
+    const args = ['--resume', opts.resumeId];
+    if (opts.permissionMode === 'bypassPermissions') {
+      args.push('--dangerously-skip-permissions');
+    } else if (opts.permissionMode) {
+      args.push('--permission-mode', opts.permissionMode);
+    }
+    if (opts.model) args.push('--model', opts.model);
+    if (opts.effort) args.push('--effort', opts.effort);
+    if (opts.allowedTools) args.push('--allowedTools', opts.allowedTools);
     if (opts.fork) args.push('--fork-session');
     return args;
   }

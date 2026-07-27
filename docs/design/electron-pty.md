@@ -758,12 +758,23 @@ Sessions are tracked in `~/.agentmatrix/active-sessions.json`:
 
 ```json
 [
-  { "id": "uuid-1", "name": "refactor-auth", "cwd": "/Users/dev/project", "cliType": "copilot" },
-  { "id": "uuid-2", "name": "fix-tests", "cwd": "/Users/dev/other", "cliType": "claude" }
+  {
+    "id": "uuid-1",
+    "name": "refactor-auth",
+    "cwd": "/Users/dev/project",
+    "cliType": "copilot",
+    "permissionMode": "bypassPermissions",
+    "model": "gpt-5.6-sol",
+    "effort": "high",
+    "copilotMode": "autopilot"
+  }
 ]
 ```
 
 Sessions are added to this list on `terminal:new` and `terminal:resume`, removed on `terminal:end`.
+The launch profile is reapplied on resume so app restarts preserve permission
+mode, model, effort, allowed tools, and Copilot mode. Legacy cache entries
+without a permission mode migrate once to the configured default.
 
 ### Persistence Flow
 
@@ -784,7 +795,7 @@ graph TD
         R4 --> R5[getCachedName - get display name]
         R4 --> R6[Allocate desk position]
         R4 --> R7[addSession - create session entry]
-        R4 --> R8[spawnResume - spawn PTY with --resume]
+        R4 --> R8[spawnResume - reapply launch profile + --resume]
         R4 --> R9[Wire callbacks]
         R8 --> R10[Provider CLI resumes from native session store]
         R2 -->|No| R11[Skip]

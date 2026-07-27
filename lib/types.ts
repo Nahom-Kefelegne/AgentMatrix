@@ -181,6 +181,7 @@ export interface ServerToClientEvents {
   'terminal:data': (data: { sessionId: string; data: string }) => void;
   'terminal:exit': (data: { sessionId: string; exitCode: number }) => void;
   'terminal:consent': (data: { sessionId: string }) => void;
+  'session:context': (data: { sessionId: string; usage: number }) => void;
   'session:state': (data: { sessionId: string; state: string; actionType?: string; actionLabel?: string; activity?: string }) => void;
   // Editor shell terminals
   'editor:terminal:data': (data: { id: string; data: string }) => void;

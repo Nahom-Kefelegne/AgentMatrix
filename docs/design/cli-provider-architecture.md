@@ -221,7 +221,7 @@ If a caller needs to repeatedly query `discoverSessions()`, that caller should m
 - **`discoverSessions`** reads `~/.copilot/session-state/<UUID>/workspace.yaml` — a tiny flat YAML with `cwd` and `name`. A custom parser avoids the `js-yaml` dependency and folds block-scalar names.
 - **`findSessionCwd`** is O(1) — directly opens `<UUID>/workspace.yaml`.
 - **`detectActiveSessionIds`** cross-references `~/.copilot/session-state/<UUID>/inuse.<PID>.lock` files against the set of live `copilot` processes from `ps`/`wmic`. New Agent Matrix sessions are spawned with `--session-id`, but locks still reliably map resumed or externally-started Copilot processes to UUIDs.
-- **`parseContextUsage`** returns `null` because Copilot's TUI doesn't print a parseable context meter; **`getContextUsage`** reads the latest `assistant_usage_events.input_tokens` from `~/.copilot/session-store.db` via async `sqlite3 -readonly`.
+- **`parseContextUsage`** returns `null` because Copilot's TUI doesn't print a parseable context meter; **`getContextUsage`** reads the latest `assistant_usage_events.input_tokens` from `~/.copilot/session-store.db` through an async fallback chain: `sqlite3`, modern Node's built-in SQLite, then Python's standard library.
 - **`getTranscriptPath`** returns `session-state/<id>/events.jsonl` for the native diff tracker.
 - **`renameSession`** writes `name:` and `user_named: true` into `workspace.yaml`, preserving Copilot-owned fields.
 

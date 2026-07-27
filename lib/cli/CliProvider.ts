@@ -26,6 +26,11 @@ export interface ResumeOptions {
   cwd: string;
   resumeId: string;
   fork?: boolean;
+  permissionMode?: string;
+  model?: string;
+  effort?: string;
+  allowedTools?: string;
+  copilotMode?: string;
 }
 
 /** A session discovered on disk (not necessarily running). */

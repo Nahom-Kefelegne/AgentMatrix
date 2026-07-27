@@ -141,8 +141,9 @@ verified live against Copilot). B3 satisfied by B1. B2 deferred.
   `workspace.yaml` gets `name` + `user_named: true`. Claude untouched (already passed
   `--session-id`, ignores `name`).
 - **B2.** ⏸ DEFERRED for resume-search optimization — `workspace.yaml` discovery
-  still yields names. Context usage now reads `session-store.db` through the system
-  `sqlite3 -readonly` CLI asynchronously, avoiding a native Node SQLite dependency.
+  still yields names. Context usage reads `session-store.db` asynchronously through
+  the first available system runtime (`sqlite3`, modern Node SQLite, or Python),
+  avoiding a native Node SQLite dependency.
 - **B3.** ✅ SATISFIED by B1 — Copilot names are now durable in `workspace.yaml` and
   `discoverSessions()` already reads `meta.name`. **`nameCache` kept intact** (Claude +
   shared routes depend on it); nothing deleted.
@@ -299,8 +300,8 @@ for Claude. **Findings:**
 
 **Implemented:**
 - **Ctx-1:** `CliProvider.getContextUsage(sessionId): Promise<number|null>`. Copilot
-  reads the latest `input_tokens` via `sqlite3 -readonly` (async `execFile`, UUID-
-  validated, graceful null on any failure incl. Windows/no-sqlite3) and computes
+  reads the latest `input_tokens` through an async child-process fallback chain
+  (`sqlite3`, modern Node SQLite, then Python; UUID-validated) and computes
   `input_tokens / windowForModel` (default 1,000,000). Claude returns null (keeps its
   text `parseContextUsage`).
 - **Ctx-2:** in `PtyManager`, on a Copilot busy→ready transition, fire-and-forget

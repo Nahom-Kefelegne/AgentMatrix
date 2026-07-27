@@ -158,11 +158,18 @@ Write-Host "Installing dependencies..." -ForegroundColor Blue
 # Project .npmrc + the environment above force lockfile tarballs through the
 # Microsoft package proxy from the first request. Never probe public npm first.
 function Invoke-NpmInstallResilient {
-    npm install --replace-registry-host=never --fetch-timeout=120000 --fetch-retry-maxtimeout=120000 --fetch-retries=2 2>&1 | Out-Host
+    npm --no-update-notifier ci `
+        --registry="$env:NPM_CONFIG_REGISTRY" `
+        --replace-registry-host=never `
+        --prefer-offline `
+        --fetch-timeout=30000 `
+        --fetch-retry-maxtimeout=30000 `
+        --fetch-retries=1 `
+        --no-audit --no-fund --no-progress
     return ($LASTEXITCODE -eq 0)
 }
 if (-not (Invoke-NpmInstallResilient)) {
-    $reg = (npm config get registry 2>$null)
+    $reg = (npm --no-update-notifier config get registry 2>$null)
     Write-Host "  [X] Could not install dependencies." -ForegroundColor Red
     Write-Host "      The Microsoft package proxy isn't usable. Fix the mirror auth:"
     Write-Host "        - Registry: $reg"
@@ -200,7 +207,11 @@ if (Test-PtyWorks) {
 } else {
     Write-Host "  [!] Prebuilt node-pty can't spawn — attempting a time-bounded rebuild..." -ForegroundColor Yellow
     $repoDir = (Get-Location).Path
-    $job = Start-Job -ScriptBlock { param($d) Set-Location $d; npx electron-rebuild -f -w node-pty } -ArgumentList $repoDir
+    $job = Start-Job -ScriptBlock {
+        param($d)
+        Set-Location $d
+        npm --no-update-notifier exec -- electron-rebuild -f -w node-pty
+    } -ArgumentList $repoDir
     if (Wait-Job $job -Timeout 180) { Receive-Job $job | Out-Host } else {
         Stop-Job $job
         Write-Host "  [!] Rebuild timed out (likely blocked network fetching Electron headers)." -ForegroundColor Yellow

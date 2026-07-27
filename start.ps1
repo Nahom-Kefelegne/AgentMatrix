@@ -14,6 +14,52 @@ $env:NPM_CONFIG_AUDIT = "false"
 $env:NPM_CONFIG_FUND = "false"
 $env:NO_UPDATE_NOTIFIER = "1"
 
+# Electron's single-instance lock would otherwise focus an old process and make
+# this command look like a successful restart.
+$existingListener = Get-NetTCPConnection -LocalPort 3000 -State Listen -ErrorAction SilentlyContinue |
+    Select-Object -First 1
+if ($existingListener) {
+    Write-Host "  Agent Matrix is already running (PID $($existingListener.OwningProcess))." -ForegroundColor Red
+    Write-Host "  Quit it completely from the tray, then run .\start.ps1 again." -ForegroundColor Yellow
+    exit 1
+}
+
+function Backup-GeneratedLockfile {
+    git diff --quiet HEAD -- package-lock.json 2>$null
+    if ($LASTEXITCODE -eq 0) { return $false }
+
+    $backupDir = Join-Path $env:USERPROFILE ".agentmatrix\update-backups"
+    New-Item -ItemType Directory -Path $backupDir -Force | Out-Null
+    $backupFile = Join-Path $backupDir "$(Get-Date -Format 'yyyyMMdd-HHmmss')-package-lock.patch"
+    $patch = (git diff --binary HEAD -- package-lock.json | Out-String)
+    [System.IO.File]::WriteAllText($backupFile, $patch, [System.Text.UTF8Encoding]::new($false))
+    git restore --source=HEAD --staged --worktree -- package-lock.json
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host "  Could not restore generated package-lock.json." -ForegroundColor Red
+        exit 1
+    }
+    Write-Host "  Backed up generated package-lock changes to $backupFile" -ForegroundColor Green
+    return $true
+}
+
+function Install-AgentMatrixDependencies {
+    Write-Host "Installing dependencies from the Microsoft mirror..." -ForegroundColor Blue
+    & npm --no-update-notifier ci `
+        --registry="$env:NPM_CONFIG_REGISTRY" `
+        --replace-registry-host=never `
+        --prefer-offline `
+        --fetch-timeout=30000 `
+        --fetch-retry-maxtimeout=30000 `
+        --fetch-retries=1 `
+        --no-audit --no-fund --no-progress
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host "  Dependency install failed through $env:NPM_CONFIG_REGISTRY" -ForegroundColor Red
+        Write-Host "  Run .\update.ps1 after fixing Microsoft mirror authentication." -ForegroundColor Yellow
+        exit 1
+    }
+}
+
+$needsDependencies = -not (Test-Path node_modules)
 if ((Get-Command git -ErrorAction SilentlyContinue) -and (Test-Path .git)) {
     Write-Host "Pulling latest from git..." -ForegroundColor Blue
     $before = (git rev-parse HEAD 2>$null)
@@ -25,6 +71,8 @@ if ((Get-Command git -ErrorAction SilentlyContinue) -and (Test-Path .git)) {
         Write-Host "  Run: git switch $defaultBranch; git pull --ff-only" -ForegroundColor Yellow
         exit 1
     }
+
+    $null = Backup-GeneratedLockfile
 
     # fetch + merge --ff-only rather than `git pull`: it ignores the user's
     # pull.rebase config, never rewrites history or creates a merge commit, and
@@ -44,11 +92,9 @@ if ((Get-Command git -ErrorAction SilentlyContinue) -and (Test-Path .git)) {
             Write-Host "  Already up to date" -ForegroundColor Green
         } else {
             Write-Host "  Updated to latest" -ForegroundColor Green
-            # If dependency manifests changed, a plain start may run against
-            # stale node_modules — point the user at the full updater.
             git diff --quiet $before $after -- package.json package-lock.json 2>$null
             if ($LASTEXITCODE -ne 0) {
-                Write-Host "  Dependencies changed upstream - run .\update.ps1 to reinstall before starting." -ForegroundColor Yellow
+                $needsDependencies = $true
             }
         }
     } elseif ($fetchOk) {
@@ -62,15 +108,6 @@ if ((Get-Command git -ErrorAction SilentlyContinue) -and (Test-Path .git)) {
     Write-Host "  Revision: $revision" -ForegroundColor DarkGray
 }
 
-# Electron's single-instance lock focuses an existing process and exits the new
-# launch. Detect that case so start.ps1 cannot appear to restart while leaving
-# an old dashboard running.
-$existingListener = Get-NetTCPConnection -LocalPort 3000 -State Listen -ErrorAction SilentlyContinue |
-    Select-Object -First 1
-if ($existingListener) {
-    Write-Host "  Agent Matrix is already running (PID $($existingListener.OwningProcess))." -ForegroundColor Red
-    Write-Host "  Quit it completely from the tray, then run .\start.ps1 again." -ForegroundColor Yellow
-    exit 1
-}
+if ($needsDependencies) { Install-AgentMatrixDependencies }
 
-npm run electron:dev
+npm --no-update-notifier run electron:dev

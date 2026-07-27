@@ -6,6 +6,11 @@ export interface CachedSession {
   name: string;
   cwd: string;
   cliType?: 'claude' | 'copilot';
+  permissionMode?: string;
+  model?: string;
+  effort?: string;
+  allowedTools?: string;
+  copilotMode?: string;
 }
 
 export function getActiveSessions(): CachedSession[] {
@@ -29,4 +34,8 @@ export function setActiveSessionName(sessionId: string, name: string): void {
   if (index < 0 || sessions[index].name === name) return;
   sessions[index] = { ...sessions[index], name };
   saveActiveSessions(sessions);
+}
+
+export function getActiveSession(sessionId: string): CachedSession | undefined {
+  return getActiveSessions().find(session => session.id === sessionId);
 }

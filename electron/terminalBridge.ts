@@ -4,7 +4,12 @@ import { randomUUID } from 'crypto';
 import { homedir } from 'os';
 import { addSession, getAllSessions, getSession, removeSession, updateSession } from '../lib/state/sessionStore';
 import { getCachedName, setCachedName } from '../lib/state/nameCache';
-import { getActiveSessions, saveActiveSessions, setActiveSessionName } from '../lib/state/activeSessionsCache';
+import {
+  getActiveSession,
+  getActiveSessions,
+  saveActiveSessions,
+  setActiveSessionName,
+} from '../lib/state/activeSessionsCache';
 import { SOCKET_EVENTS } from '../lib/types';
 import type { ResumeSessionRequest, SessionData } from '../lib/types';
 import {
@@ -188,7 +193,17 @@ export function setupTerminalBridge(io: SocketIOServer, ptyManager: PtyManager):
 
         // Track for auto-resume
         const active = getActiveSessions().filter(s => s.id !== sessionUuid);
-        active.push({ id: sessionUuid, name, cwd: opts.cwd, cliType });
+        active.push({
+          id: sessionUuid,
+          name,
+          cwd: opts.cwd,
+          cliType,
+          permissionMode: opts.permissionMode,
+          model: opts.model,
+          effort: opts.effort,
+          allowedTools: opts.allowedTools,
+          copilotMode: opts.copilotMode,
+        });
         saveActiveSessions(active);
 
         socket.emit('terminal:spawned', { sessionId: sessionUuid, name });
@@ -207,6 +222,7 @@ export function setupTerminalBridge(io: SocketIOServer, ptyManager: PtyManager):
       try {
         const sessionUuid = randomUUID();
         const sourceSession = getSession(opts.sourceSessionId);
+        const sourceProfile = getActiveSession(opts.sourceSessionId);
         const cwd = sourceSession?.cwd || homedir();
         const name = opts.name || `Fork-${opts.sourceSessionId.slice(0, 8)}`;
         console.log(`[terminal:fork] source=${opts.sourceSessionId.slice(0, 12)} newId=${sessionUuid.slice(0, 8)} cwd=${cwd}`);
@@ -223,6 +239,11 @@ export function setupTerminalBridge(io: SocketIOServer, ptyManager: PtyManager):
           resumeId: opts.sourceSessionId,
           fork: true,
           cliType: sourceSession?.cliType,
+          permissionMode: sourceProfile?.permissionMode,
+          model: sourceProfile?.model,
+          effort: sourceProfile?.effort,
+          allowedTools: sourceProfile?.allowedTools,
+          copilotMode: sourceProfile?.copilotMode,
         });
 
         // Wire up output (same pattern as terminal:new)
@@ -240,7 +261,17 @@ export function setupTerminalBridge(io: SocketIOServer, ptyManager: PtyManager):
 
         // Track for auto-resume
         const active = getActiveSessions().filter(s => s.id !== sessionUuid);
-        active.push({ id: sessionUuid, name, cwd, cliType: sourceSession?.cliType });
+        active.push({
+          id: sessionUuid,
+          name,
+          cwd,
+          cliType: sourceSession?.cliType,
+          permissionMode: sourceProfile?.permissionMode,
+          model: sourceProfile?.model,
+          effort: sourceProfile?.effort,
+          allowedTools: sourceProfile?.allowedTools,
+          copilotMode: sourceProfile?.copilotMode,
+        });
         saveActiveSessions(active);
 
         socket.emit('terminal:forked', { sessionId: sessionUuid, sourceSessionId: opts.sourceSessionId, name });
@@ -328,6 +359,9 @@ export function setupTerminalBridge(io: SocketIOServer, ptyManager: PtyManager):
         }
 
         const existing = getSession(sessionId);
+        const cachedProfile = getActiveSession(sessionId);
+        const defaultPermissionMode = require('../lib/state/appSettings').getSettings().defaultPermissionMode as string;
+        const permissionMode = cachedProfile?.permissionMode || defaultPermissionMode;
         // Resolve which CLI owns this session. Prefer the caller's explicit
         // hint (the Resume modal knows it from discovery), then any tracked
         // entry, then probe disk (Copilot session-state vs Claude projects).
@@ -361,7 +395,17 @@ export function setupTerminalBridge(io: SocketIOServer, ptyManager: PtyManager):
 
         // Track for auto-resume
         const active = getActiveSessions().filter(s => s.id !== sessionId);
-        active.push({ id: sessionId, name, cwd, cliType: resolvedCliType });
+        active.push({
+          id: sessionId,
+          name,
+          cwd,
+          cliType: resolvedCliType,
+          permissionMode,
+          model: cachedProfile?.model,
+          effort: cachedProfile?.effort,
+          allowedTools: cachedProfile?.allowedTools,
+          copilotMode: cachedProfile?.copilotMode,
+        });
         saveActiveSessions(active);
 
         // Guard against running an already-running session. Copilot does NOT
@@ -374,7 +418,16 @@ export function setupTerminalBridge(io: SocketIOServer, ptyManager: PtyManager):
         const reaped = reapOrphansForSessions([sessionId]);
         if (reaped.killed > 0) logReapResult(`resume ${name}`, reaped);
 
-        ptyManager.spawnResume(sessionId, { cwd, resumeId: sessionId, cliType: resolvedCliType });
+        ptyManager.spawnResume(sessionId, {
+          cwd,
+          resumeId: sessionId,
+          cliType: resolvedCliType,
+          permissionMode,
+          model: cachedProfile?.model,
+          effort: cachedProfile?.effort,
+          allowedTools: cachedProfile?.allowedTools,
+          copilotMode: cachedProfile?.copilotMode,
+        });
 
         subscribeOutput(sessionId);
 
@@ -514,6 +567,18 @@ export function setupTerminalBridge(io: SocketIOServer, ptyManager: PtyManager):
         systemPrompt: data.systemPrompt,
       });
 
+      const active = getActiveSessions().filter(session => session.id !== sessionUuid);
+      active.push({
+        id: sessionUuid,
+        name,
+        cwd: targetCwd,
+        cliType: 'claude',
+        permissionMode: data.permissionMode || 'bypassPermissions',
+        model: data.model,
+        effort: data.effort,
+      });
+      saveActiveSessions(active);
+
       subscribeOutput(sessionUuid);
 
       // Auto-accept trust prompts for handoff sessions too
@@ -538,11 +603,6 @@ export function setupTerminalBridge(io: SocketIOServer, ptyManager: PtyManager):
       } else {
         socket.emit('session:handoff-status', { handoffId, status: 'error', error: 'Failed to spawn session' });
       }
-
-      // Track for auto-resume
-      const active = getActiveSessions().filter(s => s.id !== sessionUuid);
-      active.push({ id: sessionUuid, name, cwd: targetCwd });
-      saveActiveSessions(active);
 
       socket.emit('terminal:spawned', { sessionId: sessionUuid, name });
     });

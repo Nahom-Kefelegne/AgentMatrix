@@ -43,22 +43,98 @@ cd "$REPO_DIR"
 echo -e "  Repo: ${REPO_DIR}"
 echo ""
 
-# Pull latest
-echo -e "${BLUE}Pulling latest from main...${NC}"
-git pull origin main
-echo -e "  ${CHECK} Code updated"
-echo ""
+stop_existing_instance() {
+    command -v lsof >/dev/null 2>&1 || return 0
+    local existing_pid existing_cwd
+    existing_pid="$(lsof -nP -iTCP:3000 -sTCP:LISTEN -t 2>/dev/null | head -1)"
+    [ -n "$existing_pid" ] || return 0
+    existing_cwd="$(lsof -a -p "$existing_pid" -d cwd -Fn 2>/dev/null | sed -n 's/^n//p' | head -1)"
+    if [ "$existing_cwd" != "$REPO_DIR" ]; then
+        echo -e "  ${CROSS} Port 3000 is already used by another process (${existing_pid})."
+        exit 1
+    fi
+    echo -e "  ${WARN} Stopping running Agent Matrix (${existing_pid}) before updating..."
+    kill "$existing_pid" 2>/dev/null || {
+        echo -e "  ${CROSS} Could not stop Agent Matrix. Quit it and retry."
+        exit 1
+    }
+    for _ in $(seq 1 30); do
+        kill -0 "$existing_pid" 2>/dev/null || break
+        sleep 1
+    done
+    kill -0 "$existing_pid" 2>/dev/null && {
+        echo -e "  ${CROSS} Agent Matrix did not exit. Quit it and retry."
+        exit 1
+    }
+}
 
-# Install dependencies (in case they changed)
-echo -e "${BLUE}Installing dependencies...${NC}"
-# See setup.sh: use the Microsoft proxy from the first request.
-if ! npm install --replace-registry-host=never --fetch-timeout=120000 --fetch-retry-maxtimeout=120000 --fetch-retries=2; then
-    reg=$(npm config get registry 2>/dev/null)
-    echo -e "  ${CROSS} Could not install dependencies through ${reg}."
-    echo -e "     Authenticate the Microsoft mirror, then re-run this script."
+backup_generated_lockfile() {
+    LOCKFILE_RESET=0
+    git diff --quiet HEAD -- package-lock.json 2>/dev/null && return 0
+    local backup_dir backup_file
+    backup_dir="$HOME/.agentmatrix/update-backups"
+    backup_file="$backup_dir/$(date +%Y%m%d-%H%M%S)-package-lock.patch"
+    mkdir -p "$backup_dir"
+    git diff --binary HEAD -- package-lock.json > "$backup_file"
+    git restore --source=HEAD --staged --worktree -- package-lock.json || {
+        echo -e "  ${CROSS} Could not restore generated package-lock.json."
+        exit 1
+    }
+    LOCKFILE_RESET=1
+    echo -e "  ${CHECK} Backed up generated package-lock changes to ${backup_file}"
+}
+
+install_dependencies() {
+    echo -e "${BLUE}Installing dependencies from the Microsoft mirror...${NC}"
+    npm --no-update-notifier ci \
+        --registry="$NPM_CONFIG_REGISTRY" \
+        --replace-registry-host=never \
+        --prefer-offline \
+        --fetch-timeout=30000 \
+        --fetch-retry-maxtimeout=30000 \
+        --fetch-retries=1 \
+        --no-audit --no-fund --no-progress || {
+        echo -e "  ${CROSS} Could not install dependencies through ${NPM_CONFIG_REGISTRY}."
+        echo -e "     Authenticate the Microsoft mirror, then re-run this script."
+        exit 1
+    }
+    echo -e "  ${CHECK} Dependencies installed"
+}
+
+branch="$(git rev-parse --abbrev-ref HEAD 2>/dev/null)"
+if [ "$branch" != "main" ]; then
+    echo -e "  ${CROSS} Update must run from the main branch."
+    echo -e "     Run: git switch main"
     exit 1
 fi
-echo -e "  ${CHECK} Dependencies installed"
+
+before="$(git rev-parse HEAD 2>/dev/null)"
+backup_generated_lockfile
+
+echo -e "${BLUE}Pulling latest from main...${NC}"
+git fetch --quiet origin main || {
+    echo -e "  ${CROSS} Could not fetch origin/main. Check network access and retry."
+    exit 1
+}
+git merge --ff-only origin/main || {
+    echo -e "  ${CROSS} Could not fast-forward to origin/main."
+    echo -e "     Commit or stash the local files shown by 'git status', then retry."
+    exit 1
+}
+after="$(git rev-parse HEAD 2>/dev/null)"
+echo -e "  ${CHECK} Code updated to $(git rev-parse --short HEAD)"
+echo ""
+
+stop_existing_instance
+
+dependencies_changed=0
+[ -d node_modules ] || dependencies_changed=1
+git diff --quiet "$before" "$after" -- package.json package-lock.json 2>/dev/null || dependencies_changed=1
+if [ "$dependencies_changed" -eq 1 ]; then
+    install_dependencies
+else
+    echo -e "  Dependencies unchanged — keeping existing node_modules."
+fi
 echo ""
 
 # ── Native modules (node-pty) ─────────────────────────────────────────────
@@ -107,7 +183,7 @@ else
         echo -e "  ${WARN} Xcode Command Line Tools missing — launching installer, then re-run."
         xcode-select --install 2>/dev/null || true
     fi
-    run_bounded 180 npx electron-rebuild -f -w node-pty || \
+    run_bounded 180 npm --no-update-notifier exec -- electron-rebuild -f -w node-pty || \
         run_bounded 180 npm rebuild node-pty || true
     find node_modules/node-pty/prebuilds -name spawn-helper -exec chmod +x {} \; 2>/dev/null || true
     [ -f node_modules/node-pty/build/Release/spawn-helper ] && \

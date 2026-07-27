@@ -348,6 +348,11 @@ erDiagram
         string name
         string cwd
         string cliType
+        string permissionMode
+        string model
+        string effort
+        string allowedTools
+        string copilotMode
     }
     AppSettings {
         boolean autoResume
@@ -481,9 +486,13 @@ The authoritative source for session names. Read/written on every access (no in-
 
 **File:** `lib/state/activeSessionsCache.ts`
 **Disk:** `~/.agentmatrix/active-sessions.json`
-**Schema:** `CachedSession[]` where `CachedSession = { id, name, cwd, cliType? }`
+**Schema:** `CachedSession[]` where `CachedSession` contains identity plus the
+optional launch profile (`permissionMode`, `model`, `effort`, `allowedTools`,
+`copilotMode`).
 
-Tracks sessions for auto-resume on app restart. Updated whenever a session is spawned, resumed, or ended.
+Tracks sessions for auto-resume on app restart. Updated whenever a session is
+spawned, resumed, or ended. Auto-resume reapplies the stored launch profile;
+legacy entries missing `permissionMode` migrate to the current default once.
 
 ### App Settings
 

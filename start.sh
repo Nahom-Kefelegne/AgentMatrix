@@ -17,6 +17,70 @@ export NPM_CONFIG_AUDIT="false"
 export NPM_CONFIG_FUND="false"
 export NO_UPDATE_NOTIFIER="1"
 
+stop_existing_instance() {
+    command -v lsof >/dev/null 2>&1 || return 0
+    local existing_pid existing_cwd
+    existing_pid="$(lsof -nP -iTCP:3000 -sTCP:LISTEN -t 2>/dev/null | head -1)"
+    [ -n "$existing_pid" ] || return 0
+    existing_cwd="$(lsof -a -p "$existing_pid" -d cwd -Fn 2>/dev/null | sed -n 's/^n//p' | head -1)"
+    if [ "$existing_cwd" != "$(pwd)" ]; then
+        echo "  ! Port 3000 is already used by another process (${existing_pid})."
+        echo "    Stop that process before starting Agent Matrix."
+        exit 1
+    fi
+
+    echo "Restarting existing Agent Matrix process (${existing_pid})..."
+    kill "$existing_pid" 2>/dev/null || {
+        echo "  ! Could not stop the existing process. Quit Agent Matrix and retry."
+        exit 1
+    }
+    for _ in $(seq 1 30); do
+        kill -0 "$existing_pid" 2>/dev/null || break
+        sleep 1
+    done
+    if kill -0 "$existing_pid" 2>/dev/null; then
+        echo "  ! Existing Agent Matrix process did not exit. Quit it and retry."
+        exit 1
+    fi
+}
+
+backup_generated_lockfile() {
+    LOCKFILE_RESET=0
+    git diff --quiet HEAD -- package-lock.json 2>/dev/null && return 0
+
+    local backup_dir backup_file
+    backup_dir="$HOME/.agentmatrix/update-backups"
+    backup_file="$backup_dir/$(date +%Y%m%d-%H%M%S)-package-lock.patch"
+    mkdir -p "$backup_dir"
+    git diff --binary HEAD -- package-lock.json > "$backup_file"
+    git restore --source=HEAD --staged --worktree -- package-lock.json || {
+        echo "  ! Could not restore generated package-lock.json."
+        exit 1
+    }
+    LOCKFILE_RESET=1
+    echo "  ✓ Backed up generated package-lock changes to $backup_file"
+}
+
+install_dependencies() {
+    echo "Installing dependencies from the Microsoft mirror..."
+    npm --no-update-notifier ci \
+        --registry="$NPM_CONFIG_REGISTRY" \
+        --replace-registry-host=never \
+        --prefer-offline \
+        --fetch-timeout=30000 \
+        --fetch-retry-maxtimeout=30000 \
+        --fetch-retries=1 \
+        --no-audit --no-fund --no-progress || {
+        echo "  ! Dependency install failed through $NPM_CONFIG_REGISTRY"
+        echo "    Run ./update.sh after fixing Microsoft mirror authentication."
+        exit 1
+    }
+    find node_modules/node-pty/prebuilds -name spawn-helper -exec chmod +x {} \; 2>/dev/null || true
+    [ -f node_modules/node-pty/build/Release/spawn-helper ] && \
+        chmod +x node_modules/node-pty/build/Release/spawn-helper 2>/dev/null || true
+}
+
+needs_dependencies=0
 if command -v git >/dev/null 2>&1 && [ -d .git ]; then
     echo "Pulling latest from git..."
     before="$(git rev-parse HEAD 2>/dev/null)"
@@ -30,6 +94,8 @@ if command -v git >/dev/null 2>&1 && [ -d .git ]; then
         exit 1
     fi
 
+    backup_generated_lockfile
+
     # fetch + merge --ff-only rather than `git pull`: it ignores the user's
     # pull.rebase config, never rewrites history or creates a merge commit, and
     # a dirty working tree only blocks the fast-forward if it would overwrite a
@@ -41,10 +107,8 @@ if command -v git >/dev/null 2>&1 && [ -d .git ]; then
                 echo "  ✓ Already up to date"
             else
                 echo "  ✓ Updated to latest"
-                # If dependency manifests changed, a plain start may run against
-                # stale node_modules — point the user at the full updater.
                 if ! git diff --quiet "$before" "$after" -- package.json package-lock.json 2>/dev/null; then
-                    echo "  ! Dependencies changed upstream — run ./update.sh to reinstall before starting."
+                    needs_dependencies=1
                 fi
             fi
         else
@@ -60,33 +124,8 @@ if command -v git >/dev/null 2>&1 && [ -d .git ]; then
     echo "  Revision: $(git rev-parse --short HEAD 2>/dev/null)"
 fi
 
-# A second Electron launch only focuses the existing single-instance process.
-# Stop the dev instance bound to this checkout first so running start.sh is a
-# real restart and cannot leave an old renderer/dashboard on screen.
-if command -v lsof >/dev/null 2>&1; then
-    existing_pid="$(lsof -nP -iTCP:3000 -sTCP:LISTEN -t 2>/dev/null | head -1)"
-    if [ -n "$existing_pid" ]; then
-        existing_cwd="$(lsof -a -p "$existing_pid" -d cwd -Fn 2>/dev/null | sed -n 's/^n//p' | head -1)"
-        if [ "$existing_cwd" = "$(pwd)" ]; then
-            echo "Restarting existing Agent Matrix process (${existing_pid})..."
-            kill "$existing_pid" 2>/dev/null || {
-                echo "  ! Could not stop the existing process. Quit Agent Matrix and retry."
-                exit 1
-            }
-            for _ in $(seq 1 30); do
-                kill -0 "$existing_pid" 2>/dev/null || break
-                sleep 1
-            done
-            if kill -0 "$existing_pid" 2>/dev/null; then
-                echo "  ! Existing Agent Matrix process did not exit. Quit it and retry."
-                exit 1
-            fi
-        else
-            echo "  ! Port 3000 is already used by another process (${existing_pid})."
-            echo "    Stop that process before starting Agent Matrix."
-            exit 1
-        fi
-    fi
-fi
+[ -d node_modules ] || needs_dependencies=1
+stop_existing_instance
+[ "$needs_dependencies" -eq 0 ] || install_dependencies
 
-npm run electron:dev
+npm --no-update-notifier run electron:dev
