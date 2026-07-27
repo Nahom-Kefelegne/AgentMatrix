@@ -6,6 +6,16 @@ import { checkForRename } from '@/lib/state/sessionName';
 import { setCachedName } from '@/lib/state/nameCache';
 import { ASK_USER_TOOLS, extractQuestion } from '@/lib/constants/askUserTools';
 
+interface ToolUseHookPayload {
+  session_id?: string;
+  transcript_path?: string;
+  tool_name?: string;
+  toolName?: string;
+  tool_input?: Record<string, unknown>;
+  toolArgs?: Record<string, unknown>;
+  agent_id?: string;
+}
+
 function buildToolSummary(toolName: string, toolInput?: Record<string, unknown>): string {
   if (!toolInput) return toolName;
 
@@ -30,9 +40,13 @@ function buildToolSummary(toolName: string, toolInput?: Record<string, unknown>)
   }
 }
 
-export async function POST(request: Request) {
+function processToolUse(payload: ToolUseHookPayload): void {
+  if (!payload.session_id) {
+    console.warn('[tool-use] ignored payload without session_id');
+    return;
+  }
+
   try {
-    const payload = await request.json();
     // Only update name if a /rename was detected — don't overwrite with slug/cwd
     const session = getSession(payload.session_id);
     if (session && payload.transcript_path) {
@@ -47,7 +61,9 @@ export async function POST(request: Request) {
       }
     }
 
-    const lastToolSummary = buildToolSummary(payload.tool_name, payload.tool_input);
+    const toolName = payload.tool_name || payload.toolName || '';
+    const toolInput = payload.tool_input || payload.toolArgs;
+    const lastToolSummary = buildToolSummary(toolName, toolInput);
     const lastActivity = Date.now();
 
     // Copilot's ask-user tools (e.g. AskUserQuestion) block waiting for the
@@ -56,9 +72,8 @@ export async function POST(request: Request) {
     // session is stuck showing "working" while it's really waiting on the user.
     // Treat them as "attention" (needs you); it clears automatically when the
     // answer arrives (PostToolUse → tool-complete → idle).
-    const toolName: string = payload.tool_name || payload.toolName || '';
     if (ASK_USER_TOOLS.has(toolName)) {
-      const question = extractQuestion(payload.tool_input || payload.toolArgs);
+      const question = extractQuestion(toolInput);
       const changes = {
         status: 'attention' as const,
         statusReason: question,
@@ -67,15 +82,15 @@ export async function POST(request: Request) {
       };
       updateSession(payload.session_id, changes);
       emitToClients(SOCKET_EVENTS.SESSION_UPDATE, { sessionId: payload.session_id, changes });
-      return NextResponse.json({ ok: true });
+      return;
     }
 
     // Track files modified by file-writing tools. Claude uses tool_input.file_path;
     // Copilot uses tool_input.path (verified against live payloads). Accept both.
     const fileModTools = ['Write', 'Edit', 'MultiEdit', 'create', 'edit'];
-    const filePath = (payload.tool_input?.file_path ?? payload.tool_input?.path) as string | undefined;
+    const filePath = (toolInput?.file_path ?? toolInput?.path) as string | undefined;
     let filesModified: string[] | undefined;
-    if (fileModTools.includes(payload.tool_name) && filePath) {
+    if (fileModTools.includes(toolName) && filePath) {
       const existing = session?.filesModified || [];
       if (!existing.includes(filePath)) {
         filesModified = [...existing, filePath];
@@ -84,7 +99,7 @@ export async function POST(request: Request) {
 
     updateSession(payload.session_id, {
       status: 'working',
-      currentTool: payload.tool_name,
+      currentTool: toolName,
       lastToolSummary,
       lastActivity,
       ...(filesModified ? { filesModified } : {}),
@@ -101,13 +116,31 @@ export async function POST(request: Request) {
     emitToClients(SOCKET_EVENTS.TOOL_START, {
       sessionId: payload.session_id,
       agentName: agentName || null,
-      toolName: payload.tool_name,
-      toolInput: payload.tool_input ? JSON.stringify(payload.tool_input).slice(0, 200) : undefined,
+      toolName,
+      toolInput: toolInput ? JSON.stringify(toolInput).slice(0, 200) : undefined,
     });
-
-    return NextResponse.json({ ok: true });
   } catch (error) {
     console.error('[tool-use]', error);
-    return NextResponse.json({ error: 'Internal error' }, { status: 500 });
   }
+}
+
+export async function POST(request: Request) {
+  let payload: ToolUseHookPayload;
+  try {
+    const raw: unknown = await request.json();
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
+      console.warn('[tool-use] ignored invalid payload');
+      return NextResponse.json({ ok: false }, { status: 202 });
+    }
+    payload = raw as ToolUseHookPayload;
+  } catch (error) {
+    console.error('[tool-use] invalid JSON:', error);
+    return NextResponse.json({ ok: false }, { status: 202 });
+  }
+
+  // PreToolUse is on Copilot's critical path. Acknowledge immediately and do
+  // state/telemetry work after the response so AgentMatrix can never hold up the
+  // tool it is observing.
+  setImmediate(() => processToolUse(payload));
+  return NextResponse.json({ ok: true }, { status: 202 });
 }

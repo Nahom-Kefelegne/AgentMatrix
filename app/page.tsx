@@ -18,6 +18,7 @@ import DashboardView from './components/DashboardView';
 import SessionDialog from './components/SessionDialog';
 import SpawnModal from './components/SpawnModal';
 import AppSettingsModal from './components/AppSettingsModal';
+import FirstRunIntro from './components/FirstRunIntro';
 import SplashScreen from './components/SplashScreen';
 import type { DashboardV2Navigation } from './components/dashboard-v2/types';
 
@@ -34,6 +35,7 @@ const DashboardV2Container = dynamic<DashboardV2Props>(
   () => import('./components/dashboard-v2/DashboardV2Container'),
   { ssr: false },
 );
+const INTRO_STORAGE_KEY = 'agentmatrix-intro-v2';
 
 function OfficeView() {
   const { connected, sessions, onEvent, socketRef } = useSocketContext();
@@ -57,9 +59,19 @@ function OfficeView() {
   const [showSpawn, setShowSpawn] = useState(false);
   const [orchestratorViewId, setOrchestratorViewId] = useState<string | null>(null);
   const [showSettings, setShowSettings] = useState(false);
+  const [showIntro, setShowIntro] = useState(true);
   const [viewMode, setViewMode] = useState<'office' | 'dashboard' | 'editor'>('dashboard');
   const [editorUnlocked, setEditorUnlocked] = useState(false);
   const canvasRef = useRef<OfficeCanvasHandle>(null);
+
+  useEffect(() => {
+    try {
+      const forced = new URLSearchParams(window.location.search).get('intro') === '1';
+      setShowIntro(forced || localStorage.getItem(INTRO_STORAGE_KEY) !== 'done');
+    } catch {
+      setShowIntro(true);
+    }
+  }, []);
 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
@@ -162,6 +174,14 @@ function OfficeView() {
   const handleOpenTasks = useCallback(() => setShowTaskBoard(true), []);
   const handleOpenResume = useCallback(() => setShowResume(true), []);
   const handleOpenSpawn = useCallback(() => setShowSpawn(true), []);
+  const handleIntroComplete = useCallback(() => {
+    try { localStorage.setItem(INTRO_STORAGE_KEY, 'done'); } catch { /* non-fatal */ }
+    setShowIntro(false);
+  }, []);
+  const handleReplayIntro = useCallback(() => {
+    setShowSettings(false);
+    setShowIntro(true);
+  }, []);
 
   const dashboardV2Navigation = useMemo<DashboardV2Navigation>(() => ({
     connected,
@@ -186,6 +206,10 @@ function OfficeView() {
   ]);
 
   const dashboardV2Active = viewMode === 'dashboard' && dashboardV2Loaded && dashboardV2Enabled;
+
+  if (showIntro) {
+    return <FirstRunIntro onComplete={handleIntroComplete} />;
+  }
 
   return (
     <>
@@ -281,6 +305,7 @@ function OfficeView() {
         dashboardV2Enabled={storedDashboardV2Enabled}
         dashboardV2Override={dashboardV2Override}
         onDashboardV2Change={setStoredDashboardV2Enabled}
+        onReplayIntro={handleReplayIntro}
       />
 
       {orchestratorViewId && (() => {

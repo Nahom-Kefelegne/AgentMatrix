@@ -132,39 +132,10 @@ console.log('Hooks configured successfully (silent-fail when app not running)');
 echo -e "  ${CHECK} Hooks configured in ${SETTINGS_FILE}"
 echo ""
 
-# Configure GitHub Copilot CLI hooks
-# Copilot supports user-level hooks at ~/.copilot/hooks/*.json with native
-# HTTP hook type — no curl shenanigans needed. Built-in timeoutSec means
-# they fail silently when Agent Matrix isn't running.
-COPILOT_DIR="$HOME/.copilot"
-COPILOT_HOOKS_DIR="$COPILOT_DIR/hooks"
-COPILOT_HOOKS_FILE="$COPILOT_HOOKS_DIR/agentmatrix.json"
-
-if command -v copilot &> /dev/null || [ -d "$COPILOT_DIR" ]; then
-    echo -e "${BLUE}Configuring GitHub Copilot CLI hooks...${NC}"
-    mkdir -p "$COPILOT_HOOKS_DIR"
-
-    # Use PascalCase event names so payload uses snake_case fields
-    # (session_id, tool_name, tool_input) matching our Claude hook payloads
-    # — our API routes work with both without modification.
-    cat > "$COPILOT_HOOKS_FILE" <<'COPILOT_HOOKS_EOF'
-{
-  "version": 1,
-  "hooks": {
-    "SessionStart": [{ "type": "http", "url": "http://localhost:3000/api/hooks/session-start", "timeoutSec": 2 }],
-    "SessionEnd":   [{ "type": "http", "url": "http://localhost:3000/api/hooks/session-end",   "timeoutSec": 2 }],
-    "PreToolUse":   [{ "type": "http", "url": "http://localhost:3000/api/hooks/tool-use",      "timeoutSec": 2 }],
-    "PostToolUse":  [{ "type": "http", "url": "http://localhost:3000/api/hooks/tool-complete", "timeoutSec": 2 }],
-    "SubagentStart":[{ "type": "http", "url": "http://localhost:3000/api/hooks/agent-start",   "timeoutSec": 2 }],
-    "SubagentStop": [{ "type": "http", "url": "http://localhost:3000/api/hooks/agent-stop",    "timeoutSec": 2 }],
-    "Stop":          [{ "type": "http", "url": "http://localhost:3000/api/hooks/stop",          "timeoutSec": 2 }]
-  }
-}
-COPILOT_HOOKS_EOF
-    echo -e "  ${CHECK} Copilot hooks configured in ${COPILOT_HOOKS_FILE}"
-else
-    echo -e "  ${WARN} Copilot CLI not detected — skipping Copilot hook setup"
-fi
+# The app owns ~/.copilot/hooks/agentmatrix.json and refreshes it before any
+# managed Copilot session starts. Keeping one runtime-generated source of truth
+# prevents installers from restoring stale or blocking PreToolUse handlers.
+echo -e "  ${CHECK} Copilot hooks will be configured on Agent Matrix startup"
 echo ""
 
 # If not in repo, clone it

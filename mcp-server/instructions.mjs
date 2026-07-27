@@ -1,6 +1,11 @@
 export const AGENTMATRIX_MCP_INSTRUCTIONS = `
 AgentMatrix provides UI tools for coordinating this managed coding session.
 
+Availability:
+- AgentMatrix tools are configured to load eagerly in managed Copilot sessions.
+- If a client still defers them, search within the agentmatrix server using the exact tool name (for example, open_file or open_symbol).
+- Never use a server-name-only tool search to decide that AgentMatrix is unavailable; that lookup can return an empty result even while every tool is registered.
+
 Status:
 - Call request_attention before asking the user for a decision, clarification, approval, or other blocking input.
 - Call work_complete as the final action after completing the user's task.

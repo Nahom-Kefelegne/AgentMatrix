@@ -9,6 +9,7 @@ import {
   issueNavigationCapability,
   type NavigationCapability,
 } from '../../lib/navigation/rootRegistry';
+import { buildAgentMatrixCopilotMcpConfig } from '../services/mcpConfig';
 
 // Opt-in raw PTY stream tee — set AGENTMATRIX_DEBUG_PTY=1 to dump every
 // chunk to ~/.agentmatrix/debug/<sessionId>.bin. Used to diagnose TUI
@@ -236,13 +237,23 @@ export class PtyManager {
     const cwdExists = existsSync(cwd);
     const safeCwd = cwdExists ? cwd : homedir();
     const env = { ...process.env };
+    let effectiveCliArgs = cliArgs;
     delete env.CLAUDECODE;
 
     // Copilot only delivers hooks to http://localhost when this is set; without
     // it every localhost HTTP hook silently no-fires, so AgentMatrix's dashboard
     // hooks (session/tool/agent activity) never arrive. Harmless for Claude, but
     // scope it to Copilot to be explicit. See docs/design/copilot-hooks-reference.md.
-    if (provider.type === 'copilot') env.COPILOT_HOOK_ALLOW_LOCALHOST = '1';
+    if (provider.type === 'copilot') {
+      env.COPILOT_HOOK_ALLOW_LOCALHOST = '1';
+      const parsedPort = Number.parseInt(process.env.PORT || '3000', 10);
+      const mcpPort = Number.isFinite(parsedPort) ? parsedPort : 3000;
+      effectiveCliArgs = [
+        ...cliArgs,
+        '--additional-mcp-config',
+        buildAgentMatrixCopilotMcpConfig(mcpPort),
+      ];
+    }
     if (navigationIdentity) {
       env.AGENTMATRIX_SESSION_ID = navigationIdentity.sessionId;
       env.AGENTMATRIX_NAVIGATION_CAPABILITY = navigationIdentity.capability;
@@ -263,21 +274,21 @@ export class PtyManager {
         const cmd = process.platform === 'win32' ? 'where agency' : 'which agency';
         const { execSync } = require('child_process');
         spawnBinary = execSync(cmd, { encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'] }).trim().split('\n')[0];
-        spawnArgs = [provider.type, ...cliArgs];
+        spawnArgs = [provider.type, ...effectiveCliArgs];
         agencyFound = true;
       } catch {
         // Agency not found — try direct binary, but give a clear error if that also fails
         console.warn(`[spawnPty] Agency enabled but 'agency' not found on PATH, trying direct ${provider.type} binary`);
         try {
           spawnBinary = provider.findBinary();
-          spawnArgs = cliArgs;
+          spawnArgs = effectiveCliArgs;
         } catch {
           throw new Error(`Agency binary not found on PATH and ${provider.type} CLI is not directly installed. Install Agency or the ${provider.displayName} CLI.`);
         }
       }
     } else {
       spawnBinary = provider.findBinary();
-      spawnArgs = cliArgs;
+      spawnArgs = effectiveCliArgs;
     }
 
     const label = useAgency ? `agency ${provider.type}` : provider.type;

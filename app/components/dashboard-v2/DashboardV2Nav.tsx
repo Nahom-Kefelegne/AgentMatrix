@@ -13,7 +13,7 @@ import { useThemeContext } from '../ThemeProvider';
 import type { DashboardV2Navigation, DashboardV2ViewMode } from './types';
 
 const VIEW_LABELS: { key: DashboardV2ViewMode; label: string }[] = [
-  { key: 'dashboard', label: 'Dashboard' },
+  { key: 'dashboard', label: 'Control Center' },
   { key: 'office', label: 'Office' },
 ];
 

@@ -1,4 +1,4 @@
-# Dashboard V2 - Console-First Mission Control
+# Dashboard V2 - Console-First Control Center
 
 Status: **Dashboard V2 and Context Canvas MVP implemented**
 
@@ -30,8 +30,8 @@ area and owns all ordinary keyboard input.
 
 ### 2.2 Attention is ranked, not tiled
 
-Sessions that need a decision, review, context reset, or intervention enter the
-attention rail. Healthy sessions move to a compact quiet rail.
+Every session remains in one list. Sessions needing a decision, review, context
+reset, or intervention sort first and receive stronger semantic treatment.
 
 ### 2.3 Repository context belongs to the conversation
 
@@ -44,9 +44,8 @@ originating conversation event.
 The interface uses:
 
 - A command rail for global app actions.
-- A signal rail for priority.
+- A unified session list with priority styling.
 - A terminal workspace for execution.
-- A quiet rail for background sessions.
 - A Context Canvas for temporary repository evidence.
 
 These boundaries encode workflow rather than decorating a card layout.
@@ -94,21 +93,18 @@ centered floating frame.
 +-----------------------------------------------------------------------+
 | AgentMatrix | Dashboard Office | New Resume Tasks | theme hooks prefs |
 +-----------------------------------------------------------------------+
-| Attention   | Selected session workspace                              |
+| Sessions    | Selected session workspace                              |
 |             | +----------------------+------------------------------+ |
 | signals     | | Live CLI             | Context Canvas (conditional) | |
 |             | |                      |                              | |
 |             | +----------------------+------------------------------+ |
-+-------------+---------------------------------------------------------+
-| Quiet sessions                                                        |
 +-----------------------------------------------------------------------+
 ```
 
 Desktop sizing:
 
 - Command rail: 48px.
-- Attention rail: approximately 200px.
-- Quiet rail: approximately 58px.
+- Session list: approximately 200px.
 - Workspace: all remaining height and width.
 
 The terminal occupies the full workspace width while Canvas is closed.
@@ -144,15 +140,14 @@ The integrated command rail contains:
 - Hook configuration.
 - Settings.
 
-There is no Sessions action. Session selection is already represented by the
-attention and quiet rails.
+There is no separate Sessions action. The left session list is always available.
 
 On narrow widths, labels collapse before icons. All icon-only controls retain
 accessible names.
 
-## 6. Attention Rail
+## 6. Unified Session List
 
-The rail is derived from `deriveDashboardModel` and ordered by urgency:
+The list is derived from `deriveDashboardModel().fleet` and ordered by urgency:
 
 1. Approval request.
 2. Human decision.
@@ -161,9 +156,11 @@ The rail is derived from `deriveDashboardModel` and ordered by urgency:
 5. Context warning.
 6. Possible stall.
 
-Selecting a signal changes the embedded terminal; it does not open a modal.
+Healthy working, idle, and completed sessions remain in the same list after the
+prioritized entries. Interaction-required sessions stay red until real CLI
+prompt/tool activity changes their status.
 
-The rail is deliberately narrow. Long reasons truncate, while the selected
+The list is deliberately narrow. Long reasons truncate, while the selected
 session exposes the full reason in the workspace header.
 
 ## 7. Session Workspace
@@ -204,20 +201,7 @@ The dashboard does not implement global single-key shortcuts while the terminal
 is active. xterm and the CLI own normal input. Global app shortcuts must ignore
 terminal and editable targets.
 
-## 8. Quiet Rail
-
-Healthy sessions appear in a horizontal compact rail containing:
-
-- Status.
-- Name.
-- Latest tool/action.
-- Activity sparkline.
-- Context usage.
-
-Selecting an item replaces the central terminal. The rail is horizontally
-scrollable and remains static.
-
-## 9. Context Canvas
+## 8. Context Canvas
 
 The Canvas is a conditional session-scoped companion to the terminal.
 
@@ -251,7 +235,7 @@ The Canvas reuses `@monaco-editor/react`:
 
 Monaco is dynamically imported only after the Canvas opens.
 
-## 10. Navigation Sources
+## 9. Navigation Sources
 
 ### Developer-controlled
 
@@ -274,7 +258,7 @@ Local AgentMatrix MCP tools:
 The tools navigate UI only. They cannot write files, execute commands, run Git,
 create terminals, or focus the OS window.
 
-## 11. Focus Policy
+## 10. Focus Policy
 
 Agent navigation preference:
 
@@ -294,7 +278,7 @@ Rules:
 - Never request OS focus.
 - Store navigation metadata, not source content, in telemetry.
 
-## 12. Diff Provenance
+## 11. Diff Provenance
 
 The UI never shows an ambiguous "diff." Every review declares:
 
@@ -317,7 +301,7 @@ Sources:
 This distinction prevents transcript patches from being mistaken for the full
 working-tree state.
 
-## 13. Review Feedback
+## 12. Review Feedback
 
 Review comments are structured session messages containing:
 
@@ -331,7 +315,7 @@ Review comments are structured session messages containing:
 AgentMatrix verifies freshness before delivery. Stale anchors require the
 developer to re-anchor, send original context, or cancel.
 
-## 14. Security Boundary
+## 13. Security Boundary
 
 The renderer does not decide whether a path is safe.
 
@@ -347,7 +331,7 @@ Server/main-process responsibilities:
 
 Model-facing paths are repository-relative POSIX paths only.
 
-## 15. Performance and RDP
+## 14. Performance and RDP
 
 - No infinite dashboard animation.
 - V2 and Context Canvas remain lazy chunks.
@@ -371,7 +355,7 @@ Model-facing paths are repository-relative POSIX paths only.
 - Terminal components do not subscribe to Canvas-only state.
 - CSS grid/flex owns layout; no resize loop performs repeated DOM reads.
 
-## 16. Feature Flag and Rollback
+## 15. Feature Flag and Rollback
 
 Dashboard V2 is the effective default.
 
@@ -384,14 +368,14 @@ Precedence:
 
 Dashboard V1 remains unchanged and independently renderable.
 
-## 17. Component Map
+## 16. Component Map
 
 ```text
 OfficeView
   DashboardV2Container
     DashboardV2
       DashboardV2Nav
-      SignalQueue
+      SessionSidebar
       SessionWorkspaceController
         EmbeddedSessionConsole
         ContextCanvas
@@ -400,12 +384,11 @@ OfficeView
           SearchResults
           DiffWorkspace / DiffCore
           ReviewFeedbackComposer
-      TelemetryRail
     FullscreenTerminal (on demand)
     ChangesViewer compatibility wrapper (shared DiffCore)
 ```
 
-## 18. Integration with Existing Code
+## 17. Integration with Existing Code
 
 ### Monaco
 
@@ -434,7 +417,11 @@ OfficeView
 
 - `mcp-server/index.mjs` exposes status plus six read-only navigation/review tools.
 - Every request is bound to one session capability and registered root.
-- AgentMatrix installs inheriting configuration for both Claude and Copilot.
+- Claude uses an inheriting user-level definition. Copilot receives a
+  session-bound `--additional-mcp-config`, so unmanaged sessions never see an
+  AgentMatrix server without valid credentials.
+- The Copilot definition uses `deferTools: "never"` so these eight control tools
+  stay available even when its global deferred-tool search is active.
 - Every managed new/resumed session receives the usage contract automatically:
   Claude through `--append-system-prompt`, Copilot through the AgentMatrix MCP
   server's model-facing initialization instructions.
@@ -445,14 +432,14 @@ The current editor/browse/Git routes are developer-facing and accept supplied
 paths; they are not an agent security boundary. Navigation tools use a separate
 read-only NavigationService with canonical root validation.
 
-## 19. Current and Planned Status
+## 18. Current and Planned Status
 
 Implemented:
 
 - Dashboard V2 flag and V1 rollback.
 - Attention model.
 - Embedded live CLI.
-- Quiet rail.
+- Unified session list with persistent attention treatment.
 - Lazy review summary and ChangesViewer.
 - Fullscreen reuse.
 - V2-native command rail and full-viewport layout.

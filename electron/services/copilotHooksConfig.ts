@@ -50,7 +50,7 @@ const COMMAND_EVENTS: Record<string, string> = {
 };
 
 interface HttpHandler { type: 'http'; url: string; timeoutSec: number }
-interface CommandHandler { type: 'command'; command: string }
+interface CommandHandler { type: 'command'; command: string; timeoutSec: number }
 
 export function buildCopilotHooksConfig(port: number): {
   version: number;
@@ -64,10 +64,12 @@ export function buildCopilotHooksConfig(port: number): {
   }
   for (const [event, route] of Object.entries(COMMAND_EVENTS)) {
     // Discard the response body so it can't be parsed as a permission decision;
-    // fail-open so a missing/slow app never blocks the tool.
+    // force a zero exit code, and bound both curl and Copilot so a missing or
+    // slow app never blocks the tool.
     hooks[event] = [{
       type: 'command',
-      command: `cat | curl -s -o /dev/null --connect-timeout 1 -X POST ${base}/${route} -H 'Content-Type: application/json' -d @- 2>/dev/null || true`,
+      command: `cat | curl -s -o /dev/null --connect-timeout 1 --max-time 1 -X POST ${base}/${route} -H 'Content-Type: application/json' -d @- 2>/dev/null || true`,
+      timeoutSec: 2,
     }];
   }
 

@@ -21,6 +21,7 @@ interface AppSettingsModalProps {
   dashboardV2Enabled: boolean;
   dashboardV2Override: boolean | null;
   onDashboardV2Change: (enabled: boolean) => void;
+  onReplayIntro: () => void;
 }
 
 const MODELS = [
@@ -68,6 +69,7 @@ export default function AppSettingsModal({
   dashboardV2Enabled,
   dashboardV2Override,
   onDashboardV2Change,
+  onReplayIntro,
 }: AppSettingsModalProps) {
   const { socketRef, connected } = useSocketContext();
   const [settings, setSettings] = useState<AppSettings>({
@@ -278,9 +280,9 @@ export default function AppSettingsModal({
             <span>Interface</span>
             <span className="subtle-text" style={{ fontSize: 11, letterSpacing: 0.4, textTransform: 'uppercase' }}>Preview</span>
           </div>
-          <div style={{ fontSize: 14, fontWeight: 600, marginTop: 6 }}>Dashboard V2</div>
+          <div style={{ fontSize: 14, fontWeight: 600, marginTop: 6 }}>Control Center</div>
           <div className="section-desc" style={{ marginBottom: 0 }}>
-            Switch the dashboard to the attention-queue Mission Control layout. Dashboard V1 remains available.
+            Use the console-first Control Center. Dashboard V1 remains available.
           </div>
           {dashboardV2Override !== null && (
             <div className="subtle-text" style={{ fontSize: 12, marginTop: 8 }}>
@@ -292,7 +294,7 @@ export default function AppSettingsModal({
           type="button"
           role="switch"
           aria-checked={dashboardV2Enabled}
-          aria-label="Use Dashboard V2"
+          aria-label="Use Control Center"
           disabled={saving}
           className={`toggle-switch ${dashboardV2Enabled ? 'toggle-switch--on' : 'toggle-switch--off'}`}
           onClick={async () => {
@@ -302,6 +304,20 @@ export default function AppSettingsModal({
           }}
         >
           <div className="toggle-switch-knob" style={{ left: dashboardV2Enabled ? 25 : 3 }} />
+        </button>
+      </div>
+
+      <hr className="divider" />
+
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 16, padding: '14px 0' }}>
+        <div style={{ flex: 1 }}>
+          <div className="section-title">Welcome Briefing</div>
+          <div className="section-desc" style={{ marginBottom: 0 }}>
+            Replay the overview of attention routing, Context Canvas, and session diff review.
+          </div>
+        </div>
+        <button type="button" className="btn-outline" onClick={onReplayIntro}>
+          Replay Welcome
         </button>
       </div>
 

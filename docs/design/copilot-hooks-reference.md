@@ -700,7 +700,25 @@ Return `{}` or HTTP 200 with empty body to take no action.
 
 ---
 
-## F. Gaps and Uncertainties
+## F. AgentMatrix Fail-Open Policy
+
+AgentMatrix hooks observe session activity; they never make policy decisions.
+
+- `PreToolUse` uses a command handler only because Copilot rejects localhost HTTP
+  for permission-capable hooks.
+- The command discards the response body, forces exit code zero, limits curl to
+  one second, and has a two-second Copilot timeout.
+- `/api/hooks/tool-use` acknowledges with HTTP 202 before doing session-state or
+  telemetry work.
+- Setup/update scripts do not duplicate the Copilot template. The running app
+  owns `~/.copilot/hooks/agentmatrix.json` and refreshes it before sessions start.
+
+This keeps AgentMatrix off the tool execution critical path: missing, slow, or
+failing telemetry may be dropped, but the underlying tool continues.
+
+---
+
+## G. Gaps and Uncertainties
 
 | Item | Status |
 |---|---|

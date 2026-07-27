@@ -345,9 +345,13 @@ export function deriveDashboardModel(
   }
   working.sort(sortLaneByRecent);
   idle.sort(sortLaneByRecent);
+  const queuePriority = new Map(queue.map(item => [item.sessionId, item.priority]));
   const fleet = sessions
     .map(session => toLaneItem(session, contextMap, now, t))
-    .sort(sortLaneByRecent);
+    .sort((a, b) => {
+      const priority = (queuePriority.get(a.session.id) ?? 100) - (queuePriority.get(b.session.id) ?? 100);
+      return priority || sortLaneByRecent(a, b);
+    });
 
   const stats = computeFleetStats(sessions, contextMap, queue.length);
 

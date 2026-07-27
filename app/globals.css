@@ -8,6 +8,7 @@
 @import "./styles/matrix-rain.css";
 @import "./styles/mission-control.css";
 @import "./styles/context-canvas.css";
+@import "./styles/first-run-intro.css";
 
 @custom-variant dark (&:is(.dark *));
 

@@ -3,42 +3,23 @@
 import {
   AlertTriangle,
   Bot,
-  CheckCircle2,
-  ChevronRight,
-  CircleGauge,
   Clock3,
   ExternalLink,
   GitCompareArrows,
   Info,
   Maximize2,
-  MessageSquareText,
   PanelRightOpen,
   ScrollText,
-  ShieldAlert,
   Terminal,
-  type LucideIcon,
 } from 'lucide-react';
 import { memo } from 'react';
-import type { AttentionItem, AttentionKind, LaneItem } from '@/lib/dashboard/attentionQueue';
+import type { AttentionItem, LaneItem } from '@/lib/dashboard/attentionQueue';
 import type { SessionData } from '@/lib/types';
 import CliIcon from '../CliIcon';
 import ContextCanvas from '../context-canvas/ContextCanvas';
 import SessionConsole from '../SessionConsole';
 import DashboardV2Nav from './DashboardV2Nav';
 import type { DashboardV2ViewProps } from './types';
-
-const SIGNAL_META: Record<AttentionKind, {
-  icon: LucideIcon;
-  label: string;
-  tone: string;
-}> = {
-  'approve-command': { icon: ShieldAlert, label: 'Approval Required', tone: 'critical' },
-  'needs-decision': { icon: MessageSquareText, label: 'Decision Required', tone: 'critical' },
-  'context-critical': { icon: CircleGauge, label: 'Context Critical', tone: 'critical' },
-  'ready-to-review': { icon: GitCompareArrows, label: 'Review Ready', tone: 'review' },
-  'context-warning': { icon: CircleGauge, label: 'Context Warning', tone: 'warning' },
-  'possibly-stuck': { icon: Clock3, label: 'Possibly Stalled', tone: 'warning' },
-};
 
 const STATUS_LABEL: Record<SessionData['status'], string> = {
   attention: 'Needs You',
@@ -70,20 +51,6 @@ function shortPath(path?: string): string {
   return parts.slice(-2).join('/') || path;
 }
 
-function Sparkline({ values }: { values: number[] }) {
-  return (
-    <span className="mc-sparkline" aria-hidden="true">
-      {values.map((value, index) => (
-        <span
-          key={index}
-          className="mc-sparkline-bar"
-          style={{ height: `${Math.max(2, Math.round(value * 18))}px` }}
-        />
-      ))}
-    </span>
-  );
-}
-
 function MiniContext({ usage }: { usage: number | null }) {
   if (usage === null) return <span className="mc-console-context">Context —</span>;
   const tone = usage >= 90 ? 'critical' : usage >= 80 ? 'warning' : 'healthy';
@@ -104,78 +71,96 @@ function MiniContext({ usage }: { usage: number | null }) {
   );
 }
 
-const SignalRow = memo(function SignalRow({
+const SessionListItem = memo(function SessionListItem({
   item,
+  attention,
   selected,
   onSelect,
 }: {
-  item: AttentionItem;
+  item: LaneItem;
+  attention?: AttentionItem;
   selected: boolean;
   onSelect: (sessionId: string) => void;
 }) {
-  const meta = SIGNAL_META[item.kind];
-  const Icon = meta.icon;
+  const { session } = item;
+  const tone = session.status === 'attention'
+    ? 'attention'
+    : attention?.kind === 'ready-to-review'
+      ? 'review'
+      : attention
+        ? 'warning'
+        : session.status;
+  const detail = attention?.detail
+    || (session.status === 'attention' ? session.statusReason : undefined)
+    || item.lastAction
+    || STATUS_LABEL[session.status];
   return (
     <button
-      id={`mc-signal-${item.sessionId}`}
       type="button"
       aria-pressed={selected}
-      className={`mc-signal mc-signal--${meta.tone} ${selected ? 'mc-signal--selected' : ''}`}
-      onClick={() => onSelect(item.sessionId)}
+      className={`mc-session-item mc-session-item--${tone} ${selected ? 'mc-session-item--selected' : ''}`}
+      onClick={() => onSelect(session.id)}
+      aria-label={`Open ${session.name}, ${attention?.label || STATUS_LABEL[session.status]}`}
     >
-      <span className="mc-signal-node" aria-hidden="true" />
-      <span className="mc-signal-icon"><Icon size={15} strokeWidth={1.8} aria-hidden="true" /></span>
-      <span className="mc-signal-content">
-        <span className="mc-signal-topline">
-          <span className="mc-signal-name">{item.sessionName}</span>
-          <span className="mc-signal-age">{timeAgo(item.waitingSince)}</span>
+      <span className={`mc-live-dot mc-live-dot--${session.status}`} aria-hidden="true" />
+      <span className="mc-session-item-copy">
+        <span className="mc-session-item-topline">
+          <span className="mc-session-item-name" title={session.name} translate="no">
+            <CliIcon cliType={session.cliType} />
+            {session.name}
+          </span>
+          <span className="mc-session-item-status">{attention?.label || STATUS_LABEL[session.status]}</span>
         </span>
-        <span className="mc-signal-label">{meta.label}</span>
-        {item.detail ? <span className="mc-signal-detail">{item.detail}</span> : null}
+        <span className="mc-session-item-subline">
+          <span className="mc-session-item-detail" title={detail}>{detail}</span>
+          <span className="mc-session-item-meta">
+            {item.contextUsage === null ? timeAgo(item.lastActivity) : `${numberFormat.format(100 - item.contextUsage)}% left`}
+          </span>
+        </span>
       </span>
-      <ChevronRight className="mc-signal-chevron" size={15} aria-hidden="true" />
     </button>
   );
 });
 
-function SignalQueue({
+function SessionSidebar({
+  sessions,
   queue,
   selectedSessionId,
   onSelect,
 }: {
+  sessions: LaneItem[];
   queue: AttentionItem[];
   selectedSessionId: string | null;
   onSelect: (sessionId: string) => void;
 }) {
+  const attentionBySession = new Map(queue.map(item => [item.sessionId, item]));
   return (
-    <aside className="mc-queue" aria-labelledby="mc-queue-title">
+    <aside className="mc-session-sidebar" aria-labelledby="mc-session-list-title">
       <header className="mc-section-header">
         <div>
-          <span className="mc-eyebrow">Human Queue</span>
-          <h2 id="mc-queue-title">What Needs You</h2>
+          <span className="mc-eyebrow">Sessions</span>
+          <h2 id="mc-session-list-title">Session List</h2>
         </div>
-        <span className="mc-key-hint">{numberFormat.format(queue.length)} Signals</span>
+        <span className={`mc-key-hint ${queue.length > 0 ? 'mc-key-hint--attention' : ''}`}>
+          {numberFormat.format(sessions.length)}
+          {queue.length > 0 ? ` · ${numberFormat.format(queue.length)} need you` : ''}
+        </span>
       </header>
 
-      {queue.length > 0 ? (
-        <div className="mc-signal-list" aria-label="Sessions Needing Attention">
-          {queue.map(item => (
-            <SignalRow
-              key={item.id}
+      {sessions.length > 0 ? (
+        <div className="mc-session-list">
+          {sessions.map(item => (
+            <SessionListItem
+              key={item.session.id}
               item={item}
-              selected={selectedSessionId === item.sessionId}
+              attention={attentionBySession.get(item.session.id)}
+              selected={selectedSessionId === item.session.id}
               onSelect={onSelect}
             />
           ))}
         </div>
       ) : (
-        <div className="mc-queue-clear">
-          <CheckCircle2 size={20} strokeWidth={1.6} aria-hidden="true" />
-          <div>
-            <strong>Nothing Is Blocked</strong>
-            <span>Healthy sessions stay in the quiet rail below.</span>
-          </div>
-        </div>
+        <div className="mc-session-list-empty">Start a session from New.</div>
       )}
     </aside>
   );
@@ -204,7 +189,7 @@ function ConsoleWorkspace(props: DashboardV2ViewProps) {
         <p>
           {model.stats.total === 0
             ? 'Start a session from “+ New” to open its CLI here.'
-            : 'Choose an attention signal or a session from the quiet rail.'}
+            : 'Choose a session from the session list.'}
         </p>
       </main>
     );
@@ -326,79 +311,6 @@ function ConsoleWorkspace(props: DashboardV2ViewProps) {
   );
 }
 
-const TelemetryItem = memo(function TelemetryItem({
-  item,
-  selected,
-  onSelect,
-}: {
-  item: LaneItem;
-  selected: boolean;
-  onSelect: (sessionId: string) => void;
-}) {
-  const { session } = item;
-  return (
-    <button
-      type="button"
-      className={`mc-telemetry-item ${session.status === 'attention' ? 'mc-telemetry-item--attention' : ''} ${selected ? 'mc-telemetry-item--selected' : ''}`}
-      onClick={() => onSelect(session.id)}
-      aria-label={`Open ${session.name} CLI`}
-    >
-      <span className={`mc-live-dot mc-live-dot--${session.status}`} />
-      <span className="mc-telemetry-name">{session.name}</span>
-      <span className="mc-telemetry-action">
-        {session.status === 'attention'
-          ? session.statusReason || 'Needs your input'
-          : item.lastAction || STATUS_LABEL[session.status]}
-      </span>
-      <Sparkline values={item.sparkline} />
-      <span className="mc-telemetry-context">
-        {item.contextUsage === null ? 'ctx —' : `ctx ${numberFormat.format(item.contextUsage)}%`}
-      </span>
-    </button>
-  );
-});
-
-function TelemetryRail({
-  items,
-  attentionCount,
-  selectedSessionId,
-  onSelect,
-}: {
-  items: LaneItem[];
-  attentionCount: number;
-  selectedSessionId: string | null;
-  onSelect: (sessionId: string) => void;
-}) {
-  return (
-    <section className="mc-telemetry" aria-labelledby="mc-telemetry-title">
-      <div className="mc-telemetry-heading">
-        <div>
-          <span className="mc-eyebrow">Sessions</span>
-          <h2 id="mc-telemetry-title">Session List</h2>
-        </div>
-        <span>
-          {numberFormat.format(items.length)} Total
-          {attentionCount > 0 ? ` · ${numberFormat.format(attentionCount)} Need You` : ''}
-        </span>
-      </div>
-      {items.length > 0 ? (
-        <div className="mc-telemetry-track">
-          {items.map(item => (
-            <TelemetryItem
-              key={item.session.id}
-              item={item}
-              selected={selectedSessionId === item.session.id}
-              onSelect={onSelect}
-            />
-          ))}
-        </div>
-      ) : (
-        <div className="mc-telemetry-empty">No sessions yet.</div>
-      )}
-    </section>
-  );
-}
-
 export default function DashboardV2(props: DashboardV2ViewProps) {
   return (
     <div className="mc-shell" data-scroll-area>
@@ -406,19 +318,14 @@ export default function DashboardV2(props: DashboardV2ViewProps) {
       <div className="mc-frame">
         <DashboardV2Nav {...props.navigation} />
         <div className="mc-workspace">
-          <SignalQueue
+          <SessionSidebar
+            sessions={props.model.fleet}
             queue={props.model.queue}
             selectedSessionId={props.selectedSessionId}
             onSelect={props.onSelectSession}
           />
           <ConsoleWorkspace {...props} />
         </div>
-        <TelemetryRail
-          items={props.model.fleet}
-          attentionCount={props.model.queue.length}
-          selectedSessionId={props.selectedSessionId}
-          onSelect={props.onSelectSession}
-        />
       </div>
     </div>
   );

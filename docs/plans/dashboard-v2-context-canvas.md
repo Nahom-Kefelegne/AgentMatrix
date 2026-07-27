@@ -10,8 +10,7 @@ Turn Dashboard V2 into the primary developer workspace for supervising multiple
 CLI coding agents:
 
 1. The selected Copilot or Claude CLI owns the majority of the viewport.
-2. The attention queue routes only sessions that need human judgment.
-3. Healthy sessions remain available in a compact quiet rail.
+2. One session list contains every session and prioritizes those needing human judgment.
 4. A session-scoped Context Canvas reveals code, search results, and diffs
    without replacing the CLI or turning AgentMatrix into a generic IDE.
 5. The selected session can safely ask AgentMatrix to reveal repository context.
@@ -26,7 +25,7 @@ Dashboard V2 shipped in `b55bda0` with:
 - Default-enabled feature flag with V1 fallback.
 - Attention queue derived by `lib/dashboard/attentionQueue.ts`.
 - Embedded `SessionConsole` as the central workspace.
-- Quiet-session telemetry rail.
+- Unified left session list with attention/review priority.
 - Lazy transcript change summaries.
 - Dynamic `ChangesViewer` and `FullscreenTerminal`.
 - V2-specific `mc-` CSS namespace.
@@ -89,21 +88,18 @@ Desktop viewport budget:
 ```text
 48px  Integrated command rail
 rest  200px attention rail + selected-session workspace
-58px  Quiet-session rail
 ```
 
 ```text
 +-----------------------------------------------------------------------+
 | AM | Dashboard Office | New Resume Tasks | theme hooks settings       |
 +-----------------------------------------------------------------------+
-| Attention    | Session Workspace                                      |
+| Session list | Session Workspace                                      |
 |              | +--------------------+-------------------------------+ |
 | session A    | | Live CLI           | Context Canvas (when open)    | |
 | session B    | |                    | Code / Search / Diff / Review  | |
 |              | |                    |                               | |
 |              | +--------------------+-------------------------------+ |
-+--------------+--------------------------------------------------------+
-| Quiet rail: selected and healthy sessions                             |
 +-----------------------------------------------------------------------+
 ```
 
@@ -111,7 +107,7 @@ When Canvas is closed, the terminal consumes the complete workspace width.
 When Canvas opens, the default split is 62% terminal / 38% Canvas and is
 resizable between 35% and 70% Canvas width.
 
-Below 900px, Canvas becomes a bottom drawer. Below 640px, the attention rail
+Below 900px, Canvas becomes a bottom drawer. Below 640px, the session list
 becomes a collapsible strip above the workspace.
 
 ## 5. Major Components
@@ -142,11 +138,12 @@ interface DashboardV2Navigation {
 }
 ```
 
-### 5.2 `AttentionQueue`
+### 5.2 `SessionSidebar`
 
 Responsibility:
 
-- Render `AttentionItem[]` from `deriveDashboardModel`.
+- Render every `LaneItem` from `deriveDashboardModel().fleet`.
+- Sort attention/review/warning sessions first while retaining all healthy sessions.
 - Remain approximately 200px wide on desktop.
 - Select a session without opening the legacy modal.
 - Show urgency, reason, and wait duration.
@@ -584,8 +581,7 @@ Deliver:
 - V2-native command rail.
 - Remove Sessions action.
 - Edge-to-edge layout.
-- 200px attention rail.
-- Compact quiet rail.
+- 200px unified session list.
 - Fullscreen button using existing `FullscreenTerminal`.
 
 ### Phase 1 - Manual Context Canvas MVP (implemented)
@@ -689,7 +685,7 @@ functional rollback paths.
 
 ### Functional
 
-- Select attention and quiet sessions.
+- Select attention and healthy sessions from the same list.
 - Switch terminal sessions while Canvas is open/closed/pinned.
 - Open/close fullscreen and verify PTY resize ownership.
 - Open exact file/range from terminal links.
