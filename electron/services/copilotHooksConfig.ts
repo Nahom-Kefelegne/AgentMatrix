@@ -62,14 +62,6 @@ export function buildCopilotHooksConfig(port: number): {
   for (const [event, route] of Object.entries(HTTP_EVENTS)) {
     hooks[event] = [{ type: 'http', url: `${base}/${route}`, timeoutSec: 2 }];
   }
-  // SessionStart officially processes `additionalContext`. Keep monitoring and
-  // model-context injection separate so the normal session route stays shared
-  // with Claude while this response is Copilot-specific.
-  hooks.SessionStart.push({
-    type: 'http',
-    url: `${base}/copilot-context`,
-    timeoutSec: 2,
-  });
   for (const [event, route] of Object.entries(COMMAND_EVENTS)) {
     // Discard the response body so it can't be parsed as a permission decision;
     // fail-open so a missing/slow app never blocks the tool.

@@ -150,8 +150,7 @@ export class CopilotProvider implements CliProvider {
   readonly iconColor = '#6E40C9';
 
   // Copilot receives AgentMatrix context through MCP server initialization
-  // instructions (enabled explicitly in spawn/resume args), not Claude's
-  // --append-system-prompt mechanism.
+  // instructions, not Claude's --append-system-prompt mechanism.
   readonly supportsMcp = false;
   readonly supportsFork = false;         // No --fork-session equivalent.
   readonly supportsContextTracking = true;  // getContextUsage reads session-store.db.

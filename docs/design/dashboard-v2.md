@@ -436,8 +436,8 @@ OfficeView
 - Every request is bound to one session capability and registered root.
 - AgentMatrix installs inheriting configuration for both Claude and Copilot.
 - Every managed new/resumed session receives the usage contract automatically:
-  Claude through `--append-system-prompt`, Copilot through a SessionStart
-  `additionalContext` hook.
+  Claude through `--append-system-prompt`, Copilot through the AgentMatrix MCP
+  server's model-facing initialization instructions.
 
 ### Security
 

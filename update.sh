@@ -168,10 +168,7 @@ if command -v copilot &> /dev/null || [ -d "$COPILOT_DIR" ]; then
 {
   "version": 1,
   "hooks": {
-    "SessionStart": [
-      { "type": "http", "url": "http://localhost:3000/api/hooks/session-start", "timeoutSec": 2 },
-      { "type": "http", "url": "http://localhost:3000/api/hooks/copilot-context", "timeoutSec": 2 }
-    ],
+    "SessionStart": [{ "type": "http", "url": "http://localhost:3000/api/hooks/session-start", "timeoutSec": 2 }],
     "SessionEnd":   [{ "type": "http", "url": "http://localhost:3000/api/hooks/session-end",   "timeoutSec": 2 }],
     "PreToolUse":   [{ "type": "http", "url": "http://localhost:3000/api/hooks/tool-use",      "timeoutSec": 2 }],
     "PostToolUse":  [{ "type": "http", "url": "http://localhost:3000/api/hooks/tool-complete", "timeoutSec": 2 }],
