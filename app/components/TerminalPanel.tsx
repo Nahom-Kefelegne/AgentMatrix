@@ -6,6 +6,7 @@ import type { CliType } from '@/lib/types';
 import type { NavigationRequest } from '@/lib/navigation/types';
 import { createTerminalLinks } from '@/lib/terminal-links';
 import { TERMINAL_THEME } from '@/lib/terminalTheme';
+import { getCleanTerminalSelection } from '@/lib/terminal-copy';
 
 interface TerminalPanelProps {
   sessionId: string;
@@ -184,7 +185,7 @@ export default function TerminalPanel({ sessionId, sessionName, cwd, visible, re
           }
           // Ctrl+Shift+C — copy selection (Windows/Linux convention)
           if (e.type === 'keydown' && e.code === 'KeyC' && e.shiftKey && e.ctrlKey) {
-            const sel = terminal.getSelection();
+            const sel = getCleanTerminalSelection(terminal);
             if (sel) navigator.clipboard.writeText(sel);
             return false;
           }
@@ -200,7 +201,7 @@ export default function TerminalPanel({ sessionId, sessionName, cwd, visible, re
           }
           // Cmd+C on Mac — copy if selection, else SIGINT
           if (e.type === 'keydown' && e.code === 'KeyC' && e.metaKey && !e.shiftKey) {
-            const sel = terminal.getSelection();
+            const sel = getCleanTerminalSelection(terminal);
             if (sel) {
               navigator.clipboard.writeText(sel);
               return false;

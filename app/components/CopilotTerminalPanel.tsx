@@ -6,6 +6,7 @@ import { useXterm } from '@/lib/hooks/useXterm';
 import type { NavigationRequest } from '@/lib/navigation/types';
 import { TERMINAL_THEME } from '@/lib/terminalTheme';
 import { perfEvent } from '@/lib/perf';
+import { getCleanTerminalSelection } from '@/lib/terminal-copy';
 
 // Copilot's timeline scrolling has two regimes:
 //
@@ -146,7 +147,7 @@ export default function CopilotTerminalPanel({ sessionId, sessionName, cwd, visi
       return false;
     }
     if (e.type === 'keydown' && e.code === 'KeyC' && e.shiftKey && e.ctrlKey) {
-      const sel = term.getSelection();
+      const sel = getCleanTerminalSelection(term);
       if (sel) navigator.clipboard.writeText(sel);
       return false;
     }
@@ -158,7 +159,7 @@ export default function CopilotTerminalPanel({ sessionId, sessionName, cwd, visi
       return false;
     }
     if (e.type === 'keydown' && e.code === 'KeyC' && e.metaKey && !e.shiftKey) {
-      const sel = term.getSelection();
+      const sel = getCleanTerminalSelection(term);
       if (sel) { navigator.clipboard.writeText(sel); return false; }
       return true;
     }

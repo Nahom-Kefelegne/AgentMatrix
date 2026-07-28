@@ -456,6 +456,7 @@ export class NavigationService {
     if (typeof raw !== 'string' || !raw.trim() || raw.length > 4_096 || raw.includes('\0')) {
       throw new NavigationServiceError('INVALID_LINK', 'A valid terminal link is required.');
     }
+
     const root = await this.resolveRoot(sessionId, signal);
     const parsed = parseDeveloperLink(raw.trim());
     validateSourceRange(parsed.range);
@@ -485,6 +486,87 @@ export class NavigationService {
     }
   }
 
+  async resolveDocumentLink(
+    sessionId: string,
+    documentPath: string,
+    raw: string,
+    signal?: AbortSignal,
+  ): Promise<
+    | { kind: 'fragment'; fragment: string }
+    | { kind: 'external'; url: string }
+    | { kind: 'target'; path: string; fragment?: string; repoRef: string }
+  > {
+    if (typeof raw !== 'string' || !raw.trim() || raw.length > 4_096 || raw.includes('\0')) {
+      throw new NavigationServiceError('INVALID_LINK', 'A valid document link is required.');
+    }
+    const reference = raw.trim();
+    if (reference.startsWith('#')) {
+      let fragment: string;
+      try {
+        fragment = decodeURIComponent(reference.slice(1)).trim();
+      } catch {
+        throw new NavigationServiceError('INVALID_FRAGMENT', 'Document fragment is invalid.');
+      }
+      if (!fragment || fragment.length > 256) {
+        throw new NavigationServiceError('INVALID_FRAGMENT', 'Document fragment is invalid.');
+      }
+      return { kind: 'fragment', fragment };
+    }
+    if (/^https?:\/\//i.test(reference)) {
+      const url = new URL(reference);
+      if (url.protocol !== 'http:' && url.protocol !== 'https:') {
+        throw new NavigationServiceError('UNSAFE_URL', 'Only HTTP(S) document links are allowed.', 403);
+      }
+      return { kind: 'external', url: url.href };
+    }
+    if (
+      reference.startsWith('//')
+      || /^[A-Za-z][A-Za-z0-9+.-]*:/.test(reference)
+      || reference.startsWith('/')
+      || reference.includes('\\')
+    ) {
+      throw new NavigationServiceError('UNSAFE_URL', 'This document link scheme is not allowed.', 403);
+    }
+
+    const root = await this.resolveRoot(sessionId, signal);
+    const document = await this.resolveModelPath(root, documentPath, signal);
+    const hashIndex = reference.indexOf('#');
+    const pathPart = hashIndex >= 0 ? reference.slice(0, hashIndex) : reference;
+    let fragment: string | undefined;
+    try {
+      fragment = hashIndex >= 0 ? decodeURIComponent(reference.slice(hashIndex + 1)).trim() : undefined;
+    } catch {
+      throw new NavigationServiceError('INVALID_FRAGMENT', 'Document fragment is invalid.');
+    }
+    const queryIndex = pathPart.indexOf('?');
+    const withoutQuery = queryIndex >= 0 ? pathPart.slice(0, queryIndex) : pathPart;
+    let decoded: string;
+    try {
+      decoded = decodeURIComponent(withoutQuery);
+    } catch {
+      throw new NavigationServiceError('INVALID_PATH_ENCODING', 'Document link contains invalid percent encoding.');
+    }
+    if (!decoded || decoded.includes('\0') || decoded.includes('\\')) {
+      throw new NavigationServiceError('INVALID_LINK', 'Document link path is invalid.');
+    }
+
+    const candidate = path.posix.normalize(path.posix.join(path.posix.dirname(document.relativePath), decoded));
+    if (
+      candidate === '..'
+      || candidate.startsWith('../')
+      || path.posix.isAbsolute(candidate)
+    ) {
+      throw new NavigationServiceError('PATH_OUTSIDE_ROOT', 'Document link points outside the repository.', 403);
+    }
+    const resolved = await this.resolveModelPath(root, candidate, signal);
+    return {
+      kind: 'target',
+      path: resolved.relativePath,
+      fragment: fragment || undefined,
+      repoRef: root.repoRef,
+    };
+  }
+
   async validateRequestTarget(
     sessionId: string,
     target: NavigationRequest['target'],
@@ -497,6 +579,7 @@ export class NavigationService {
       path: resolved.relativePath,
       range: target.range,
       symbol: target.symbol,
+      fragment: target.fragment,
     };
   }
 

@@ -11,6 +11,20 @@ export interface ReviewComment {
   resolved: boolean;
 }
 
+export interface SessionFileChange {
+  path: string;
+  op: 'create' | 'update' | 'delete' | 'unknown';
+  detectedBy: 'hook' | 'transcript' | 'watcher';
+  toolName?: string;
+  toolCallRef?: string;
+}
+
+export interface SessionFilesChangedEvent {
+  sessionId: string;
+  completedAt: number;
+  changes?: SessionFileChange[];
+}
+
 // ===== CLI Types =====
 
 export type CliType = 'claude' | 'copilot';
@@ -153,7 +167,7 @@ export interface ServerToClientEvents {
   'session:end': (data: { sessionId: string }) => void;
   'session:update': (data: { sessionId: string; changes: Partial<SessionData> }) => void;
   /** A file-mutating tool completed — the changes viewer should re-fetch. */
-  'session:files-changed': (data: { sessionId: string }) => void;
+  'session:files-changed': (data: SessionFilesChangedEvent) => void;
   /**
    * An out-of-band (ACP / injector) query the app ran against a session —
    * summary generation, handoff, deep search. Echoed to the console so these

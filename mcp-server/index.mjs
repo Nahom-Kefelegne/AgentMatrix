@@ -59,7 +59,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
     },
     {
       name: 'open_file',
-      description: 'Ask AgentMatrix Canvas to open a repository-relative POSIX file path. Returns UI status only.',
+      description: 'Ask AgentMatrix Canvas to open a repository-relative POSIX file path. Markdown renders as a document with Source available. Returns UI status only.',
       inputSchema: {
         type: 'object',
         properties: {

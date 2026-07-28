@@ -9,6 +9,9 @@ import {
   type NavigationRequest,
   type NavigationTarget,
 } from '@/lib/navigation/types';
+import { isMarkdownPath } from './markdown';
+import type { SessionFilesChangedEvent } from '@/lib/types';
+import { invalidateNavigationFileEvent } from './useNavigationFile';
 
 export interface SessionCanvasState extends CanvasState {
   queuedRequests: NavigationRequest[];
@@ -55,7 +58,7 @@ function modeForRequest(request: NavigationRequest): CanvasMode {
     case 'open_review':
       return 'review';
     default:
-      return 'code';
+      return isMarkdownPath(request.target?.path) ? 'document' : 'code';
   }
 }
 
@@ -100,8 +103,11 @@ export function useContextCanvas(
   socketRef: React.RefObject<any>,
 ): ContextCanvasController {
   const [states, setStates] = useState<Map<string, SessionCanvasState>>(() => new Map(canvasStateCache));
+  const statesRef = useRef(states);
+  statesRef.current = states;
   const selectedRef = useRef(selectedSessionId);
   selectedRef.current = selectedSessionId;
+  const autoPreviewTimersRef = useRef<Map<string, number>>(new Map());
 
   const updateSession = useCallback((
     sessionId: string,
@@ -133,10 +139,23 @@ export function useContextCanvas(
       const isPinned = previous.mode !== 'closed' && previous.disposition === 'pinned';
       const shouldQueue = !isSelected
         || request.presentation?.disposition === 'queue'
-        || (isPinned && request.source !== 'developer' && request.source !== 'terminal_link');
+        || (isPinned && request.source !== 'developer' && request.source !== 'terminal_link')
+        || (
+          request.source === 'session_event'
+          && previous.mode !== 'closed'
+          && previous.request?.source !== 'session_event'
+          && previous.request?.target?.path !== request.target?.path
+        );
 
       if (shouldQueue) {
-        const queued = previous.queuedRequests.filter(item => item.requestRef !== request.requestRef);
+        const queued = previous.queuedRequests.filter(item =>
+          item.requestRef !== request.requestRef
+          && !(
+            request.source === 'session_event'
+            && item.source === 'session_event'
+            && item.target?.path === request.target?.path
+          ),
+        );
         return { ...previous, queuedRequests: [...queued, request].slice(-20) };
       }
 
@@ -165,6 +184,95 @@ export function useContextCanvas(
     socket.on('navigation:requested' as any, handleRequested);
     return () => socket.off('navigation:requested' as any, handleRequested);
   }, [openRequest, socketRef]);
+
+  useEffect(() => {
+    const socket = socketRef.current;
+    if (!socket) return;
+    const handleFilesChanged = (event: SessionFilesChangedEvent) => {
+      invalidateNavigationFileEvent(event);
+      const candidates = event.changes?.filter(change =>
+        change.op !== 'delete'
+        && isMarkdownPath(change.path)
+        && /(?:^|\/)docs\/design\//.test(change.path.toLocaleLowerCase()),
+      );
+      const candidate = candidates?.at(-1);
+      if (!candidate) return;
+
+      const currentState = statesRef.current.get(event.sessionId) ?? canvasStateCache.get(event.sessionId) ?? EMPTY_STATE;
+      const existingTimer = autoPreviewTimersRef.current.get(event.sessionId);
+      if (
+        currentState.mode === 'document'
+        && currentState.request?.target?.path === candidate.path
+      ) {
+        if (existingTimer !== undefined) {
+          window.clearTimeout(existingTimer);
+          autoPreviewTimersRef.current.delete(event.sessionId);
+        }
+        return;
+      }
+
+      if (existingTimer !== undefined) window.clearTimeout(existingTimer);
+      const timer = window.setTimeout(() => {
+        autoPreviewTimersRef.current.delete(event.sessionId);
+        const latest = statesRef.current.get(event.sessionId) ?? canvasStateCache.get(event.sessionId) ?? EMPTY_STATE;
+        if (
+          latest.mode === 'document'
+          && latest.request?.target?.path === candidate.path
+        ) {
+          return;
+        }
+        const protectedArtifact = latest.mode !== 'closed'
+          && latest.request?.source !== 'session_event'
+          && latest.request?.target?.path !== candidate.path;
+        const disposition = latest.disposition === 'pinned' || protectedArtifact
+          ? 'queue'
+          : 'preview';
+        openRequest({
+          protocolVersion: NAVIGATION_PROTOCOL_VERSION,
+          requestRef: newRequestRef(),
+          sessionId: event.sessionId,
+          action: 'open_file',
+          source: 'session_event',
+          target: { path: candidate.path },
+          presentation: { disposition, focus: 'preserve' },
+          intent: {
+            kind: 'agent_progress',
+            summary: candidate.op === 'create'
+              ? `Created design document ${candidate.path}`
+              : `Updated design document ${candidate.path}`,
+          },
+          createdAt: event.completedAt || Date.now(),
+        });
+      }, 800);
+      autoPreviewTimersRef.current.set(event.sessionId, timer);
+    };
+
+    socket.on('session:files-changed' as any, handleFilesChanged);
+    return () => {
+      socket.off('session:files-changed' as any, handleFilesChanged);
+      for (const timer of autoPreviewTimersRef.current.values()) window.clearTimeout(timer);
+      autoPreviewTimersRef.current.clear();
+    };
+  }, [openRequest, socketRef]);
+
+  useEffect(() => {
+    if (!selectedSessionId) return;
+    const selectedState = statesRef.current.get(selectedSessionId)
+      ?? canvasStateCache.get(selectedSessionId)
+      ?? EMPTY_STATE;
+    if (selectedState.mode !== 'closed') return;
+    const queued = selectedState.queuedRequests[0];
+    if (!queued) return;
+
+    openRequest({
+      ...queued,
+      presentation: {
+        ...queued.presentation,
+        disposition: 'preview',
+        focus: 'preserve',
+      },
+    });
+  }, [openRequest, selectedSessionId]);
 
   const createRequest = useCallback((
     action: NavigationRequest['action'],

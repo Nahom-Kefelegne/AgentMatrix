@@ -208,6 +208,8 @@ The Canvas is a conditional session-scoped companion to the terminal.
 ### Capabilities
 
 - Open file at an exact line/range.
+- Render Markdown documents with a lazy Preview/Source toggle.
+- Auto-preview selected-session `docs/design/*.md` changes without stealing focus.
 - Resolve and reveal a symbol.
 - Display repository search results.
 - Open stack-trace and compiler-error locations.

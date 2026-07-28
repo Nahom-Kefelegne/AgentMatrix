@@ -5,8 +5,11 @@ import {
   ArrowLeft,
   ArrowRight,
   BellRing,
+  BookOpenText,
   CircleDot,
+  Code2,
   FileCode2,
+  FileText,
   GitCompareArrows,
   Maximize2,
   MessageSquareText,
@@ -80,7 +83,30 @@ const TOUR_PAGES: ReadonlyArray<TourPage> = [
     ],
   },
   {
-    eyebrow: '03 · Session Review',
+    eyebrow: '03 · Markdown Preview',
+    title: 'Write the design.',
+    accent: 'See the document.',
+    body: 'When a session creates or updates a Markdown design doc, Context Canvas renders it beside the live CLI—without another app or a context switch.',
+    features: [
+      {
+        number: '01',
+        title: 'Design docs appear automatically',
+        body: 'Successful changes under docs/design open as a rendered document after a short quiet period.',
+      },
+      {
+        number: '02',
+        title: 'Preview or inspect source',
+        body: 'Read tables, tasks, links, and code blocks naturally, then switch to source when exact Markdown matters.',
+      },
+      {
+        number: '03',
+        title: 'Your current context stays protected',
+        body: 'Pinned, background, and developer-opened Canvas work queues the preview instead of replacing what you are reviewing.',
+      },
+    ],
+  },
+  {
+    eyebrow: '04 · Session Review',
     title: 'Review one agent.',
     accent: 'Send the work back.',
     body: 'Inspect the code attributed to a single session, comment on exact lines, and return structured feedback to the agent that made it.',
@@ -225,6 +251,66 @@ function ContextCanvasDemo() {
   );
 }
 
+function MarkdownDemo() {
+  return (
+    <div className="fre-demo fre-demo--markdown" aria-label="Automatic rendered Markdown design preview">
+      <div className="fre-demo-header">
+        <span><BookOpenText size={12} aria-hidden="true" /> Design Document Updated</span>
+        <span>docs/design/auth-flow.md</span>
+      </div>
+      <div className="fre-markdown-body">
+        <div className="fre-markdown-event">
+          <div className="fre-pane-label">
+            <Terminal size={13} aria-hidden="true" />
+            Live CLI
+          </div>
+          <div className="fre-doc-event">
+            <span className="fre-agent-dot" aria-hidden="true" />
+            <div>
+              <strong>Created auth-flow.md</strong>
+              <p>I documented the token refresh design and rollout plan.</p>
+            </div>
+          </div>
+          <div className="fre-doc-route" aria-hidden="true">
+            <span />
+            <ArrowRight size={14} />
+          </div>
+          <div className="fre-doc-status">
+            <span><BookOpenText size={12} aria-hidden="true" /> Auto-preview</span>
+            <span><Pin size={12} aria-hidden="true" /> Queue if protected</span>
+          </div>
+        </div>
+
+        <div className="fre-document-preview">
+          <div className="fre-document-toolbar">
+            <span><FileText size={12} aria-hidden="true" /> auth-flow.md</span>
+            <div className="fre-document-toggle" aria-label="Document view options">
+              <span className="fre-document-toggle--active">
+                <BookOpenText size={11} aria-hidden="true" /> Preview
+              </span>
+              <span><Code2 size={11} aria-hidden="true" /> Source</span>
+            </div>
+          </div>
+          <article className="fre-document-page">
+            <span className="fre-doc-kicker">Architecture decision</span>
+            <h2>Token refresh flow</h2>
+            <p>Rotate refresh tokens once, preserve the existing error contract, and ship behind a compatibility gate.</p>
+            <h3>Implementation</h3>
+            <div className="fre-doc-check"><span aria-hidden="true">✓</span> Validate the current refresh token</div>
+            <div className="fre-doc-check"><span aria-hidden="true">✓</span> Issue a new token pair atomically</div>
+            <div className="fre-doc-check"><span aria-hidden="true">✓</span> Revoke the previous token after success</div>
+            <pre><code>POST /auth/refresh{'\n'}→ 200 {'{'} accessToken, refreshToken {'}'}</code></pre>
+            <div className="fre-doc-safe">
+              <ShieldCheck size={12} aria-hidden="true" />
+              Sanitized preview · repository links stay root-scoped
+            </div>
+          </article>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function ReviewDemo() {
   return (
     <div className="fre-demo fre-demo--review" aria-label="Session-attributed diff and review feedback">
@@ -272,6 +358,7 @@ function ReviewDemo() {
 function TourDemo({ page }: { page: number }) {
   if (page === 0) return <MissionControlDemo />;
   if (page === 1) return <ContextCanvasDemo />;
+  if (page === 2) return <MarkdownDemo />;
   return <ReviewDemo />;
 }
 

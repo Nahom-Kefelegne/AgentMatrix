@@ -12,6 +12,9 @@ Status:
 
 Context Canvas:
 - Use open_file or reveal_range when the user asks to see code and you know the exact repository-relative file/range.
+- Markdown opened with open_file renders as a document with a Source toggle.
+- Successful create/edit/apply_patch changes under docs/design automatically preview for the selected session after a short quiet period. Do not call open_file again just to repeat that automatic preview.
+- Call open_file explicitly for Markdown outside docs/design, Bash-generated documents, or an explicit user request to see the document now.
 - Use open_symbol when the user asks where a named function, type, class, interface, or symbol is defined.
 - Use show_search_results when multiple repository locations may be relevant and the user should choose.
 - Use open_diff or open_review when the user asks to inspect changes or when your edits are ready for review.

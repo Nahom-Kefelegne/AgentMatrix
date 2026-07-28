@@ -30,6 +30,8 @@ export interface NavigationTarget {
   path: string;
   range?: SourceRange;
   symbol?: string;
+  /** Optional Markdown heading fragment without the leading '#'. */
+  fragment?: string;
 }
 
 export interface NavigationPresentation {
@@ -150,7 +152,7 @@ export interface NavigationHistoryEntry {
   createdAt: number;
 }
 
-export type CanvasMode = 'closed' | 'code' | 'search' | 'diff' | 'review';
+export type CanvasMode = 'closed' | 'code' | 'document' | 'search' | 'diff' | 'review';
 
 export interface CanvasState {
   mode: CanvasMode;

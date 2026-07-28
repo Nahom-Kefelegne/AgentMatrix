@@ -57,19 +57,27 @@ function readRange(value: unknown): SourceRange | undefined {
   };
 }
 
-function readTarget(value: unknown): { path: string; range?: SourceRange; symbol?: string } | undefined {
+function readTarget(value: unknown): { path: string; range?: SourceRange; symbol?: string; fragment?: string } | undefined {
   if (value === undefined) return undefined;
   if (!value || typeof value !== 'object') {
     throw new NavigationServiceError('INVALID_TARGET', 'Target must be an object.');
   }
-  const target = value as { path?: unknown; range?: unknown; symbol?: unknown };
+  const target = value as { path?: unknown; range?: unknown; symbol?: unknown; fragment?: unknown };
   if (typeof target.path !== 'string' || !target.path) {
     throw new NavigationServiceError('INVALID_TARGET', 'Target path is required.');
   }
   if (target.symbol !== undefined && (typeof target.symbol !== 'string' || target.symbol.length > 512)) {
     throw new NavigationServiceError('INVALID_TARGET', 'Target symbol must be a string of 512 characters or fewer.');
   }
-  return { path: target.path, range: readRange(target.range), symbol: target.symbol as string | undefined };
+  if (target.fragment !== undefined && (typeof target.fragment !== 'string' || target.fragment.length > 256)) {
+    throw new NavigationServiceError('INVALID_TARGET', 'Target fragment must be a string of 256 characters or fewer.');
+  }
+  return {
+    path: target.path,
+    range: readRange(target.range),
+    symbol: target.symbol as string | undefined,
+    fragment: target.fragment as string | undefined,
+  };
 }
 
 export interface CreateNavigationRequestOptions {

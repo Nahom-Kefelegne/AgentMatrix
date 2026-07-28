@@ -313,7 +313,7 @@ export default function AppSettingsModal({
         <div style={{ flex: 1 }}>
           <div className="section-title">Welcome Briefing</div>
           <div className="section-desc" style={{ marginBottom: 0 }}>
-            Replay the overview of attention routing, Context Canvas, and session diff review.
+            Replay the overview of attention routing, Context Canvas, rendered design docs, and session diff review.
           </div>
         </div>
         <button type="button" className="btn-outline" onClick={onReplayIntro}>

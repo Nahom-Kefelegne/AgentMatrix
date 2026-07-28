@@ -26,6 +26,11 @@ const SearchResults = dynamic(() => import('./SearchResults'), {
   loading: () => <div className="cc-loading" role="status">Loading search…</div>,
 });
 
+const MarkdownPreview = dynamic(() => import('./MarkdownPreview'), {
+  ssr: false,
+  loading: () => <div className="cc-loading" role="status">Loading document preview…</div>,
+});
+
 const DiffCanvas = dynamic(() => import('./DiffCanvas'), {
   ssr: false,
   loading: () => <div className="cc-loading" role="status">Loading session review…</div>,
@@ -168,7 +173,15 @@ export default function ContextCanvas({ sessionId, sessionName, cwd, controller 
       </header>
 
       <div className="cc-provenance">
-        <span>{request?.source === 'mcp' ? 'Opened by Session' : request?.source === 'terminal_link' ? 'Terminal Link' : 'Developer Opened'}</span>
+        <span>{
+          request?.source === 'mcp'
+            ? 'Opened by Session'
+            : request?.source === 'session_event'
+              ? 'Auto-preview from Session'
+              : request?.source === 'terminal_link'
+                ? 'Terminal Link'
+                : 'Developer Opened'
+        }</span>
         <span>{request?.intent.summary ?? 'Session-scoped preview'}</span>
         {state.disposition === 'pinned' ? <span><LockKeyhole size={11} aria-hidden="true" /> Pinned</span> : null}
       </div>
@@ -176,6 +189,9 @@ export default function ContextCanvas({ sessionId, sessionName, cwd, controller 
       <div className="cc-content">
         {!request ? <CanvasEmpty /> : null}
         {request && state.mode === 'code' ? <CodePreview request={request} /> : null}
+        {request && state.mode === 'document' ? (
+          <MarkdownPreview request={request} controller={controller} />
+        ) : null}
         {request && state.mode === 'search' ? (
           <SearchResults request={request} onOpenFile={controller.openFile} />
         ) : null}
