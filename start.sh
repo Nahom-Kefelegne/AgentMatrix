@@ -41,13 +41,29 @@ stop_existing_instance() {
         echo "  ! Could not stop the existing process. Quit Agent Matrix and retry."
         exit 1
     }
-    for _ in $(seq 1 30); do
+    local shutdown_wait
+    shutdown_wait="${AGENTMATRIX_SHUTDOWN_WAIT_SECONDS:-15}"
+    case "$shutdown_wait" in
+        ''|*[!0-9]*|0) shutdown_wait=15 ;;
+    esac
+    for _ in $(seq 1 "$shutdown_wait"); do
         kill -0 "$existing_pid" 2>/dev/null || break
         sleep 1
     done
     if kill -0 "$existing_pid" 2>/dev/null; then
-        echo "  ! Existing Agent Matrix process did not exit. Quit it and retry."
-        exit 1
+        echo "  ! Graceful shutdown timed out; force-stopping Agent Matrix (${existing_pid})..."
+        kill -KILL "$existing_pid" 2>/dev/null || {
+            echo "    Could not force-stop the existing process. Quit Agent Matrix and retry."
+            exit 1
+        }
+        for _ in $(seq 1 5); do
+            kill -0 "$existing_pid" 2>/dev/null || break
+            sleep 1
+        done
+        if kill -0 "$existing_pid" 2>/dev/null; then
+            echo "  ! Existing Agent Matrix process is still alive. Quit it and retry."
+            exit 1
+        fi
     fi
 }
 

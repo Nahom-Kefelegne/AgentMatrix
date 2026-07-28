@@ -65,14 +65,30 @@ stop_existing_instance() {
         echo -e "  ${CROSS} Could not stop Agent Matrix. Quit it and retry."
         exit 1
     }
-    for _ in $(seq 1 30); do
+    local shutdown_wait
+    shutdown_wait="${AGENTMATRIX_SHUTDOWN_WAIT_SECONDS:-15}"
+    case "$shutdown_wait" in
+        ''|*[!0-9]*|0) shutdown_wait=15 ;;
+    esac
+    for _ in $(seq 1 "$shutdown_wait"); do
         kill -0 "$existing_pid" 2>/dev/null || break
         sleep 1
     done
-    kill -0 "$existing_pid" 2>/dev/null && {
-        echo -e "  ${CROSS} Agent Matrix did not exit. Quit it and retry."
-        exit 1
-    }
+    if kill -0 "$existing_pid" 2>/dev/null; then
+        echo -e "  ${WARN} Graceful shutdown timed out; force-stopping Agent Matrix (${existing_pid})..."
+        kill -KILL "$existing_pid" 2>/dev/null || {
+            echo -e "  ${CROSS} Could not force-stop Agent Matrix. Quit it and retry."
+            exit 1
+        }
+        for _ in $(seq 1 5); do
+            kill -0 "$existing_pid" 2>/dev/null || break
+            sleep 1
+        done
+        kill -0 "$existing_pid" 2>/dev/null && {
+            echo -e "  ${CROSS} Agent Matrix is still alive. Quit it and retry."
+            exit 1
+        }
+    fi
 }
 
 backup_generated_lockfile() {

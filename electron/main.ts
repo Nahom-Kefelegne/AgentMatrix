@@ -450,36 +450,37 @@ async function closeLiveSessionsForExit(reason: string): Promise<void> {
   // orphan reaper still protects against duplicate writers before resume.
 }
 
-async function exitFromSignal(signal: NodeJS.Signals): Promise<void> {
+async function shutdownAndExit(reason: string): Promise<void> {
   if (shuttingDown) return;
   shuttingDown = true;
-  await closeLiveSessionsForExit(signal);
-  process.exit(0);
+  const forceExit = setTimeout(() => {
+    console.error(`[shutdown] ${reason} exceeded the shutdown deadline; forcing process exit`);
+    process.exit(0);
+  }, 10_000);
+  forceExit.unref();
+
+  try {
+    await closeLiveSessionsForExit(reason);
+  } finally {
+    clearTimeout(forceExit);
+    // Electron can leave its native app loop alive after app.exit() on macOS.
+    // Session state is already flushed, so terminate the host process directly.
+    process.exit(0);
+  }
 }
 
-process.on('SIGINT', () => void exitFromSignal('SIGINT'));
-process.on('SIGTERM', () => void exitFromSignal('SIGTERM'));
+process.on('SIGINT', () => void shutdownAndExit('SIGINT'));
+process.on('SIGTERM', () => void shutdownAndExit('SIGTERM'));
 
 // Graceful shutdown — intercept quit, cleanly close all sessions so their
 // SessionEnd hooks fire and transcripts are flushed, then force-exit.
 // Without this, PTY processes get SIGKILL'd on app exit and transcripts can
 // be left in an inconsistent state with no sessionEnd hook firing.
-app.on('before-quit', async (e) => {
+app.on('before-quit', (e) => {
   // Always prevent the default quit during shutdown. This blocks re-entry
   // from spammed Cmd+Q presses that would otherwise SIGKILL mid-shutdown.
-  if (shuttingDown) {
-    e.preventDefault();
-    return;
-  }
-  shuttingDown = true;
   e.preventDefault();
-
-  await closeLiveSessionsForExit('before-quit');
-
-  // Force-exit to bypass the before-quit/close event loop entirely.
-  // app.quit() would re-fire before-quit and try to close windows, which
-  // is fragile. app.exit() skips all of that and terminates immediately.
-  app.exit(0);
+  void shutdownAndExit('before-quit');
 });
 
 app.on('will-quit', () => {
