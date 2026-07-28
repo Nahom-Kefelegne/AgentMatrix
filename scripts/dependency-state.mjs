@@ -1,7 +1,11 @@
 #!/usr/bin/env node
 
 import { createHash } from 'node:crypto';
+import { createRequire } from 'node:module';
 import {
+  accessSync,
+  chmodSync,
+  constants,
   existsSync,
   mkdirSync,
   readFileSync,
@@ -19,6 +23,7 @@ const root = process.env.AGENTMATRIX_DEPENDENCY_ROOT
 const nodeModules = path.join(root, 'node_modules');
 const stampPath = path.join(nodeModules, '.agentmatrix-dependencies.json');
 const schemaVersion = 1;
+const require = createRequire(import.meta.url);
 
 function manifestHash() {
   const hash = createHash('sha256');
@@ -57,6 +62,65 @@ function dependencyPackageJson(name) {
   return path.join(nodeModules, ...name.split('/'), 'package.json');
 }
 
+function nativeDirectories() {
+  if (process.platform === 'win32') return [];
+  const nodePty = path.join(nodeModules, 'node-pty');
+  const relativeRoots = [nodePty, path.join(nodePty, 'lib')];
+  const directories = [
+    ['build', 'Release'],
+    ['build', 'Debug'],
+    ['prebuilds', `${process.platform}-${process.arch}`],
+  ];
+  return directories.flatMap(parts => relativeRoots.map(base => path.join(base, ...parts)));
+}
+
+function nativeHelperCandidates() {
+  return [
+    ...nativeDirectories().map(directory => path.join(directory, 'spawn-helper')),
+  ];
+}
+
+function repairNativeArtifacts() {
+  for (const helper of nativeHelperCandidates()) {
+    if (existsSync(helper)) chmodSync(helper, 0o755);
+  }
+}
+
+function invalidNativeArtifact() {
+  const directories = nativeDirectories();
+  if (!directories.length) return null;
+  let selectedDirectory = null;
+  let foundAddon = false;
+  for (const directory of directories) {
+    const addon = path.join(directory, 'pty.node');
+    if (!existsSync(addon)) continue;
+    foundAddon = true;
+    try {
+      require(addon);
+      selectedDirectory = directory;
+      break;
+    } catch {
+      // Follow node-pty's fallback order when an addon is present but unloadable.
+    }
+  }
+  if (!selectedDirectory) {
+    return foundAddon
+      ? `node-pty pty.node is not loadable for ${process.platform}-${process.arch}`
+      : `node-pty pty.node is missing for ${process.platform}-${process.arch}`;
+  }
+
+  const helper = path.join(selectedDirectory, 'spawn-helper');
+  if (!existsSync(helper)) {
+    return `node-pty spawn-helper is missing beside ${path.relative(nodeModules, selectedDirectory)}/pty.node`;
+  }
+  try {
+    accessSync(helper, constants.X_OK);
+    return null;
+  } catch {
+    return `node-pty spawn-helper is not executable beside ${path.relative(nodeModules, selectedDirectory)}/pty.node`;
+  }
+}
+
 function invalidInstalledArtifact() {
   const lockfile = JSON.parse(readFileSync(path.join(root, 'package-lock.json'), 'utf8'));
   for (const name of directDependencies()) {
@@ -75,7 +139,7 @@ function invalidInstalledArtifact() {
   for (const bin of bins) {
     if (!existsSync(path.join(nodeModules, '.bin', bin))) return `node_modules/.bin/${bin} is missing`;
   }
-  return null;
+  return invalidNativeArtifact();
 }
 
 function fail(reason) {
@@ -116,6 +180,7 @@ function check() {
 }
 
 function write() {
+  repairNativeArtifacts();
   const invalid = invalidInstalledArtifact();
   if (invalid) {
     fail(`${invalid} after npm ci`);
@@ -133,10 +198,17 @@ function write() {
   }
 }
 
+function repair() {
+  repairNativeArtifacts();
+  const invalid = invalidNativeArtifact();
+  if (invalid) fail(invalid);
+}
+
 const command = process.argv[2];
 if (command === 'check') check();
 else if (command === 'write') write();
+else if (command === 'repair') repair();
 else {
-  console.error('Usage: node scripts/dependency-state.mjs <check|write>');
+  console.error('Usage: node scripts/dependency-state.mjs <check|write|repair>');
   process.exitCode = 2;
 }

@@ -85,9 +85,6 @@ install_dependencies() {
         echo "    If npm reports an out-of-sync lockfile, run ./update.sh from a separate terminal."
         exit 1
     }
-    find node_modules/node-pty/prebuilds -name spawn-helper -exec chmod +x {} \; 2>/dev/null || true
-    [ -f node_modules/node-pty/build/Release/spawn-helper ] && \
-        chmod +x node_modules/node-pty/build/Release/spawn-helper 2>/dev/null || true
     node scripts/dependency-state.mjs check || {
         echo "  ! Dependencies installed, but their state could not be verified."
         exit 1
@@ -139,6 +136,9 @@ if command -v git >/dev/null 2>&1 && [ -d .git ]; then
 fi
 
 [ -d node_modules ] || needs_dependencies=1
+if [ "$needs_dependencies" -eq 0 ] && ! node scripts/dependency-state.mjs repair; then
+    needs_dependencies=1
+fi
 if [ "$needs_dependencies" -eq 0 ] && ! node scripts/dependency-state.mjs check; then
     needs_dependencies=1
 fi

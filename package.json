@@ -11,7 +11,7 @@
     "build:preload": "esbuild electron/preload.ts --bundle --platform=node --format=cjs --external:electron --outfile=electron/preload.js",
     "electron:dev": "npm --no-update-notifier run build:preload && electron .",
     "electron:build": "npm --no-update-notifier run build:preload && npm --no-update-notifier run build && cp -r .next/static .next/standalone/.next/static && cp -r public .next/standalone/public && electron-builder",
-    "fix:native": "find node_modules/node-pty/prebuilds -name spawn-helper -exec chmod +x {} \\; ; [ -f node_modules/node-pty/build/Release/spawn-helper ] && chmod +x node_modules/node-pty/build/Release/spawn-helper || true",
+    "fix:native": "node scripts/dependency-state.mjs repair",
     "rebuild:native": "electron-rebuild -f -w node-pty"
   },
   "dependencies": {
