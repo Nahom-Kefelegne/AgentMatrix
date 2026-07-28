@@ -100,6 +100,7 @@ flowchart LR
 | [Control Center](dashboard-v2.md) | Console-first dashboard and Context Canvas | Native command rail, unified session list, embedded CLI, fullscreen, Monaco code/diff preview, navigation tools, focus and security contracts |
 | [Context Canvas Markdown](context-canvas-markdown.md) | Rendered session design documents | Sanitized GFM rendering, Preview/Source, automatic docs/design previews, file-change event and link security contracts |
 | [AgentMatrix Tooling Showcase](markdown-preview-live-check.md) | Live session-tool walkthrough | Status routing, Canvas navigation, Markdown preview, queue protection, diff/review, terminal links, and cross-platform behavior |
+| [Release Briefings](release-briefings.md) | Release-triggered first-run experience | Explicit campaign IDs, one-time local acknowledgement, returning-user start pages, and release checklist |
 | [Frontend/UI](frontend-ui.md) | React components, views, modals | Component hierarchy, 3 view modes (Dashboard/Office/Editor), session dialog, terminal panels, canvas engine, real-time socket handling, splash screen |
 | [Backend/Server](backend-server.md) | Server, APIs, Socket.io, hooks | Server startup, 30+ API endpoints, 22 socket events, CLI hook system, session lifecycle, ADO integration, state stores |
 | [Electron/PTY](electron-pty.md) | Electron main process, terminals | Window/tray lifecycle, PTY spawning, prompt injection system, terminal bridge, auto-resume, session naming, production build |

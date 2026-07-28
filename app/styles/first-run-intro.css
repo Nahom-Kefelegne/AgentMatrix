@@ -64,6 +64,21 @@
   font-weight: 800;
 }
 
+.fre-release-tag {
+  display: inline-flex;
+  min-height: 20px;
+  align-items: center;
+  padding: 0 7px;
+  border: 1px solid color-mix(in srgb, var(--fre-purple) 36%, var(--fre-line));
+  border-radius: 999px;
+  color: var(--fre-purple);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 8px;
+  font-weight: 750;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
 .fre-nav-end {
   display: flex;
   gap: 12px;
@@ -940,6 +955,10 @@
 
   .fre-main {
     padding: 24px 16px 28px;
+  }
+
+  .fre-release-tag {
+    display: none;
   }
 
   .fre-copy h1 {

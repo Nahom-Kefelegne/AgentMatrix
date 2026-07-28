@@ -18,9 +18,13 @@ import {
   ShieldCheck,
   Terminal,
 } from 'lucide-react';
+import type { IntroBriefingVariant } from '@/lib/onboarding/releaseBriefing';
 
 interface FirstRunIntroProps {
   onComplete: () => void;
+  variant?: IntroBriefingVariant;
+  initialPage?: number;
+  releaseTitle?: string;
 }
 
 interface TourPage {
@@ -362,10 +366,16 @@ function TourDemo({ page }: { page: number }) {
   return <ReviewDemo />;
 }
 
-export default function FirstRunIntro({ onComplete }: FirstRunIntroProps) {
-  const [page, setPage] = useState(0);
+export default function FirstRunIntro({
+  onComplete,
+  variant = 'welcome',
+  initialPage = 0,
+  releaseTitle,
+}: FirstRunIntroProps) {
+  const [page, setPage] = useState(() => Math.max(0, Math.min(TOUR_PAGES.length - 1, initialPage)));
   const current = TOUR_PAGES[page];
   const isLast = page === TOUR_PAGES.length - 1;
+  const isReleaseBriefing = variant === 'release';
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
@@ -383,11 +393,14 @@ export default function FirstRunIntro({ onComplete }: FirstRunIntroProps) {
         <div className="fre-brand">
           <span className="fre-brand-mark" aria-hidden="true">AM</span>
           <span>AgentMatrix</span>
+          {isReleaseBriefing ? (
+            <span className="fre-release-tag">Release briefing · {releaseTitle}</span>
+          ) : null}
         </div>
         <div className="fre-nav-end">
           <span className="fre-page-count">{page + 1} / {TOUR_PAGES.length}</span>
           <button type="button" className="fre-skip" onClick={onComplete}>
-            Skip Tour
+            {isReleaseBriefing ? 'Skip Briefing' : 'Skip Tour'}
           </button>
         </div>
       </header>
@@ -420,7 +433,9 @@ export default function FirstRunIntro({ onComplete }: FirstRunIntroProps) {
                   else setPage(value => value + 1);
                 }}
               >
-                {isLast ? 'Enter Control Center' : 'Continue'}
+                {isLast
+                  ? isReleaseBriefing ? 'Return to Control Center' : 'Enter Control Center'
+                  : 'Continue'}
                 <ArrowRight size={16} aria-hidden="true" />
               </button>
             </div>
@@ -438,7 +453,11 @@ export default function FirstRunIntro({ onComplete }: FirstRunIntroProps) {
               ))}
             </div>
 
-            <span className="fre-replay-note">Use ← and → to navigate. Replay anytime from Settings.</span>
+            <span className="fre-replay-note">
+              {isReleaseBriefing
+                ? 'Use ← and → to navigate. This release briefing appears once.'
+                : 'Use ← and → to navigate. Replay anytime from Settings.'}
+            </span>
           </div>
 
           <TourDemo page={page} />

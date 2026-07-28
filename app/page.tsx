@@ -21,6 +21,13 @@ import AppSettingsModal from './components/AppSettingsModal';
 import FirstRunIntro from './components/FirstRunIntro';
 import SplashScreen from './components/SplashScreen';
 import type { DashboardV2Navigation } from './components/dashboard-v2/types';
+import {
+  CURRENT_RELEASE_BRIEFING,
+  RELEASE_BRIEFING_STORAGE_KEY,
+  WELCOME_COMPLETION_STORAGE_KEY,
+  resolveIntroBriefing,
+  type IntroBriefingLaunch,
+} from '@/lib/onboarding/releaseBriefing';
 
 import { initPerfMonitor } from '@/lib/perf';
 
@@ -35,7 +42,6 @@ const DashboardV2Container = dynamic<DashboardV2Props>(
   () => import('./components/dashboard-v2/DashboardV2Container'),
   { ssr: false },
 );
-const INTRO_STORAGE_KEY = 'agentmatrix-intro-v2';
 
 function OfficeView() {
   const { connected, sessions, onEvent, socketRef } = useSocketContext();
@@ -59,17 +65,23 @@ function OfficeView() {
   const [showSpawn, setShowSpawn] = useState(false);
   const [orchestratorViewId, setOrchestratorViewId] = useState<string | null>(null);
   const [showSettings, setShowSettings] = useState(false);
-  const [showIntro, setShowIntro] = useState(true);
+  const [introLaunch, setIntroLaunch] = useState<IntroBriefingLaunch | null | undefined>(undefined);
   const [viewMode, setViewMode] = useState<'office' | 'dashboard' | 'editor'>('dashboard');
   const [editorUnlocked, setEditorUnlocked] = useState(false);
   const canvasRef = useRef<OfficeCanvasHandle>(null);
 
   useEffect(() => {
     try {
-      const forced = new URLSearchParams(window.location.search).get('intro') === '1';
-      setShowIntro(forced || localStorage.getItem(INTRO_STORAGE_KEY) !== 'done');
+      const introParam = new URLSearchParams(window.location.search).get('intro');
+      const launch = resolveIntroBriefing({
+        forced: introParam === '1',
+        forceRelease: introParam === 'release',
+        welcomeCompleted: localStorage.getItem(WELCOME_COMPLETION_STORAGE_KEY) === 'done',
+        acknowledgedCampaignId: localStorage.getItem(RELEASE_BRIEFING_STORAGE_KEY),
+      });
+      setIntroLaunch(launch);
     } catch {
-      setShowIntro(true);
+      setIntroLaunch({ variant: 'welcome', initialPage: 0 });
     }
   }, []);
 
@@ -175,12 +187,15 @@ function OfficeView() {
   const handleOpenResume = useCallback(() => setShowResume(true), []);
   const handleOpenSpawn = useCallback(() => setShowSpawn(true), []);
   const handleIntroComplete = useCallback(() => {
-    try { localStorage.setItem(INTRO_STORAGE_KEY, 'done'); } catch { /* non-fatal */ }
-    setShowIntro(false);
+    try {
+      localStorage.setItem(WELCOME_COMPLETION_STORAGE_KEY, 'done');
+      localStorage.setItem(RELEASE_BRIEFING_STORAGE_KEY, CURRENT_RELEASE_BRIEFING.id);
+    } catch { /* non-fatal */ }
+    setIntroLaunch(null);
   }, []);
   const handleReplayIntro = useCallback(() => {
     setShowSettings(false);
-    setShowIntro(true);
+    setIntroLaunch({ variant: 'replay', initialPage: 0 });
   }, []);
 
   const dashboardV2Navigation = useMemo<DashboardV2Navigation>(() => ({
@@ -207,8 +222,18 @@ function OfficeView() {
 
   const dashboardV2Active = viewMode === 'dashboard' && dashboardV2Loaded && dashboardV2Enabled;
 
-  if (showIntro) {
-    return <FirstRunIntro onComplete={handleIntroComplete} />;
+  if (introLaunch === undefined) return null;
+
+  if (introLaunch) {
+    return (
+      <FirstRunIntro
+        key={`${introLaunch.variant}:${introLaunch.initialPage}:${introLaunch.releaseTitle ?? ''}`}
+        onComplete={handleIntroComplete}
+        variant={introLaunch.variant}
+        initialPage={introLaunch.initialPage}
+        releaseTitle={introLaunch.releaseTitle}
+      />
+    );
   }
 
   return (
