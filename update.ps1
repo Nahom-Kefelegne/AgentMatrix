@@ -32,6 +32,13 @@ Set-Location $repoDir
 Write-Host "  Repo: $repoDir"
 Write-Host ""
 
+if ($env:AGENTMATRIX_SESSION_ID) {
+    Write-Host "  [X] Refusing to update Agent Matrix from a session it is hosting." -ForegroundColor Red
+    Write-Host "      Updating here could disconnect this conversation." -ForegroundColor Yellow
+    Write-Host "      Run $repoDir\update.ps1 from a separate terminal instead." -ForegroundColor Yellow
+    exit 1
+}
+
 # Updating node_modules while Electron is running is unreliable on Windows
 # because native binaries may be locked.
 $existingListener = Get-NetTCPConnection -LocalPort 3000 -State Listen -ErrorAction SilentlyContinue |
@@ -71,8 +78,14 @@ function Install-AgentMatrixDependencies {
         --fetch-retries=1 `
         --no-audit --no-fund --no-progress
     if ($LASTEXITCODE -ne 0) {
-        Write-Host "  [X] Could not install dependencies through $env:NPM_CONFIG_REGISTRY." -ForegroundColor Red
-        Write-Host "      Authenticate the Microsoft mirror, then re-run." -ForegroundColor Yellow
+        $revision = (git rev-parse --short HEAD 2>$null)
+        $nodeVersion = (& node --version 2>$null)
+        $npmVersion = (& npm --version 2>$null)
+        Write-Host "  [X] Dependency install failed." -ForegroundColor Red
+        Write-Host "      Revision: $revision" -ForegroundColor Yellow
+        Write-Host "      Runtime: Node $nodeVersion, npm $npmVersion" -ForegroundColor Yellow
+        Write-Host "      Registry: $env:NPM_CONFIG_REGISTRY" -ForegroundColor Yellow
+        Write-Host "      If npm reports an out-of-sync lockfile, fetch latest main and retry." -ForegroundColor Yellow
         exit 1
     }
     & node scripts/dependency-state.mjs check

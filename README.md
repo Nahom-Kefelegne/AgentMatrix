@@ -72,6 +72,12 @@ required CLI bins inside `node_modules`. Start and update verify that state on
 every run and execute deterministic `npm ci` whenever it is missing or stale—even
 if the checkout was updated before the launcher started.
 
+Run start and update scripts from a separate system terminal, not from a CLI
+session hosted by AgentMatrix. Managed sessions carry a host marker, and the
+scripts refuse to stop their own host. On macOS/Linux, dependency installation
+also completes before the existing app is stopped, so a failed install leaves the
+running app and its sessions intact.
+
 The repository's `.npmrc` and launch scripts keep npm traffic on
 `https://packagefeedproxy.microsoft.io/npm/`. They also disable npm's background
 update notifier both in configuration and with `--no-update-notifier`, which

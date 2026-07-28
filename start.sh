@@ -17,6 +17,13 @@ export NPM_CONFIG_AUDIT="false"
 export NPM_CONFIG_FUND="false"
 export NO_UPDATE_NOTIFIER="1"
 
+if [ -n "${AGENTMATRIX_SESSION_ID:-}" ]; then
+    echo "  ! Refusing to restart Agent Matrix from a session it is hosting."
+    echo "    Restarting here would disconnect this conversation."
+    echo "    Run $(pwd)/start.sh from a separate terminal instead."
+    exit 1
+fi
+
 stop_existing_instance() {
     command -v lsof >/dev/null 2>&1 || return 0
     local existing_pid existing_cwd
@@ -71,8 +78,11 @@ install_dependencies() {
         --fetch-retry-maxtimeout=30000 \
         --fetch-retries=1 \
         --no-audit --no-fund --no-progress || {
-        echo "  ! Dependency install failed through $NPM_CONFIG_REGISTRY"
-        echo "    Run ./update.sh after fixing Microsoft mirror authentication."
+        echo "  ! Dependency install failed; Agent Matrix was not stopped."
+        echo "    Revision: $(git rev-parse --short HEAD 2>/dev/null || echo unknown)"
+        echo "    Runtime: Node $(node --version 2>/dev/null || echo unknown), npm $(npm --version 2>/dev/null || echo unknown)"
+        echo "    Registry: $NPM_CONFIG_REGISTRY"
+        echo "    If npm reports an out-of-sync lockfile, run ./update.sh from a separate terminal."
         exit 1
     }
     find node_modules/node-pty/prebuilds -name spawn-helper -exec chmod +x {} \; 2>/dev/null || true
@@ -132,11 +142,11 @@ fi
 if [ "$needs_dependencies" -eq 0 ] && ! node scripts/dependency-state.mjs check; then
     needs_dependencies=1
 fi
-stop_existing_instance
 if [ "$needs_dependencies" -eq 1 ]; then
     install_dependencies
 else
     echo "  ✓ Dependencies match package-lock.json"
 fi
+stop_existing_instance
 
 npm --no-update-notifier run electron:dev

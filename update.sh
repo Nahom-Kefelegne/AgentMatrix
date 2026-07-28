@@ -43,6 +43,13 @@ cd "$REPO_DIR"
 echo -e "  Repo: ${REPO_DIR}"
 echo ""
 
+if [ -n "${AGENTMATRIX_SESSION_ID:-}" ]; then
+    echo -e "  ${CROSS} Refusing to update Agent Matrix from a session it is hosting."
+    echo -e "     Updating here could disconnect this conversation."
+    echo -e "     Run ${REPO_DIR}/update.sh from a separate terminal instead."
+    exit 1
+fi
+
 stop_existing_instance() {
     command -v lsof >/dev/null 2>&1 || return 0
     local existing_pid existing_cwd
@@ -94,8 +101,11 @@ install_dependencies() {
         --fetch-retry-maxtimeout=30000 \
         --fetch-retries=1 \
         --no-audit --no-fund --no-progress || {
-        echo -e "  ${CROSS} Could not install dependencies through ${NPM_CONFIG_REGISTRY}."
-        echo -e "     Authenticate the Microsoft mirror, then re-run this script."
+        echo -e "  ${CROSS} Dependency install failed; Agent Matrix was not stopped."
+        echo -e "     Revision: $(git rev-parse --short HEAD 2>/dev/null || echo unknown)"
+        echo -e "     Runtime: Node $(node --version 2>/dev/null || echo unknown), npm $(npm --version 2>/dev/null || echo unknown)"
+        echo -e "     Registry: ${NPM_CONFIG_REGISTRY}"
+        echo -e "     If npm reports an out-of-sync lockfile, fetch the latest main branch and retry."
         exit 1
     }
     node scripts/dependency-state.mjs check || {
@@ -128,8 +138,6 @@ git merge --ff-only origin/main || {
 after="$(git rev-parse HEAD 2>/dev/null)"
 echo -e "  ${CHECK} Code updated to $(git rev-parse --short HEAD)"
 echo ""
-
-stop_existing_instance
 
 dependencies_changed=0
 [ -d node_modules ] || dependencies_changed=1
@@ -206,6 +214,8 @@ else
     fi
 fi
 echo ""
+
+stop_existing_instance
 
 # Re-configure hooks with silent-fail support
 SETTINGS_FILE="$HOME/.claude/settings.json"

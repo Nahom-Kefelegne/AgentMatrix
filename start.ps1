@@ -14,6 +14,13 @@ $env:NPM_CONFIG_AUDIT = "false"
 $env:NPM_CONFIG_FUND = "false"
 $env:NO_UPDATE_NOTIFIER = "1"
 
+if ($env:AGENTMATRIX_SESSION_ID) {
+    Write-Host "  Refusing to restart Agent Matrix from a session it is hosting." -ForegroundColor Red
+    Write-Host "  Restarting here would disconnect this conversation." -ForegroundColor Yellow
+    Write-Host "  Run $((Get-Location).Path)\start.ps1 from a separate terminal instead." -ForegroundColor Yellow
+    exit 1
+}
+
 # Electron's single-instance lock would otherwise focus an old process and make
 # this command look like a successful restart.
 $existingListener = Get-NetTCPConnection -LocalPort 3000 -State Listen -ErrorAction SilentlyContinue |
@@ -53,8 +60,14 @@ function Install-AgentMatrixDependencies {
         --fetch-retries=1 `
         --no-audit --no-fund --no-progress
     if ($LASTEXITCODE -ne 0) {
-        Write-Host "  Dependency install failed through $env:NPM_CONFIG_REGISTRY" -ForegroundColor Red
-        Write-Host "  Run .\update.ps1 after fixing Microsoft mirror authentication." -ForegroundColor Yellow
+        $revision = (git rev-parse --short HEAD 2>$null)
+        $nodeVersion = (& node --version 2>$null)
+        $npmVersion = (& npm --version 2>$null)
+        Write-Host "  Dependency install failed." -ForegroundColor Red
+        Write-Host "  Revision: $revision" -ForegroundColor Yellow
+        Write-Host "  Runtime: Node $nodeVersion, npm $npmVersion" -ForegroundColor Yellow
+        Write-Host "  Registry: $env:NPM_CONFIG_REGISTRY" -ForegroundColor Yellow
+        Write-Host "  If npm reports an out-of-sync lockfile, run .\update.ps1 and retry." -ForegroundColor Yellow
         exit 1
     }
     & node scripts/dependency-state.mjs check
