@@ -78,6 +78,10 @@ install_dependencies() {
     find node_modules/node-pty/prebuilds -name spawn-helper -exec chmod +x {} \; 2>/dev/null || true
     [ -f node_modules/node-pty/build/Release/spawn-helper ] && \
         chmod +x node_modules/node-pty/build/Release/spawn-helper 2>/dev/null || true
+    node scripts/dependency-state.mjs check || {
+        echo "  ! Dependencies installed, but their state could not be verified."
+        exit 1
+    }
 }
 
 needs_dependencies=0
@@ -125,7 +129,14 @@ if command -v git >/dev/null 2>&1 && [ -d .git ]; then
 fi
 
 [ -d node_modules ] || needs_dependencies=1
+if [ "$needs_dependencies" -eq 0 ] && ! node scripts/dependency-state.mjs check; then
+    needs_dependencies=1
+fi
 stop_existing_instance
-[ "$needs_dependencies" -eq 0 ] || install_dependencies
+if [ "$needs_dependencies" -eq 1 ]; then
+    install_dependencies
+else
+    echo "  ✓ Dependencies match package-lock.json"
+fi
 
 npm --no-update-notifier run electron:dev

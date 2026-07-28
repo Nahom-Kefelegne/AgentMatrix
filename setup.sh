@@ -179,6 +179,10 @@ if ! npm_install_resilient; then
     echo -e "     Then re-run this script."
     exit 1
 fi
+if ! node scripts/dependency-state.mjs check; then
+    echo -e "  ${CROSS} Dependencies installed, but their state could not be verified."
+    exit 1
+fi
 echo ""
 
 # ── Native modules (node-pty) ─────────────────────────────────────────────

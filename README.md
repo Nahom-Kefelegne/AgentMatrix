@@ -66,8 +66,11 @@ online update blocked by local edits stops instead of silently launching an old
 dashboard. On macOS/Linux, `start.sh` gracefully restarts an existing dev instance.
 On Windows, fully quit the existing tray app before running `start.ps1`. A locally
 generated `package-lock.json` is backed up under `~/.agentmatrix/update-backups/`
-and restored before the fast-forward. If dependency manifests changed, the
-launcher runs deterministic `npm ci` automatically.
+and restored before the fast-forward. Every successful install records the exact
+manifest hash, platform, architecture, Node ABI, direct package versions, and
+required CLI bins inside `node_modules`. Start and update verify that state on
+every run and execute deterministic `npm ci` whenever it is missing or stale—even
+if the checkout was updated before the launcher started.
 
 The repository's `.npmrc` and launch scripts keep npm traffic on
 `https://packagefeedproxy.microsoft.io/npm/`. They also disable npm's background

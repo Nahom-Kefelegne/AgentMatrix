@@ -7,6 +7,7 @@
     "dev": "tsx server.ts",
     "build": "next build",
     "start": "NODE_ENV=production tsx server.ts",
+    "postinstall": "node scripts/dependency-state.mjs write",
     "build:preload": "esbuild electron/preload.ts --bundle --platform=node --format=cjs --external:electron --outfile=electron/preload.js",
     "electron:dev": "npm --no-update-notifier run build:preload && electron .",
     "electron:build": "npm --no-update-notifier run build:preload && npm --no-update-notifier run build && cp -r .next/static .next/standalone/.next/static && cp -r public .next/standalone/public && electron-builder",

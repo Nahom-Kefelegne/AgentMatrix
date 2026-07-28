@@ -177,6 +177,11 @@ if (-not (Invoke-NpmInstallResilient)) {
     Write-Host "          (or add a Packaging-read PAT to your user .npmrc), then re-run this script."
     exit 1
 }
+& node scripts/dependency-state.mjs check
+if ($LASTEXITCODE -ne 0) {
+    Write-Host "  [X] Dependencies installed, but their state could not be verified." -ForegroundColor Red
+    exit 1
+}
 Write-Host ""
 
 # ── Native modules (node-pty) ─────────────────────────────────────────────

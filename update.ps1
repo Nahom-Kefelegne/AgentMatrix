@@ -75,6 +75,11 @@ function Install-AgentMatrixDependencies {
         Write-Host "      Authenticate the Microsoft mirror, then re-run." -ForegroundColor Yellow
         exit 1
     }
+    & node scripts/dependency-state.mjs check
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host "  [X] Dependencies installed, but their state could not be verified." -ForegroundColor Red
+        exit 1
+    }
     Write-Host "  [OK] Dependencies installed" -ForegroundColor Green
 }
 
@@ -107,11 +112,15 @@ Write-Host ""
 $dependenciesChanged = -not (Test-Path node_modules)
 git diff --quiet $before $after -- package.json package-lock.json 2>$null
 if ($LASTEXITCODE -ne 0) { $dependenciesChanged = $true }
+if (-not $dependenciesChanged) {
+    & node scripts/dependency-state.mjs check
+    if ($LASTEXITCODE -ne 0) { $dependenciesChanged = $true }
+}
 
 if ($dependenciesChanged) {
     Install-AgentMatrixDependencies
 } else {
-    Write-Host "Dependencies unchanged - keeping existing node_modules." -ForegroundColor DarkGray
+    Write-Host "  [OK] Dependencies match package-lock.json" -ForegroundColor Green
 }
 Write-Host ""
 

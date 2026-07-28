@@ -98,6 +98,10 @@ install_dependencies() {
         echo -e "     Authenticate the Microsoft mirror, then re-run this script."
         exit 1
     }
+    node scripts/dependency-state.mjs check || {
+        echo -e "  ${CROSS} Dependencies installed, but their state could not be verified."
+        exit 1
+    }
     echo -e "  ${CHECK} Dependencies installed"
 }
 
@@ -130,10 +134,13 @@ stop_existing_instance
 dependencies_changed=0
 [ -d node_modules ] || dependencies_changed=1
 git diff --quiet "$before" "$after" -- package.json package-lock.json 2>/dev/null || dependencies_changed=1
+if [ "$dependencies_changed" -eq 0 ] && ! node scripts/dependency-state.mjs check; then
+    dependencies_changed=1
+fi
 if [ "$dependencies_changed" -eq 1 ]; then
     install_dependencies
 else
-    echo -e "  Dependencies unchanged — keeping existing node_modules."
+    echo -e "  ${CHECK} Dependencies match package-lock.json"
 fi
 echo ""
 

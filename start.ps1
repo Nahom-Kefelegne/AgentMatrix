@@ -57,6 +57,11 @@ function Install-AgentMatrixDependencies {
         Write-Host "  Run .\update.ps1 after fixing Microsoft mirror authentication." -ForegroundColor Yellow
         exit 1
     }
+    & node scripts/dependency-state.mjs check
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host "  Dependencies installed, but their state could not be verified." -ForegroundColor Red
+        exit 1
+    }
 }
 
 $needsDependencies = -not (Test-Path node_modules)
@@ -108,6 +113,15 @@ if ((Get-Command git -ErrorAction SilentlyContinue) -and (Test-Path .git)) {
     Write-Host "  Revision: $revision" -ForegroundColor DarkGray
 }
 
-if ($needsDependencies) { Install-AgentMatrixDependencies }
+if (-not $needsDependencies) {
+    & node scripts/dependency-state.mjs check
+    if ($LASTEXITCODE -ne 0) { $needsDependencies = $true }
+}
+
+if ($needsDependencies) {
+    Install-AgentMatrixDependencies
+} else {
+    Write-Host "  Dependencies match package-lock.json" -ForegroundColor Green
+}
 
 npm --no-update-notifier run electron:dev
