@@ -196,11 +196,6 @@ html, body {
   -moz-osx-font-smoothing: grayscale;
 }
 
-canvas {
-  image-rendering: pixelated;
-  image-rendering: crisp-edges;
-}
-
 a { color: inherit; text-decoration: none; }
 
 /* ─── Scrollbar ─── */

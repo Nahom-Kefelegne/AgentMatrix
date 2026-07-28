@@ -50,7 +50,12 @@ const COMMAND_EVENTS: Record<string, string> = {
 };
 
 interface HttpHandler { type: 'http'; url: string; timeoutSec: number }
-interface CommandHandler { type: 'command'; command: string; timeoutSec: number }
+interface CommandHandler {
+  type: 'command';
+  bash: string;
+  powershell: string;
+  timeoutSec: number;
+}
 
 export function buildCopilotHooksConfig(port: number): {
   version: number;
@@ -66,9 +71,11 @@ export function buildCopilotHooksConfig(port: number): {
     // Discard the response body so it can't be parsed as a permission decision;
     // force a zero exit code, and bound both curl and Copilot so a missing or
     // slow app never blocks the tool.
+    const url = `${base}/${route}`;
     hooks[event] = [{
       type: 'command',
-      command: `cat | curl -s -o /dev/null --connect-timeout 1 --max-time 1 -X POST ${base}/${route} -H 'Content-Type: application/json' -d @- 2>/dev/null || true`,
+      bash: `cat | curl -s -o /dev/null --connect-timeout 1 --max-time 1 -X POST ${url} -H 'Content-Type: application/json' --data-binary @- 2>/dev/null || true`,
+      powershell: `$body = [Console]::In.ReadToEnd(); try { Invoke-RestMethod -Uri '${url}' -Method Post -ContentType 'application/json' -Body $body -TimeoutSec 1 | Out-Null } catch {}; exit 0`,
       timeoutSec: 2,
     }];
   }

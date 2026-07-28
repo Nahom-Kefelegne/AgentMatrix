@@ -293,6 +293,7 @@ const OfficeCanvas = forwardRef<OfficeCanvasHandle, OfficeCanvasProps>(function 
       <div style={{ position: 'relative', width: DISPLAY_W, height: DISPLAY_H }}>
         {/* Pixel art layer */}
         <canvas
+          className="office-pixel-canvas"
           ref={canvasRef}
           width={CANVAS_W}
           height={CANVAS_H}
@@ -307,6 +308,7 @@ const OfficeCanvas = forwardRef<OfficeCanvasHandle, OfficeCanvasProps>(function 
         />
         {/* Crisp text overlay */}
         <canvas
+          className="office-overlay-canvas"
           ref={overlayRef}
           width={DISPLAY_W}
           height={DISPLAY_H}

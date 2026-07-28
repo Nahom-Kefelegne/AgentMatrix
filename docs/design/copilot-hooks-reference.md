@@ -706,8 +706,9 @@ AgentMatrix hooks observe session activity; they never make policy decisions.
 
 - `PreToolUse` uses a command handler only because Copilot rejects localhost HTTP
   for permission-capable hooks.
-- The command discards the response body, forces exit code zero, limits curl to
-  one second, and has a two-second Copilot timeout.
+- Platform-specific `bash` and `powershell` commands discard the response body,
+  force exit code zero, cap transport time at one second, and use a two-second
+  Copilot timeout.
 - `/api/hooks/tool-use` acknowledges with HTTP 202 before doing session-state or
   telemetry work.
 - Setup/update scripts do not duplicate the Copilot template. The running app

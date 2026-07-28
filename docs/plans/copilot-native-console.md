@@ -107,13 +107,14 @@ Rejected: a single component branching on `cliType` — the anti-pattern the
 - **A3. Single-owner resize** ✅ only the visible panel emits `terminal:resize`;
   `PtySession.cols/rows` persisted; `PtyManager.forceRepaint()` (SIGWINCH nudge)
   replaces the Copilot `Ctrl+L` seed — subscribe-then-repaint, works even when idle.
-- **A4. Renderer ladder (Win+Mac)** ✅ added `@xterm/addon-canvas`; WebGL→Canvas→DOM
-  selection (Windows prefers Canvas), WebGL `onContextLoss`→Canvas downgrade; dropped
-  `willChange:'transform'` on the Copilot container for crispness.
+- **A4. Renderer ladder (Win+Mac)** ✅ WebGL→Canvas→DOM on macOS/Linux, with
+  WebGL `onContextLoss`→Canvas downgrade. Windows now keeps xterm's DOM renderer
+  for native ClearType/RDP text and prefers Cascadia Mono/Consolas. The Office
+  pixel-art `image-rendering` rule is scoped away from xterm canvases.
 
 Validation: `npx tsc --noEmit` + `npm run build` pass. Still to do: dev-build manual
 test (modal open/close mid-run, fullscreen toggle, resume-after-restart, long-output
-PgUp/PgDn + line-by-line wheel, trust auto-accept) and Windows/RDP Canvas verification.
+PgUp/PgDn + line-by-line wheel, trust auto-accept) and Windows/RDP DOM verification.
 
 ### Track B — Identity, naming & lifecycle (empirically probed 2026-07-07)
 

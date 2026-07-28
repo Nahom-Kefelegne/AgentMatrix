@@ -97,11 +97,19 @@ export function useXterm(options: UseXtermOptions): UseXtermHandle {
           onNavigate: current.onNavigate,
         } : undefined;
       });
+      const platform = `${navigator.platform ?? ''} ${navigator.userAgent ?? ''}`.toLowerCase();
+      const isWindows = platform.includes('win');
+      const defaultFontFamily = isWindows
+        ? "'Cascadia Mono', 'Cascadia Code', Consolas, 'Courier New', monospace"
+        : "'Menlo', 'Monaco', 'Courier New', monospace";
 
       const terminal = new Terminal({
         theme: o.theme,
         fontSize: o.fontSize ?? 16,
-        fontFamily: o.fontFamily ?? "'Menlo', 'Monaco', 'Courier New', monospace",
+        fontFamily: o.fontFamily ?? defaultFontFamily,
+        fontWeight: '400',
+        fontWeightBold: '700',
+        letterSpacing: 0,
         lineHeight: o.lineHeight ?? 1.4,
         cursorBlink: o.cursorBlink ?? false,
         cursorStyle: o.cursorStyle ?? 'bar',
@@ -116,13 +124,11 @@ export function useXterm(options: UseXtermOptions): UseXtermHandle {
       const terminalLinksDisposable = terminalLinks.register(terminal);
 
       // ── Renderer ladder: WebGL (GPU) → Canvas (CPU) → DOM ──
-      // WebGL is fastest but grainy and context-flaky over Windows Remote
-      // Desktop, so Windows prefers the Canvas renderer (CPU-rasterized: crisp
-      // on RDP and far faster than xterm's built-in DOM renderer). Elsewhere we
-      // prefer WebGL and fall back to Canvas. If an addon can't load at all,
-      // xterm keeps its DOM renderer. A lost WebGL context downgrades to Canvas
-      // at runtime instead of rendering blank.
-      const isWindows = navigator.platform?.toLowerCase().includes('win');
+      // Windows intentionally keeps xterm's DOM renderer. Both WebGL and Canvas
+      // rasterize glyphs into bitmaps, which look thin/grainy under ClearType,
+      // fractional display scaling, and RDP. DOM text retains the browser's
+      // native Windows font rendering. Elsewhere prefer WebGL and fall back to
+      // Canvas; a lost WebGL context downgrades at runtime.
 
       // Track the active GPU/canvas renderer addon so cleanup can dispose it
       // explicitly and in the right order (see __cleanup below).
@@ -154,9 +160,7 @@ export function useXterm(options: UseXtermOptions): UseXtermHandle {
         } catch { return false; }
       };
 
-      if (isWindows) {
-        await loadCanvas();
-      } else if (!(await loadWebgl())) {
+      if (!isWindows && !(await loadWebgl())) {
         await loadCanvas();
       }
 
