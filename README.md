@@ -2,6 +2,15 @@
 
 A desktop app that turns CLI coding agents (GitHub Copilot CLI and Claude Code) into a visual, manageable multi-session powerhouse.
 
+<p align="center">
+  <img src="docs/assets/readme/control-center.png" width="49%" alt="Control Center routing attention across multiple coding-agent sessions">
+  <img src="docs/assets/readme/context-canvas.png" width="49%" alt="Context Canvas opening repository code beside a live CLI conversation">
+</p>
+<p align="center">
+  <img src="docs/assets/readme/markdown-preview.png" width="49%" alt="Rendered Markdown design document preview beside a live agent session">
+  <img src="docs/assets/readme/session-review.png" width="49%" alt="Session-attributed diff review with structured feedback">
+</p>
+
 **No API keys needed** — uses your installed CLI binaries directly.
 
 > **Note:** This is in early internal testing. We recommend trying it on your **devbox (Windows)** first rather than your primary machine, since the setup configures CLI hooks globally.
