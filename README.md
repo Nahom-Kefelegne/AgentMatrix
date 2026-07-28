@@ -74,6 +74,12 @@ The repository's `.npmrc` and launch scripts keep npm traffic on
 update notifier both in configuration and with `--no-update-notifier`, which
 prevents npm's package metadata update check during app shutdown.
 
+Managed Copilot sessions also receive an AgentMatrix npm shim first on `PATH`.
+Agency strips npm configuration from MCP subprocesses, so the shim restores the
+same policy at the actual child boundary. Cached `@teams-eng-mcp/launcher`
+processes resolve offline and run with the launcher's supported `--no-update`
+mode; a Microsoft Azure Artifacts bootstrap occurs only when no cache exists.
+
 ### Update
 
 For a full update (pull + reinstall dependencies + refresh CLI hooks):

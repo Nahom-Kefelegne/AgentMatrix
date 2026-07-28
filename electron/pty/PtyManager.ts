@@ -10,6 +10,7 @@ import {
   type NavigationCapability,
 } from '../../lib/navigation/rootRegistry';
 import { buildAgentMatrixCopilotMcpConfig } from '../services/mcpConfig';
+import { prependManagedNpmPolicy } from '../services/npmPolicy';
 
 // Opt-in raw PTY stream tee — set AGENTMATRIX_DEBUG_PTY=1 to dump every
 // chunk to ~/.agentmatrix/debug/<sessionId>.bin. Used to diagnose TUI
@@ -245,6 +246,7 @@ export class PtyManager {
     // hooks (session/tool/agent activity) never arrive. Harmless for Claude, but
     // scope it to Copilot to be explicit. See docs/design/copilot-hooks-reference.md.
     if (provider.type === 'copilot') {
+      prependManagedNpmPolicy(env);
       env.COPILOT_HOOK_ALLOW_LOCALHOST = '1';
       const parsedPort = Number.parseInt(process.env.PORT || '3000', 10);
       const mcpPort = Number.isFinite(parsedPort) ? parsedPort : 3000;

@@ -899,6 +899,7 @@ The built app is distributed as a zip with a `setup.sh` script that:
 | `electron/preload.ts` | Preload script -- exposes `platform` and `isElectron` |
 | `electron/terminalBridge.ts` | Socket.io <-> PTY bridge for all terminal I/O |
 | `electron/pty/PtyManager.ts` | PTY session spawning, tracking, and lifecycle |
+| `electron/services/npmPolicy.ts` | Managed npm/npx PATH shims for Agency MCP subprocess policy |
 | `electron/pty/OutputParser.ts` | ANSI stripping and legacy Claude output parsing helpers |
 | `electron/pty/PromptInjector.ts` | Fallback inject-and-capture via file-based output |
 | `electron/services/OrchestratorService.ts` | Hidden Copilot session for app-internal queries |
