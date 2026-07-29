@@ -1,10 +1,13 @@
 'use client';
 
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useRef } from 'react';
+import { useFormFieldControl } from './Modal';
 
 export function FolderPicker({ value, onChange }: { value: string; onChange: (path: string) => void }) {
   const [dirs, setDirs] = useState<{ name: string; path: string }[]>([]);
   const [open, setOpen] = useState(false);
+  const field = useFormFieldControl();
+  const triggerRef = useRef<HTMLButtonElement>(null);
 
   const loadDirs = useCallback(async (parentPath: string) => {
     try {
@@ -34,12 +37,39 @@ export function FolderPicker({ value, onChange }: { value: string; onChange: (pa
 
   return (
     <div style={{ position: 'relative' }}>
-      <div className="folder-picker-trigger" onClick={() => { setOpen(!open); if (!open) loadDirs(value); }}>
+      <button
+        type="button"
+        id={field?.controlId}
+        ref={triggerRef}
+        aria-labelledby={field?.labelId}
+        aria-describedby={field?.descriptionId}
+        aria-expanded={open}
+        className="folder-picker-trigger"
+        onKeyDown={event => {
+          if (event.key === 'Escape' && open) {
+            event.preventDefault();
+            event.stopPropagation();
+            setOpen(false);
+            window.requestAnimationFrame(() => triggerRef.current?.focus());
+          }
+        }}
+        onClick={() => { setOpen(!open); if (!open) loadDirs(value); }}
+      >
         <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{value}</span>
         <span style={{ fontSize: 12, transition: 'transform 0.15s', transform: open ? 'rotate(180deg)' : 'none' }}>▼</span>
-      </div>
+      </button>
       {open && (
-        <div className="folder-picker-dropdown">
+        <div
+          className="folder-picker-dropdown"
+          onKeyDown={event => {
+            if (event.key === 'Escape') {
+              event.preventDefault();
+              event.stopPropagation();
+              setOpen(false);
+              window.requestAnimationFrame(() => triggerRef.current?.focus());
+            }
+          }}
+        >
           <button className="folder-picker-item folder-picker-item--action" onClick={navigateUp}>
             ↑ Parent Directory
           </button>

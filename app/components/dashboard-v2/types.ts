@@ -47,10 +47,10 @@ export interface DashboardV2ViewProps {
   sessionControlState: SessionControlState | null;
   sessionControlsAvailable: boolean;
   onSelectSession: (sessionId: string) => void;
-  onOpenSession: (sessionId: string) => void;
   onReviewChanges: (sessionId: string) => void;
   onRequestSummary: (sessionId: string) => void;
   onFullscreenSession: (sessionId: string) => void;
+  onContinueSession: (sessionId: string) => void;
   onRestartSession: (sessionId: string) => void;
   onEndSession: (sessionId: string) => void;
 }

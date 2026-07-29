@@ -98,7 +98,7 @@ export default function HeaderBar({
           {menuOpen && (
             <div className="dropdown" style={{ top: 'calc(100% + 12px)', right: -4 }}>
               <button className="dropdown-item" onClick={() => { onSettingsClick(); setMenuOpen(false); }}>Settings</button>
-              <button className="dropdown-item" onClick={() => { onSetupClick(); setMenuOpen(false); }}>Hooks Config</button>
+              <button className="dropdown-item" onClick={() => { onSetupClick(); setMenuOpen(false); }}>Integration Status</button>
             </div>
           )}
         </div>

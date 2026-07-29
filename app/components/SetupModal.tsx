@@ -1,53 +1,16 @@
 'use client';
 
-import { useCallback } from 'react';
-
-const HOOK_CONFIG = `{
-  "hooks": {
-    "SessionStart": [
-      {
-        "type": "command",
-        "command": "curl -s -X POST http://localhost:3000/api/hooks/session-start -H 'Content-Type: application/json' -d '$CLAUDE_EVENT_DATA'"
-      }
-    ],
-    "SessionEnd": [
-      {
-        "type": "command",
-        "command": "curl -s -X POST http://localhost:3000/api/hooks/session-end -H 'Content-Type: application/json' -d '$CLAUDE_EVENT_DATA'"
-      }
-    ],
-    "ToolUse": [
-      {
-        "type": "command",
-        "command": "curl -s -X POST http://localhost:3000/api/hooks/tool-use -H 'Content-Type: application/json' -d '$CLAUDE_EVENT_DATA'"
-      }
-    ],
-    "ToolResult": [
-      {
-        "type": "command",
-        "command": "curl -s -X POST http://localhost:3000/api/hooks/tool-complete -H 'Content-Type: application/json' -d '$CLAUDE_EVENT_DATA'"
-      }
-    ],
-    "SubagentStart": [
-      {
-        "type": "command",
-        "command": "curl -s -X POST http://localhost:3000/api/hooks/agent-start -H 'Content-Type: application/json' -d '$CLAUDE_EVENT_DATA'"
-      }
-    ],
-    "SubagentEnd": [
-      {
-        "type": "command",
-        "command": "curl -s -X POST http://localhost:3000/api/hooks/agent-stop -H 'Content-Type: application/json' -d '$CLAUDE_EVENT_DATA'"
-      }
-    ],
-    "Stop": [
-      {
-        "type": "command",
-        "command": "curl -s -X POST http://localhost:3000/api/hooks/session-end -H 'Content-Type: application/json' -d '$CLAUDE_EVENT_DATA'"
-      }
-    ]
-  }
-}`;
+import { useCallback, useEffect, useState } from 'react';
+import {
+  CheckCircle2,
+  CircleAlert,
+  Copy,
+  RefreshCw,
+  Wrench,
+} from 'lucide-react';
+import type { CliType } from '@/lib/types';
+import CliIcon, { CLI_ICON_META } from './CliIcon';
+import { Modal } from './ui/Modal';
 
 interface SetupModalProps {
   isOpen: boolean;
@@ -56,141 +19,165 @@ interface SetupModalProps {
   sessionCount: number;
 }
 
+interface CliHealthInfo {
+  type: CliType;
+  installed: boolean;
+  version: string | null;
+  binaryPath: string | null;
+  error?: string;
+}
+
+interface IntegrationHealth {
+  clis: CliHealthInfo[];
+  agency: { installed: boolean; version: string | null } | null;
+}
+
+const START_COMMANDS = {
+  windows: '.\\start.ps1',
+  unix: './start.sh',
+};
+
 export default function SetupModal({ isOpen, onClose, connected, sessionCount }: SetupModalProps) {
-  const handleCopy = useCallback(() => {
-    navigator.clipboard.writeText(HOOK_CONFIG);
+  const [health, setHealth] = useState<IntegrationHealth>({ clis: [], agency: null });
+  const [loading, setLoading] = useState(false);
+  const [copied, setCopied] = useState<string | null>(null);
+
+  const refresh = useCallback(async () => {
+    setLoading(true);
+    try {
+      const response = await fetch('/api/cli/health');
+      const data = await response.json();
+      setHealth({ clis: data.clis || [], agency: data.agency || null });
+    } finally {
+      setLoading(false);
+    }
   }, []);
 
-  if (!isOpen) return null;
+  useEffect(() => {
+    if (isOpen) void refresh();
+  }, [isOpen, refresh]);
+
+  const copy = (key: string, value: string) => {
+    navigator.clipboard.writeText(value);
+    setCopied(key);
+    window.setTimeout(() => setCopied(null), 1_800);
+  };
 
   return (
-    <>
-      {/* Backdrop */}
-      <div
-        onClick={onClose}
-        style={{
-          position: 'fixed',
-          inset: 0,
-          background: 'rgba(0, 0, 0, 0.5)',
-          zIndex: 59,
-        }}
-      />
-      {/* Modal */}
-      <div
-        style={{
-          position: 'fixed',
-          top: '50%',
-          left: '50%',
-          transform: 'translate(-50%, -50%)',
-          width: 480,
-          maxHeight: '80vh',
-          background: 'var(--bg-secondary)',
-          border: '1px solid var(--border-color)',
-          borderRadius: 8,
-          zIndex: 60,
-          display: 'flex',
-          flexDirection: 'column',
-          overflow: 'hidden',
-        }}
-      >
-        {/* Header */}
-        <div
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'space-between',
-            padding: '12px 16px',
-            borderBottom: '1px solid var(--border-color)',
-          }}
-        >
-          <span style={{ fontSize: 18, fontWeight: 700 }}>Setup</span>
-          <button
-            onClick={onClose}
-            style={{
-              width: 24,
-              height: 24,
-              borderRadius: 4,
-              border: '1px solid var(--border-color)',
-              background: 'var(--bg-tertiary)',
-              color: 'var(--text-secondary)',
-              fontSize: 12,
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-            }}
-          >
-            x
-          </button>
-        </div>
-
-        {/* Body */}
-        <div style={{ padding: 16, overflowY: 'auto', flex: 1 }}>
-          {/* Status */}
-          <div style={{ marginBottom: 16 }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
-              <span
-                style={{
-                  width: 8,
-                  height: 8,
-                  borderRadius: '50%',
-                  backgroundColor: connected ? '#51cf66' : '#ff6b6b',
-                  display: 'inline-block',
-                }}
-              />
-              <span style={{ fontSize: 14 }}>
-                {connected ? 'Connected' : 'Disconnected'}
-              </span>
-            </div>
-            <div style={{ fontSize: 14, color: 'var(--text-secondary)' }}>
-              Active sessions: {sessionCount}
-            </div>
-          </div>
-
-          {/* Hook config */}
+    <Modal
+      isOpen={isOpen}
+      onClose={onClose}
+      title="Integration Status"
+      eyebrow="Setup and Health"
+      description="AgentMatrix manages its runtime integrations automatically. This view reports what is ready and where configuration is owned."
+      icon={<Wrench size={16} />}
+      maxWidth={680}
+      headerActions={(
+        <button type="button" className="btn-outline" onClick={() => void refresh()} disabled={loading}>
+          <RefreshCw size={13} aria-hidden="true" />
+          {loading ? 'Checking…' : 'Refresh'}
+        </button>
+      )}
+    >
+      <section className="cc-setup-summary">
+        <div className={`cc-setup-signal ${connected ? 'cc-setup-signal--ready' : 'cc-setup-signal--error'}`}>
+          {connected ? <CheckCircle2 size={17} aria-hidden="true" /> : <CircleAlert size={17} aria-hidden="true" />}
           <div>
-            <div
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'space-between',
-                marginBottom: 8,
-              }}
-            >
-              <span style={{ fontSize: 13, color: '#9a9ab0', textTransform: 'uppercase', letterSpacing: 1 }}>
-                ~/.claude/settings.json
-              </span>
-              <button
-                onClick={handleCopy}
-                style={{
-                  padding: '4px 12px',
-                  borderRadius: 4,
-                  border: '1px solid var(--border-color)',
-                  background: 'var(--bg-tertiary)',
-                  color: 'var(--text-secondary)',
-                  fontSize: 13,
-                }}
-              >
-                Copy
+            <strong>{connected ? 'Control Center connected' : 'Control Center disconnected'}</strong>
+            <span>{sessionCount} active {sessionCount === 1 ? 'session' : 'sessions'}</span>
+          </div>
+        </div>
+        <div className="cc-setup-signal cc-setup-signal--ready">
+          <CheckCircle2 size={17} aria-hidden="true" />
+          <div>
+            <strong>Navigation tools managed</strong>
+            <span>AgentMatrix MCP and renderer capabilities refresh on startup.</span>
+          </div>
+        </div>
+      </section>
+
+      <section className="cc-settings-section">
+        <div className="cc-settings-section-heading">
+          <span>Providers</span>
+          <strong>Detected CLI runtimes</strong>
+          <p>At least one provider must be installed directly or launched through Microsoft Agency.</p>
+        </div>
+        <div className="cc-setup-provider-list">
+          {(['copilot', 'claude'] as CliType[]).map(type => {
+            const provider = health.clis.find(item => item.type === type);
+            return (
+              <div key={type} className="cc-setup-provider">
+                <span className="cc-settings-provider-icon"><CliIcon cliType={type} /></span>
+                <div>
+                  <strong>{CLI_ICON_META[type].name}</strong>
+                  <code>{provider?.binaryPath || provider?.error || 'Not detected'}</code>
+                </div>
+                <span className={provider?.installed ? 'cc-setup-ready' : 'cc-setup-missing'}>
+                  {provider?.installed ? provider.version || 'Ready' : 'Missing'}
+                </span>
+              </div>
+            );
+          })}
+          <div className="cc-setup-provider">
+            <span className="cc-settings-provider-icon">A</span>
+            <div>
+              <strong>Microsoft Agency</strong>
+              <code>Optional provider launcher</code>
+            </div>
+            <span className={health.agency?.installed ? 'cc-setup-ready' : 'cc-setup-neutral'}>
+              {health.agency?.installed ? health.agency.version || 'Ready' : 'Optional'}
+            </span>
+          </div>
+        </div>
+      </section>
+
+      <section className="cc-settings-section">
+        <div className="cc-settings-section-heading">
+          <span>Managed Configuration</span>
+          <strong>No manual hook JSON required</strong>
+          <p>AgentMatrix refreshes its supported integrations through the app and setup scripts.</p>
+        </div>
+        <div className="cc-setup-managed-list">
+          <div>
+            <span>GitHub Copilot hooks</span>
+            <code>~/.copilot/hooks/agentmatrix.json</code>
+            <small>Generated by AgentMatrix at startup with localhost hook support.</small>
+          </div>
+          <div>
+            <span>Claude Code hooks</span>
+            <code>~/.claude/settings.json</code>
+            <small>Installed and refreshed by setup/update scripts with fail-open transport.</small>
+          </div>
+          <div>
+            <span>AgentMatrix MCP</span>
+            <code>Session-bound additional MCP config</code>
+            <small>Passed to managed Copilot sessions with eager tool loading.</small>
+          </div>
+        </div>
+      </section>
+
+      <section className="cc-settings-section cc-settings-section--diagnostics">
+        <div className="cc-settings-section-heading">
+          <span>Launch Commands</span>
+          <strong>Run from a separate system terminal</strong>
+          <p>Hosted sessions cannot restart their own AgentMatrix process.</p>
+        </div>
+        <div className="cc-setup-command-list">
+          {([
+            ['windows', 'Windows PowerShell', START_COMMANDS.windows],
+            ['unix', 'macOS / Linux', START_COMMANDS.unix],
+          ] as const).map(([key, label, command]) => (
+            <div key={key}>
+              <span>{label}</span>
+              <code>{command}</code>
+              <button type="button" className="btn-outline" onClick={() => copy(key, command)}>
+                {copied === key ? <CheckCircle2 size={13} aria-hidden="true" /> : <Copy size={13} aria-hidden="true" />}
+                {copied === key ? 'Copied' : 'Copy'}
               </button>
             </div>
-            <pre
-              style={{
-                background: 'var(--bg-primary)',
-                border: '1px solid var(--border-color)',
-                borderRadius: 6,
-                padding: 14,
-                fontSize: 12,
-                lineHeight: 1.5,
-                overflowX: 'auto',
-                whiteSpace: 'pre',
-                color: 'var(--text-secondary)',
-              }}
-            >
-              {HOOK_CONFIG}
-            </pre>
-          </div>
+          ))}
         </div>
-      </div>
-    </>
+      </section>
+    </Modal>
   );
 }

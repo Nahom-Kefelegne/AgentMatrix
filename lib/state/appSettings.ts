@@ -6,6 +6,7 @@ export interface AppSettings {
   defaultModel: string;
   defaultPermissionMode: string;
   defaultEffort: string;
+  defaultCopilotMode?: 'interactive' | 'plan' | 'autopilot';
   appendSystemPrompt: string;
   defaultCli?: 'claude' | 'copilot';
   useAgency?: boolean;
@@ -20,6 +21,7 @@ const DEFAULTS: AppSettings = {
   defaultModel: '',
   defaultPermissionMode: 'bypassPermissions',
   defaultEffort: '',
+  defaultCopilotMode: 'interactive',
   appendSystemPrompt: '',
 };
 

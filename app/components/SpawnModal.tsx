@@ -1,15 +1,29 @@
 'use client';
 
-import { useState, useCallback, useEffect } from 'react';
-import { useSocketContext } from './SocketProvider';
-import { Modal, FormField, OptionGroup, OptionButton, TextInput, TextArea, SelectInput } from './ui/Modal';
-import { FolderPicker } from './ui/FolderPicker';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { ChevronDown, Plus, ShieldCheck } from 'lucide-react';
+import type { AppSettings } from '@/lib/state/appSettings';
 import type { CliType } from '@/lib/types';
 import {
-  CLAUDE_MODELS, CLAUDE_PERMISSION_MODES,
-  COPILOT_MODELS, COPILOT_PERMISSION_MODES, COPILOT_MODES,
+  COPILOT_MODES,
   EFFORT_LEVELS,
+  defaultPermissionModeForCli,
+  modelsForCli,
+  permissionModesForCli,
+  validOptionValue,
 } from '@/lib/cli/uiMetadata';
+import CliIcon, { CLI_ICON_META } from './CliIcon';
+import { useSocketContext } from './SocketProvider';
+import { FolderPicker } from './ui/FolderPicker';
+import {
+  FormField,
+  Modal,
+  OptionButton,
+  OptionGroup,
+  SelectInput,
+  TextArea,
+  TextInput,
+} from './ui/Modal';
 
 interface CliHealthInfo {
   type: CliType;
@@ -19,296 +33,421 @@ interface CliHealthInfo {
   error?: string;
 }
 
-/** Inline SVG icons for CLI types */
-const CLI_ICONS: Record<CliType, { svg: string; color: string; name: string }> = {
-  claude: {
-    svg: `<svg width="14" height="14" viewBox="0 0 248 248" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M52.4285 162.873L98.7844 136.879L99.5485 134.602L98.7844 133.334H96.4921L88.7237 132.862L62.2346 132.153L39.3113 131.207L17.0249 130.026L11.4214 128.844L6.2 121.873L6.7094 118.447L11.4214 115.257L18.171 115.847L33.0711 116.911L55.485 118.447L71.6586 119.392L95.728 121.873H99.5485L100.058 120.337L98.7844 119.392L97.7656 118.447L74.5877 102.732L49.4995 86.1905L36.3823 76.62L29.3779 71.7757L25.8121 67.2858L24.2839 57.3608L30.6515 50.2716L39.3113 50.8623L41.4763 51.4531L50.2636 58.1879L68.9842 72.7209L93.4357 90.6804L97.0015 93.6343L98.4374 92.6652L98.6571 91.9801L97.0015 89.2625L83.757 65.2772L69.621 40.8192L63.2534 30.6579L61.5978 24.632C60.9565 22.1032 60.579 20.0111 60.579 17.4246L67.8381 7.49965L71.9133 6.19995L81.7193 7.49965L85.7946 11.0443L91.9074 24.9865L101.714 46.8451L116.996 76.62L121.453 85.4816L123.873 93.6343L124.764 96.1155H126.292V94.6976L127.566 77.9197L129.858 57.3608L132.15 30.8942L132.915 23.4505L136.608 14.4708L143.994 9.62643L149.725 12.344L154.437 19.0788L153.8 23.4505L150.998 41.6463L145.522 70.1215L141.957 89.2625H143.994L146.414 86.7813L156.093 74.0206L172.266 53.698L179.398 45.6635L187.803 36.802L193.152 32.5484H203.34L210.726 43.6549L207.415 55.1159L196.972 68.3492L188.312 79.5739L175.896 96.2095L168.191 109.585L168.882 110.689L170.738 110.53L198.755 104.504L213.91 101.787L231.994 98.7149L240.144 102.496L241.036 106.395L237.852 114.311L218.495 119.037L195.826 123.645L162.07 131.592L161.696 131.893L162.137 132.547L177.36 133.925L183.855 134.279H199.774L229.447 136.524L237.215 141.605L241.8 147.867L241.036 152.711L229.065 158.737L213.019 154.956L175.45 145.977L162.587 142.787H160.805V143.85L171.502 154.366L191.242 172.089L215.82 195.011L217.094 200.682L213.91 205.172L210.599 204.699L188.949 188.394L180.544 181.069L161.696 165.118H160.422V166.772L164.752 173.152L187.803 207.771L188.949 218.405L187.294 221.832L181.308 223.959L174.813 222.777L161.187 203.754L147.305 182.486L136.098 163.345L134.745 164.2L128.075 235.42L125.019 239.082L117.887 241.8L111.902 237.31L108.718 229.984L111.902 215.452L115.722 196.547L118.779 181.541L121.58 162.873L123.291 156.636L123.14 156.219L121.773 156.449L107.699 175.752L86.304 204.699L69.3663 222.777L65.291 224.431L58.2867 220.768L58.9235 214.27L62.8713 208.48L86.304 178.705L100.44 160.155L109.551 149.507L109.462 147.967L108.959 147.924L46.6977 188.512L35.6182 189.93L30.7788 185.44L31.4156 178.115L33.7079 175.752L52.4285 162.873Z" fill="currentColor"/></svg>`,
-    color: '#D97757',
-    name: 'Claude Code',
-  },
-  copilot: {
-    svg: `<svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor" xmlns="http://www.w3.org/2000/svg"><path d="M7.998 15.035c-4.562 0-7.873-2.914-7.998-3.749V9.338c.085-.628.677-1.686 1.588-2.065.013-.07.024-.143.036-.218.029-.183.06-.384.126-.612-.201-.508-.254-1.084-.254-1.656 0-.87.128-1.769.693-2.484.579-.733 1.494-1.124 2.724-1.261 1.206-.134 2.262.034 2.944.765.05.053.096.108.139.165.044-.057.094-.112.143-.165.682-.731 1.738-.899 2.944-.765 1.23.137 2.145.528 2.724 1.261.566.715.693 1.614.693 2.484 0 .572-.053 1.148-.254 1.656.066.228.098.429.126.612.012.076.024.148.037.218.924.385 1.522 1.471 1.591 2.095v1.872c0 .766-3.351 3.795-8.002 3.795Zm0-1.485c2.28 0 4.584-1.11 5.002-1.433V7.862l-.023-.116c-.49.21-1.075.291-1.727.291-1.146 0-2.059-.327-2.71-.991A3.222 3.222 0 0 1 8 6.303a3.24 3.24 0 0 1-.544.743c-.65.664-1.563.991-2.71.991-.652 0-1.236-.081-1.727-.291l-.023.116v4.255c.419.323 2.722 1.433 5.002 1.433ZM6.762 2.83c-.193-.206-.637-.413-1.682-.297-1.019.113-1.479.404-1.713.7-.247.312-.369.789-.369 1.554 0 .793.129 1.171.308 1.371.162.181.519.379 1.442.379.853 0 1.339-.235 1.638-.54.315-.322.527-.827.617-1.553.117-.935-.037-1.395-.241-1.614Zm4.155-.297c-1.044-.116-1.488.091-1.681.297-.204.219-.359.679-.242 1.614.091.726.303 1.231.618 1.553.299.305.784.54 1.638.54.922 0 1.28-.198 1.442-.379.179-.2.308-.578.308-1.371 0-.765-.123-1.242-.37-1.554-.233-.296-.693-.587-1.713-.7Z"/><path d="M6.25 9.037a.75.75 0 0 1 .75.75v1.501a.75.75 0 0 1-1.5 0V9.787a.75.75 0 0 1 .75-.75Zm4.25.75v1.501a.75.75 0 0 1-1.5 0V9.787a.75.75 0 0 1 1.5 0Z"/></svg>`,
-    color: '#6E40C9',
-    name: 'GitHub Copilot',
-  },
-};
-
 interface SpawnModalProps {
   isOpen: boolean;
   onClose: () => void;
   onSessionSpawned?: (sessionId: string) => void;
 }
 
+interface LaunchMetadata {
+  settings: AppSettings;
+  cliHealth: CliHealthInfo[];
+  agencyAvailable: boolean;
+  agencyVersion: string | null;
+}
+
+function isCliAvailable(
+  type: CliType,
+  health: CliHealthInfo[],
+  useAgency: boolean,
+  agencyAvailable: boolean,
+): boolean {
+  return health.some(item => item.type === type && item.installed)
+    || (useAgency && agencyAvailable);
+}
+
 export default function SpawnModal({ isOpen, onClose, onSessionSpawned }: SpawnModalProps) {
-  const { socketRef } = useSocketContext();
+  const { connected, socketRef } = useSocketContext();
   const [cwd, setCwd] = useState('');
   const [sessionName, setSessionName] = useState('');
-  const [permissionMode, setPermissionMode] = useState('');
+  const [cliType, setCliType] = useState<CliType>('copilot');
+  const [permissionMode, setPermissionMode] = useState('default');
   const [model, setModel] = useState('');
   const [effort, setEffort] = useState('');
+  const [copilotMode, setCopilotMode] = useState('interactive');
   const [allowedTools, setAllowedTools] = useState('');
   const [systemPrompt, setSystemPrompt] = useState('');
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [launching, setLaunching] = useState(false);
-  const [defaultsLoaded, setDefaultsLoaded] = useState(false);
-  const [cliType, setCliType] = useState<CliType>('claude');
-  const [cliHealth, setCliHealth] = useState<CliHealthInfo[]>([]);
-  const [healthLoaded, setHealthLoaded] = useState(false);
-  const [agencyAvailable, setAgencyAvailable] = useState(false);
-  const [agencyVersion, setAgencyVersion] = useState<string | null>(null);
-  const [useAgency, setUseAgency] = useState(false);
-
-  // Copilot-specific state
-  const [copilotMode, setCopilotMode] = useState('interactive');
-
+  const [launchError, setLaunchError] = useState('');
   const [nameTouched, setNameTouched] = useState(false);
-  const nameValid = sessionName.trim().length > 0;
+  const [metadata, setMetadata] = useState<LaunchMetadata | null>(null);
+  const [metadataLoading, setMetadataLoading] = useState(false);
+  const [useAgency, setUseAgency] = useState(false);
+  const launchCleanupRef = useRef<(() => void) | null>(null);
 
-  useEffect(() => {
-    if (!cwd) fetch('/api/system').then(r => r.json()).then(d => setCwd(d.homedir || '')).catch(() => {});
+  const applyDefaults = useCallback((type: CliType, settings: AppSettings) => {
+    const useStoredDefaults = settings.defaultCli === type;
+    const models = modelsForCli(type);
+    const permissions = permissionModesForCli(type);
+    setModel(useStoredDefaults ? validOptionValue(models, settings.defaultModel) : '');
+    setPermissionMode(
+      useStoredDefaults
+        ? validOptionValue(permissions, settings.defaultPermissionMode, defaultPermissionModeForCli(type))
+        : defaultPermissionModeForCli(type),
+    );
+    setEffort(useStoredDefaults ? validOptionValue(EFFORT_LEVELS, settings.defaultEffort) : '');
+    setCopilotMode(
+      type === 'copilot' && useStoredDefaults
+        ? validOptionValue(COPILOT_MODES, settings.defaultCopilotMode, 'interactive')
+        : 'interactive',
+    );
+    setSystemPrompt(type === 'claude' ? settings.appendSystemPrompt || '' : '');
+    setAllowedTools('');
   }, []);
 
-  // Reset the name field each time the modal is closed so a new session starts clean.
   useEffect(() => {
-    if (!isOpen) {
-      setSessionName('');
-      setNameTouched(false);
-    }
-  }, [isOpen]);
+    if (!isOpen) return;
+    let cancelled = false;
+    setMetadataLoading(true);
+    setLaunchError('');
+    setSessionName('');
+    setNameTouched(false);
+    setShowAdvanced(false);
 
-  useEffect(() => {
-    if (isOpen && !healthLoaded) {
-      fetch('/api/cli/health')
-        .then(r => r.json())
-        .then(data => {
-          const clis: CliHealthInfo[] = data.clis || [];
-          setCliHealth(clis);
-          setHealthLoaded(true);
-          if (data.agency?.installed) {
-            setAgencyAvailable(true);
-            setAgencyVersion(data.agency.version);
-          }
-          const installed = clis.filter(c => c.installed);
-          if (installed.length > 0 && !installed.find(c => c.type === cliType)) {
-            setCliType(installed[0].type);
-          }
-        })
-        .catch(() => setHealthLoaded(true));
-    }
-  }, [isOpen, healthLoaded]);
+    Promise.all([
+      fetch('/api/system').then(response => response.json()),
+      fetch('/api/cli/health').then(response => response.json()),
+      fetch('/api/settings').then(response => response.json()),
+    ])
+      .then(([system, healthPayload, settings]) => {
+        if (cancelled) return;
+        const cliHealth = (healthPayload.clis || []) as CliHealthInfo[];
+        const agencyAvailable = Boolean(healthPayload.agency?.installed);
+        const agencyEnabled = Boolean(settings.useAgency && agencyAvailable);
+        const configuredDefault = settings.defaultCli as CliType | undefined;
+        const preferred: CliType = configuredDefault
+          && isCliAvailable(configuredDefault, cliHealth, agencyEnabled, agencyAvailable)
+          ? configuredDefault
+          : isCliAvailable('copilot', cliHealth, agencyEnabled, agencyAvailable)
+            ? 'copilot'
+            : 'claude';
+        const nextMetadata = {
+          settings: settings as AppSettings,
+          cliHealth,
+          agencyAvailable,
+          agencyVersion: healthPayload.agency?.version || null,
+        };
+        setMetadata(nextMetadata);
+        setUseAgency(agencyEnabled);
+        setCwd(system.homedir || '');
+        setCliType(preferred);
+        applyDefaults(preferred, nextMetadata.settings);
+        setMetadataLoading(false);
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setMetadataLoading(false);
+        setLaunchError('AgentMatrix could not load CLI launch settings.');
+      });
 
-  useEffect(() => {
-    if (isOpen && !defaultsLoaded) {
-      fetch('/api/settings').then(r => r.json()).then(data => {
-        if (data.defaultModel && !model) setModel(data.defaultModel);
-        if (data.defaultPermissionMode) setPermissionMode(data.defaultPermissionMode);
-        if (data.defaultEffort && !effort) setEffort(data.defaultEffort);
-        if (data.appendSystemPrompt && !systemPrompt) setSystemPrompt(data.appendSystemPrompt);
-        if (data.defaultCli) setCliType(data.defaultCli);
-        if (data.useAgency) setUseAgency(true);
-        setDefaultsLoaded(true);
-      }).catch(() => setDefaultsLoaded(true));
-    }
-  }, [isOpen, defaultsLoaded]);
+    return () => {
+      cancelled = true;
+      launchCleanupRef.current?.();
+      launchCleanupRef.current = null;
+      setLaunching(false);
+    };
+  }, [applyDefaults, isOpen]);
 
-  // Reset model + mode-specific state when CLI type changes
-  useEffect(() => {
-    setModel('');
-    setPermissionMode(cliType === 'copilot' ? 'default' : 'bypassPermissions');
-    setCopilotMode('interactive');
-  }, [cliType]);
+  const selectCli = useCallback((type: CliType) => {
+    if (!metadata || !isCliAvailable(type, metadata.cliHealth, useAgency, metadata.agencyAvailable)) return;
+    setCliType(type);
+    applyDefaults(type, metadata.settings);
+  }, [applyDefaults, metadata, useAgency]);
 
-  const models = cliType === 'copilot' ? COPILOT_MODELS : CLAUDE_MODELS;
-  const permModes = cliType === 'copilot' ? COPILOT_PERMISSION_MODES : CLAUDE_PERMISSION_MODES;
-
-  const getCliHealthInfo = (type: CliType): CliHealthInfo | undefined => {
-    return cliHealth.find(c => c.type === type);
-  };
+  const toggleAgency = useCallback(() => {
+    if (!metadata?.agencyAvailable) return;
+    const next = !useAgency;
+    setUseAgency(next);
+    fetch('/api/settings', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ useAgency: next }),
+    }).catch(() => {});
+  }, [metadata?.agencyAvailable, useAgency]);
 
   const handleLaunch = useCallback(() => {
     const socket = socketRef.current;
-    if (!socket) return;
-    if (!sessionName.trim()) { setNameTouched(true); return; }
+    const name = sessionName.trim();
+    if (!name) {
+      setNameTouched(true);
+      return;
+    }
+    if (!connected || !socket?.connected) {
+      setLaunchError('AgentMatrix is disconnected. Reconnect before starting a session.');
+      return;
+    }
+    if (!cwd) {
+      setLaunchError('Choose a working directory.');
+      return;
+    }
+
     setLaunching(true);
-    const handleSpawned = (data: { sessionId: string }) => {
+    setLaunchError('');
+    launchCleanupRef.current?.();
+    const cleanup = () => {
       socket.off('terminal:spawned' as any, handleSpawned);
+      socket.off('terminal:spawn-error' as any, handleSpawnError);
+      window.clearTimeout(timeout);
+    };
+    const handleSpawned = (data: { sessionId: string }) => {
+      cleanup();
+      launchCleanupRef.current = null;
       setLaunching(false);
       onSessionSpawned?.(data.sessionId);
       onClose();
     };
+    const handleSpawnError = (data: { error?: string }) => {
+      cleanup();
+      launchCleanupRef.current = null;
+      setLaunching(false);
+      setLaunchError(data.error || 'The CLI process could not be started.');
+    };
+    const timeout = window.setTimeout(() => {
+      cleanup();
+      launchCleanupRef.current = null;
+      setLaunching(false);
+      setLaunchError('The session did not start within 20 seconds.');
+    }, 20_000);
+    launchCleanupRef.current = cleanup;
+
     socket.on('terminal:spawned' as any, handleSpawned);
+    socket.on('terminal:spawn-error' as any, handleSpawnError);
     socket.emit('terminal:new' as any, {
       cwd,
-      name: sessionName.trim(),
+      name,
       permissionMode,
       model: model || undefined,
       effort: effort || undefined,
       allowedTools: allowedTools.trim() || undefined,
-      systemPrompt: systemPrompt.trim() || undefined,
+      systemPrompt: cliType === 'claude' ? systemPrompt.trim() || undefined : undefined,
       cliType,
-      // Copilot-specific
       copilotMode: cliType === 'copilot' ? copilotMode : undefined,
     });
-    setTimeout(() => { socket.off('terminal:spawned' as any, handleSpawned); setLaunching(false); onClose(); }, 5000);
-  }, [socketRef, cwd, sessionName, permissionMode, model, effort, allowedTools, systemPrompt, cliType, copilotMode, onClose, onSessionSpawned]);
+  }, [
+    allowedTools,
+    cliType,
+    connected,
+    copilotMode,
+    cwd,
+    effort,
+    model,
+    onClose,
+    onSessionSpawned,
+    permissionMode,
+    sessionName,
+    socketRef,
+    systemPrompt,
+  ]);
+
+  const models = modelsForCli(cliType);
+  const permissionModes = permissionModesForCli(cliType);
+  const nameValid = sessionName.trim().length > 0;
+  const selectedCliAvailable = metadata
+    ? isCliAvailable(cliType, metadata.cliHealth, useAgency, metadata.agencyAvailable)
+    : false;
 
   return (
-    <Modal isOpen={isOpen} onClose={onClose} title="New Session"
-      footer={
-        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10 }}>
-          <button className="btn-outline" onClick={onClose}>Cancel</button>
-          <button className="btn-primary" onClick={handleLaunch} disabled={launching || !nameValid}>
-            {launching ? 'Launching...' : 'Launch Session'}
+    <Modal
+      isOpen={isOpen}
+      onClose={onClose}
+      title="Start a Session"
+      eyebrow="New Session"
+      description="Launch a native CLI in the selected workspace. The terminal opens directly in Control Center."
+      icon={<Plus size={16} />}
+      maxWidth={700}
+      closeDisabled={launching}
+      footer={(
+        <div className="cc-modal-footer-row">
+          <span className="cc-modal-footer-status" role="status" aria-live="polite">
+            {launching ? 'Waiting for CLI startup…' : launchError}
+          </span>
+          <button className="btn-outline" onClick={onClose} disabled={launching}>Cancel</button>
+          <button
+            className="btn-primary"
+            onClick={handleLaunch}
+            disabled={launching || metadataLoading || !nameValid || !selectedCliAvailable || !connected}
+          >
+            {launching ? 'Launching…' : 'Launch Session'}
           </button>
         </div>
-      }>
-
-      {/* CLI Selector */}
-      <FormField label="CLI">
+      )}
+    >
+      <section className="cc-form-section">
+        <div className="cc-form-section-heading">
+          <span>01</span>
+          <div>
+            <strong>Choose the CLI</strong>
+            <p>Only installed providers—or providers available through Agency—can be selected.</p>
+          </div>
+        </div>
         <OptionGroup>
-          {(['claude', 'copilot'] as CliType[]).map(type => {
-            const health = getCliHealthInfo(type);
-            const directInstall = health?.installed ?? false;
-            const available = directInstall || (useAgency && agencyAvailable);
-            const icon = CLI_ICONS[type];
+          {(['copilot', 'claude'] as CliType[]).map(type => {
+            const health = metadata?.cliHealth.find(item => item.type === type);
+            const available = metadata
+              ? isCliAvailable(type, metadata.cliHealth, useAgency, metadata.agencyAvailable)
+              : false;
             return (
               <OptionButton
                 key={type}
                 selected={cliType === type}
-                onClick={() => available && setCliType(type)}
-                title={!available ? (health?.error || `${icon.name} not installed`) : icon.name}
+                disabled={!available || metadataLoading}
+                onClick={() => selectCli(type)}
+                description={
+                  health?.installed
+                    ? health.version || 'Installed'
+                    : useAgency && metadata?.agencyAvailable
+                      ? 'Available through Agency'
+                      : health?.error || 'Not installed'
+                }
               >
-                <div style={{ display: 'flex', alignItems: 'center', gap: 6, opacity: available ? 1 : 0.4 }}>
-                  <span
-                    style={{ color: available ? icon.color : '#666', display: 'flex', alignItems: 'center' }}
-                    dangerouslySetInnerHTML={{ __html: icon.svg }}
-                  />
-                  <span>{icon.name}</span>
-                </div>
-                {healthLoaded && (
-                  <div style={{ fontSize: 11, marginTop: 2, color: available ? '#888' : '#666' }}>
-                    {directInstall ? (health?.version || 'Installed') : (useAgency && agencyAvailable) ? 'via Agency' : 'Not installed'}
-                  </div>
-                )}
+                <span className="cc-cli-option">
+                  <CliIcon cliType={type} />
+                  {CLI_ICON_META[type].name}
+                </span>
               </OptionButton>
             );
           })}
         </OptionGroup>
-      </FormField>
 
-      {/* Agency toggle */}
-      {agencyAvailable && (
-        <div style={{
-          display: 'flex', alignItems: 'center', gap: 12,
-          padding: '10px 14px', borderRadius: 10, marginBottom: 16,
-          background: useAgency ? 'rgba(99, 102, 241, 0.12)' : 'rgba(128, 128, 128, 0.08)',
-          border: `1px solid ${useAgency ? 'rgba(99, 102, 241, 0.4)' : 'rgba(128, 128, 128, 0.15)'}`,
-          cursor: 'pointer', transition: 'all 0.2s',
-        }} onClick={() => {
-          const next = !useAgency;
-          setUseAgency(next);
-          // Persist to backend settings so PtyManager sees it
-          fetch('/api/settings', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ useAgency: next }),
-          }).catch(() => {});
-        }}>
-          <div style={{
-            width: 36, height: 20, borderRadius: 10, padding: 2, flexShrink: 0,
-            background: useAgency ? '#6366f1' : '#555',
-            transition: 'background 0.2s',
-          }}>
-            <div style={{
-              width: 16, height: 16, borderRadius: '50%', background: '#fff',
-              boxShadow: '0 1px 3px rgba(0,0,0,0.3)',
-              transform: useAgency ? 'translateX(16px)' : 'translateX(0)',
-              transition: 'transform 0.2s',
-            }} />
-          </div>
+        {metadata?.agencyAvailable ? (
+          <button
+            type="button"
+            role="switch"
+            aria-checked={useAgency}
+            className={`cc-inline-setting ${useAgency ? 'cc-inline-setting--active' : ''}`}
+            onClick={toggleAgency}
+          >
+            <span className="cc-inline-setting-indicator" aria-hidden="true" />
+            <span>
+              <strong>Launch through Microsoft Agency</strong>
+              <small>{metadata.agencyVersion ? `Agency ${metadata.agencyVersion}` : 'Agency detected'}</small>
+            </span>
+            <span className="cc-inline-setting-state">{useAgency ? 'On' : 'Off'}</span>
+          </button>
+        ) : null}
+      </section>
+
+      <section className="cc-form-section">
+        <div className="cc-form-section-heading">
+          <span>02</span>
           <div>
-            <div style={{ fontSize: 13, fontWeight: 600 }}>Launch via Agency</div>
-            <div style={{ fontSize: 11, opacity: 0.6 }}>
-              Microsoft Agent Platform {agencyVersion ? `v${agencyVersion}` : ''}
-            </div>
+            <strong>Name and workspace</strong>
+            <p>The name persists with the provider session and appears in the left session list.</p>
           </div>
         </div>
-      )}
-
-      <FormField label="Working Directory">
-        <FolderPicker value={cwd} onChange={setCwd} />
-      </FormField>
-      <FormField label="Session Name" required>
-        <TextInput value={sessionName} onChange={setSessionName}
-          onBlur={() => setNameTouched(true)}
-          error={nameTouched && !nameValid}
-          placeholder="my-session" />
-        {nameTouched && !nameValid && (
-          <div style={{ fontSize: 12, color: '#f87171', marginTop: 4 }}>Session name is required.</div>
-        )}
-      </FormField>
-
-      {/* Copilot: Agent Mode selector */}
-      {cliType === 'copilot' && (
-        <FormField label="Agent Mode">
-          <OptionGroup>
-            {COPILOT_MODES.map(m => (
-              <OptionButton key={m.value} selected={copilotMode === m.value}
-                onClick={() => setCopilotMode(m.value)} title={m.desc}>{m.label}</OptionButton>
-            ))}
-          </OptionGroup>
+        <FormField label="Session name" required>
+          <TextInput
+            data-autofocus
+            name="session-name"
+            autoComplete="off"
+            spellCheck={false}
+            value={sessionName}
+            onChange={setSessionName}
+            onBlur={() => setNameTouched(true)}
+            error={nameTouched && !nameValid}
+            placeholder="auth-refresh"
+          />
+          {nameTouched && !nameValid ? <div className="error-text">Session name is required.</div> : null}
         </FormField>
-      )}
+        <FormField label="Working directory">
+          <FolderPicker value={cwd} onChange={setCwd} />
+        </FormField>
+      </section>
 
-      {/* Permission Mode — different options per CLI */}
-      <FormField label={cliType === 'copilot' ? 'Permissions' : 'Permission Mode'}>
-        <OptionGroup>
-          {permModes.map(pm => (
-            <OptionButton key={pm.value} selected={permissionMode === pm.value}
-              onClick={() => setPermissionMode(pm.value)} title={pm.desc}>{pm.label}</OptionButton>
-          ))}
-        </OptionGroup>
-      </FormField>
-
-      <button onClick={() => setShowAdvanced(!showAdvanced)}
-        style={{ fontSize: 14, fontWeight: 600, color: '#6366f1', cursor: 'pointer', marginBottom: 16,
-          display: 'flex', alignItems: 'center', gap: 4, background: 'none', border: 'none', fontFamily: 'inherit', padding: 0 }}>
-        <span style={{ fontSize: 10 }}>{showAdvanced ? '▼' : '▶'}</span> Advanced Options
-      </button>
-
-      {showAdvanced && (
-        <>
-          <FormField label="Model"><SelectInput value={model} onChange={setModel} options={models} /></FormField>
-          <FormField label={cliType === 'copilot' ? 'Reasoning Effort' : 'Effort Level'}>
+      <section className="cc-form-section">
+        <div className="cc-form-section-heading">
+          <span>03</span>
+          <div>
+            <strong>Execution profile</strong>
+            <p>These settings are preserved when AgentMatrix restarts or resumes this session.</p>
+          </div>
+        </div>
+        {cliType === 'copilot' ? (
+          <FormField label="Agent mode">
             <OptionGroup>
-              {EFFORT_LEVELS.map(e => (
-                <OptionButton key={e.value} selected={effort === e.value} onClick={() => setEffort(e.value)}>{e.label}</OptionButton>
+              {COPILOT_MODES.map(mode => (
+                <OptionButton
+                  key={mode.value}
+                  selected={copilotMode === mode.value}
+                  onClick={() => setCopilotMode(mode.value)}
+                  description={mode.desc}
+                >
+                  {mode.label}
+                </OptionButton>
               ))}
             </OptionGroup>
           </FormField>
+        ) : null}
+        <FormField label={cliType === 'copilot' ? 'Permissions' : 'Permission mode'}>
+          <OptionGroup>
+            {permissionModes.map(mode => (
+              <OptionButton
+                key={mode.value}
+                selected={permissionMode === mode.value}
+                onClick={() => setPermissionMode(mode.value)}
+                description={mode.desc}
+              >
+                {mode.label}
+              </OptionButton>
+            ))}
+          </OptionGroup>
+        </FormField>
+      </section>
 
-          {/* Claude-specific: allowed tools as text, system prompt */}
-          {cliType === 'claude' && (
-            <>
-              <FormField label="Allowed Tools" optional>
-                <TextInput value={allowedTools} onChange={setAllowedTools} placeholder="e.g. Bash,Read,Edit" />
-              </FormField>
-              <FormField label="Append System Prompt" optional>
-                <TextArea value={systemPrompt} onChange={setSystemPrompt} placeholder="Additional instructions..." />
-              </FormField>
-            </>
-          )}
+      <button
+        type="button"
+        className="cc-advanced-toggle"
+        aria-expanded={showAdvanced}
+        onClick={() => setShowAdvanced(value => !value)}
+      >
+        <ChevronDown size={14} className={showAdvanced ? 'cc-advanced-toggle-icon--open' : ''} aria-hidden="true" />
+        Advanced launch controls
+      </button>
 
-          {/* Copilot-specific: tool allow/deny patterns */}
-          {cliType === 'copilot' && (
-            <>
-              <FormField label="Allow Tools" optional>
-                <TextInput value={allowedTools} onChange={setAllowedTools} placeholder="e.g. shell(npm:*), write, url" />
-              </FormField>
-            </>
-          )}
-        </>
-      )}
+      {showAdvanced ? (
+        <section className="cc-form-section cc-form-section--advanced">
+          <FormField label="Model" description={`Model IDs are passed directly to ${CLI_ICON_META[cliType].name}.`}>
+            <SelectInput name="launch-model" value={model} onChange={setModel} options={models} />
+          </FormField>
+          <FormField label={cliType === 'copilot' ? 'Reasoning effort' : 'Effort level'}>
+            <OptionGroup>
+              {EFFORT_LEVELS.map(level => (
+                <OptionButton key={level.value} selected={effort === level.value} onClick={() => setEffort(level.value)}>
+                  {level.label}
+                </OptionButton>
+              ))}
+            </OptionGroup>
+          </FormField>
+          <FormField
+            label={cliType === 'copilot' ? 'Allowed tool patterns' : 'Allowed tools'}
+            optional
+            description={cliType === 'copilot' ? 'Comma-separated Copilot allow-tool patterns.' : 'Comma-separated Claude tool names.'}
+          >
+            <TextInput
+              name="allowed-tools"
+              autoComplete="off"
+              value={allowedTools}
+              onChange={setAllowedTools}
+              placeholder={cliType === 'copilot' ? 'shell(npm:*), write, url' : 'Bash, Read, Edit'}
+            />
+          </FormField>
+          {cliType === 'claude' ? (
+            <FormField label="Append system prompt" optional>
+              <TextArea
+                name="append-system-prompt"
+                value={systemPrompt}
+                onChange={setSystemPrompt}
+                placeholder="Additional session instructions…"
+              />
+            </FormField>
+          ) : null}
+          <div className="cc-profile-note">
+            <ShieldCheck size={14} aria-hidden="true" />
+            <span>AgentMatrix stores this launch profile locally so restart and auto-resume retain it.</span>
+          </div>
+        </section>
+      ) : null}
     </Modal>
   );
 }

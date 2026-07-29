@@ -74,7 +74,7 @@ export default function DashboardV2Nav({
         <button type="button" className="mc-nav-icon" onClick={toggleTheme} aria-label="Toggle theme" title="Toggle Theme">
           {theme === 'dark' ? <Sun size={15} aria-hidden="true" /> : <Moon size={15} aria-hidden="true" />}
         </button>
-        <button type="button" className="mc-nav-icon" onClick={onSetup} aria-label="Configure hooks" title="Hooks Config">
+        <button type="button" className="mc-nav-icon" onClick={onSetup} aria-label="Open integration status" title="Integration Status">
           <Wrench size={15} aria-hidden="true" />
         </button>
         <button type="button" className="mc-nav-icon" onClick={onSettings} aria-label="Open settings" title="Settings">

@@ -1,7 +1,17 @@
 'use client';
 
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback, useRef, type CSSProperties } from 'react';
+import { ClipboardList, Plus, RefreshCw } from 'lucide-react';
 import { useSocketContext } from './SocketProvider';
+import {
+  FormField,
+  Modal,
+  OptionButton,
+  OptionGroup,
+  SelectInput,
+  TextArea,
+  TextInput,
+} from './ui/Modal';
 
 interface Discussion {
   author: string;
@@ -77,6 +87,7 @@ const TYPE_ICONS: Record<string, string> = {
 };
 
 const TASK_TYPES = ['Bug', 'Task', 'User Story', 'Feature', 'Epic', 'Issue'] as const;
+const TASK_DATE_FORMAT = new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'short' });
 
 type Tab = 'app' | 'ado';
 
@@ -97,7 +108,7 @@ function TaskDetailModal({ task, onClose, onUpdate, onComment, onAssign, onDelet
   onUpdate: (id: string, changes: Record<string, unknown>) => void;
   onComment: (id: string, text: string) => void;
   onAssign: (task: AppTask) => void;
-  onDelete: (id: string) => void;
+  onDelete: (id: string) => Promise<boolean>;
   onSync: (task: AppTask) => void;
   onSyncClaude?: (task: AppTask) => void;
   sessions: Map<string, { id: string; name: string }>;
@@ -125,144 +136,153 @@ function TaskDetailModal({ task, onClose, onUpdate, onComment, onAssign, onDelet
   };
 
   return (
-    <>
-      <div onClick={onClose} style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', zIndex: 100, backdropFilter: 'blur(4px)' }} />
-      <div style={{
-        position: 'fixed', top: '50%', left: '50%', transform: 'translate(-50%, -50%)',
-        width: 720, height: '80vh', background: '#111118', border: '1px solid #222235',
-        borderRadius: 16, zIndex: 101, display: 'flex', flexDirection: 'column', overflow: 'hidden',
-        boxShadow: '0 20px 60px rgba(0,0,0,0.5)',
-      }}>
-        {/* Header */}
-        <div style={{ padding: '20px 24px', borderBottom: '1px solid #1e1e30', flexShrink: 0 }}>
-          <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12 }}>
-            <div style={{ flex: 1 }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
-                <span style={{ fontSize: 22 }}>{typeIcon}</span>
-                <span style={{ fontSize: 20, fontWeight: 800, color: '#eee' }}>{task.subject}</span>
-              </div>
-              <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-                <span style={{ fontSize: 12, padding: '3px 10px', borderRadius: 12, background: statusColor + '20', color: statusColor, fontWeight: 700, textTransform: 'uppercase' }}>{task.status}</span>
-                <span style={{ fontSize: 12, padding: '3px 10px', borderRadius: 12, background: (STATE_COLORS[taskState] || '#888') + '15', color: STATE_COLORS[taskState] || '#888', fontWeight: 700 }}>{taskState}</span>
-                {task.source === 'ado' && task.adoId && adoConfig?.configured && (
-                  <a href={getAdoItemUrl(adoConfig.organization, adoConfig.project, task.adoId)} target="_blank" rel="noopener noreferrer" onClick={e => e.stopPropagation()}
-                    style={{ fontSize: 12, padding: '3px 10px', borderRadius: 12, background: '#4a9eff15', color: '#4a9eff', fontWeight: 700, textDecoration: 'none' }}>
-                    ADO #{task.adoId} ↗
-                  </a>
-                )}
-                {task.source === 'ado' && task.adoId && !adoConfig?.configured && (
-                  <span style={{ fontSize: 12, padding: '3px 10px', borderRadius: 12, background: '#4a9eff15', color: '#4a9eff', fontWeight: 700 }}>ADO #{task.adoId}</span>
-                )}
-                {task.priority && <span style={{ fontSize: 12, padding: '3px 10px', borderRadius: 12, background: '#ffd43b15', color: '#ffd43b', fontWeight: 700 }}>P{task.priority}</span>}
-                {task.assignedToName && <span style={{ fontSize: 12, padding: '3px 10px', borderRadius: 12, background: '#cc5de815', color: '#cc5de8', fontWeight: 700 }}>Assigned: {task.assignedToName}</span>}
-              </div>
-            </div>
-            <button onClick={onClose} style={{ width: 36, height: 36, borderRadius: 8, border: '1px solid #3a3a4e', background: '#1e1e30', color: '#ccc', fontSize: 18, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', flexShrink: 0 }}>X</button>
-          </div>
-        </div>
-
-        {/* Tabs */}
-        <div style={{ display: 'flex', borderBottom: '1px solid #1e1e30', padding: '0 24px', flexShrink: 0 }}>
-          {(['details', 'comments'] as const).map(t => (
-            <button key={t} onClick={() => setModalTab(t)} style={{
-              padding: '10px 20px', fontSize: 14, fontWeight: 700, cursor: 'pointer',
-              color: modalTab === t ? '#eee' : '#666', background: 'none', border: 'none', fontFamily: 'inherit',
-              borderBottom: `2px solid ${modalTab === t ? '#4a9eff' : 'transparent'}`,
-              textTransform: 'capitalize',
-            }}>{t === 'comments' ? `Comments (${task.discussions?.length || 0})` : t}</button>
-          ))}
-        </div>
-
-        {/* Body */}
-        <div style={{ flex: 1, overflowY: 'auto', padding: '20px 24px' }}>
-          {modalTab === 'details' ? (
-            <>
-              {/* State changer */}
-              <div style={{ marginBottom: 20 }}>
-                <div style={{ fontSize: 13, fontWeight: 700, color: '#888', textTransform: 'uppercase', letterSpacing: 1, marginBottom: 8 }}>State</div>
-                <div style={{ display: 'flex', gap: 6 }}>
-                  {TASK_STATES.map(s => (
-                    <button key={s} onClick={() => handleStateChange(s)} style={{
-                      padding: '6px 14px', borderRadius: 8, fontSize: 13, fontWeight: 700,
-                      border: taskState === s ? `2px solid ${STATE_COLORS[s] || '#888'}` : '1px solid #2a2a3e',
-                      background: taskState === s ? (STATE_COLORS[s] || '#888') + '15' : '#1a1a2a',
-                      color: taskState === s ? STATE_COLORS[s] || '#888' : '#666',
-                      cursor: 'pointer', fontFamily: 'inherit',
-                    }}>{s}</button>
-                  ))}
-                </div>
-              </div>
-
-              {/* Description */}
-              <div style={{ marginBottom: 20 }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
-                  <span style={{ fontSize: 13, fontWeight: 700, color: '#888', textTransform: 'uppercase', letterSpacing: 1 }}>Description</span>
-                  <button onClick={() => { setEditingDesc(!editingDesc); setDescDraft(task.description); }} style={{ fontSize: 12, color: '#4a9eff', background: 'none', border: 'none', cursor: 'pointer', fontWeight: 700, fontFamily: 'inherit' }}>
-                    {editingDesc ? 'Cancel' : 'Edit'}
-                  </button>
-                </div>
-                {editingDesc ? (
-                  <div>
-                    <textarea value={descDraft} onChange={e => setDescDraft(e.target.value)} rows={6} style={{ width: '100%', background: '#1a1a2a', border: '1px solid #2a2a3e', color: '#eee', borderRadius: 8, padding: '12px 14px', fontSize: 14, fontFamily: 'inherit', resize: 'vertical', lineHeight: 1.5, marginBottom: 8 }} />
-                    <button onClick={() => { onUpdate(task.id, { description: descDraft }); setEditingDesc(false); }} style={{ padding: '6px 14px', borderRadius: 6, border: 'none', background: '#4a9eff', color: '#fff', fontSize: 13, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit' }}>Save</button>
-                  </div>
-                ) : (
-                  <div style={{ fontSize: 14, color: '#bbb', lineHeight: 1.6, background: '#0e0e18', borderRadius: 8, padding: '14px 16px', border: '1px solid #1a1a28', minHeight: 60 }}>
-                    {task.description || <span style={{ color: '#555', fontStyle: 'italic' }}>No description</span>}
-                  </div>
-                )}
-              </div>
-            </>
-          ) : (
-            /* Comments tab */
-            <>
-              {task.discussions?.length > 0 ? (
-                task.discussions.map((d, i) => (
-                  <div key={i} style={{ padding: '12px 16px', background: '#0e0e18', borderRadius: 10, border: '1px solid #1a1a28', marginBottom: 10 }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6 }}>
-                      <span style={{ fontSize: 13, color: '#7aafff', fontWeight: 700 }}>{d.author}</span>
-                      <span style={{ fontSize: 11, color: '#555' }}>{new Date(d.timestamp).toLocaleString()}</span>
-                    </div>
-                    <div style={{ fontSize: 14, color: '#ccc', lineHeight: 1.6, maxHeight: 120, overflow: 'hidden', textOverflow: 'ellipsis' }}>{d.text}</div>
-                  </div>
-                ))
-              ) : (
-                <div style={{ color: '#555', fontSize: 14, fontStyle: 'italic', padding: '20px 0', textAlign: 'center' }}>No comments yet</div>
-              )}
-              <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
-                <input value={newComment} onChange={e => setNewComment(e.target.value)}
-                  onKeyDown={e => { if (e.key === 'Enter' && newComment.trim()) { onComment(task.id, newComment.trim()); setNewComment(''); } }}
-                  placeholder="Add a comment..."
-                  style={{ flex: 1, background: '#1a1a2a', border: '1px solid #2a2a3e', color: '#eee', borderRadius: 8, padding: '10px 14px', fontSize: 14, fontFamily: 'inherit' }}
-                />
-                <button onClick={() => { if (newComment.trim()) { onComment(task.id, newComment.trim()); setNewComment(''); } }} disabled={!newComment.trim()} style={{
-                  padding: '10px 16px', borderRadius: 8, border: 'none',
-                  background: newComment.trim() ? '#4a9eff' : '#1e1e30', color: newComment.trim() ? '#fff' : '#555',
-                  fontSize: 14, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit',
-                }}>Add</button>
-              </div>
-            </>
-          )}
-        </div>
-
-        {/* Footer */}
-        <div style={{ padding: '14px 24px', borderTop: '1px solid #1e1e30', background: '#0e0e16', display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
+    <Modal
+      isOpen
+      onClose={onClose}
+      title={task.subject}
+      eyebrow={`${task.type || 'Task'} · ${taskState}`}
+      description={task.description || 'No task description.'}
+      icon={<span>{typeIcon}</span>}
+      maxWidth={760}
+      bodyClassName="cc-task-detail-body"
+      footer={(
+        <div className="cc-modal-footer-row">
           {task.status === 'pending' && <button onClick={() => onAssign(task)} style={{ padding: '8px 16px', borderRadius: 6, border: 'none', background: '#4a9eff', color: '#fff', fontSize: 14, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit' }}>Assign to Session</button>}
           {task.status === 'assigned' && task.assignedTo && onSyncClaude && (
-            <button onClick={() => onSyncClaude(task)} style={{ padding: '8px 16px', borderRadius: 6, border: '1px solid #cc5de840', background: 'transparent', color: '#cc5de8', fontSize: 14, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit' }}>
+            <button className="btn-outline" onClick={() => onSyncClaude(task)}>
               Sync to Session
             </button>
           )}
           {task.source === 'ado' && task.adoId && (
-            <button onClick={handleSync} disabled={syncing} style={{ padding: '8px 16px', borderRadius: 6, border: '1px solid #51cf6640', background: 'transparent', color: '#51cf66', fontSize: 14, fontWeight: 700, cursor: syncing ? 'wait' : 'pointer', fontFamily: 'inherit', opacity: syncing ? 0.6 : 1 }}>
+            <button className="btn-outline" onClick={handleSync} disabled={syncing}>
               {syncing ? 'Syncing...' : 'Sync with ADO'}
             </button>
           )}
-          <div style={{ flex: 1 }} />
-          <button onClick={() => { onDelete(task.id); onClose(); }} style={{ padding: '8px 16px', borderRadius: 6, border: '1px solid #ff6b6b30', background: 'transparent', color: '#ff6b6b', fontSize: 14, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit' }}>Delete</button>
+          <span style={{ flex: 1 }} />
+          <button
+            className="btn-destructive"
+            onClick={async () => {
+              if (await onDelete(task.id)) onClose();
+            }}
+          >
+            Delete Task
+          </button>
         </div>
+      )}
+    >
+      <div className="cc-task-detail-badges">
+        <span style={{ '--task-tone': statusColor } as CSSProperties}>{task.status}</span>
+        <span style={{ '--task-tone': STATE_COLORS[taskState] || '#888' } as CSSProperties}>{taskState}</span>
+        {task.adoId ? (
+          adoConfig?.configured ? (
+            <a href={getAdoItemUrl(adoConfig.organization, adoConfig.project, task.adoId)} target="_blank" rel="noopener noreferrer">
+              ADO #{task.adoId} ↗
+            </a>
+          ) : <span>ADO #{task.adoId}</span>
+        ) : null}
+        {task.priority ? <span>P{task.priority}</span> : null}
+        {task.assignedToName ? <span>Assigned: {task.assignedToName}</span> : null}
       </div>
-    </>
+
+      <div className="cc-task-detail-tabs" role="tablist" aria-label="Task detail">
+        {(['details', 'comments'] as const).map(tab => (
+          <button
+            key={tab}
+            type="button"
+            role="tab"
+            aria-selected={modalTab === tab}
+            onClick={() => setModalTab(tab)}
+          >
+            {tab === 'comments' ? `Comments (${task.discussions?.length || 0})` : 'Details'}
+          </button>
+        ))}
+      </div>
+
+      {modalTab === 'details' ? (
+        <div className="cc-task-detail-panel" role="tabpanel">
+          <FormField label="State">
+            <OptionGroup>
+              {TASK_STATES.map(state => (
+                <OptionButton key={state} selected={taskState === state} onClick={() => handleStateChange(state)}>
+                  {state}
+                </OptionButton>
+              ))}
+            </OptionGroup>
+          </FormField>
+          <div className="cc-task-description-heading">
+            <strong>Description</strong>
+            <button type="button" onClick={() => { setEditingDesc(!editingDesc); setDescDraft(task.description); }}>
+              {editingDesc ? 'Cancel' : 'Edit'}
+            </button>
+          </div>
+          {editingDesc ? (
+            <>
+              <TextArea
+                value={descDraft}
+                onChange={setDescDraft}
+                rows={6}
+                name="task-detail-description"
+                aria-label="Task description"
+              />
+              <button
+                type="button"
+                className="btn-primary cc-settings-field-action"
+                onClick={() => {
+                  onUpdate(task.id, { description: descDraft });
+                  setEditingDesc(false);
+                }}
+              >
+                Save Description
+              </button>
+            </>
+          ) : (
+            <div className="cc-task-description">{task.description || 'No description.'}</div>
+          )}
+        </div>
+      ) : (
+        <div className="cc-task-detail-panel" role="tabpanel">
+          <div className="cc-task-comments">
+            {task.discussions?.length ? task.discussions.map((discussion, index) => (
+              <article key={`${discussion.timestamp}:${index}`}>
+                <header>
+                  <strong>{discussion.author}</strong>
+                  <time>{TASK_DATE_FORMAT.format(new Date(discussion.timestamp))}</time>
+                </header>
+                <p>{discussion.text}</p>
+              </article>
+            )) : <div className="cc-modal-empty">No comments yet.</div>}
+          </div>
+          <div className="cc-task-comment-form">
+            <TextInput
+              value={newComment}
+              onChange={setNewComment}
+              name="task-comment"
+              aria-label="Add a task comment"
+              autoComplete="off"
+              onKeyDown={event => {
+                if (event.key === 'Enter' && newComment.trim()) {
+                  onComment(task.id, newComment.trim());
+                  setNewComment('');
+                }
+              }}
+              placeholder="Add a comment…"
+            />
+            <button
+              type="button"
+              className="btn-primary"
+              disabled={!newComment.trim()}
+              onClick={() => {
+                if (!newComment.trim()) return;
+                onComment(task.id, newComment.trim());
+                setNewComment('');
+              }}
+            >
+              Add
+            </button>
+          </div>
+        </div>
+      )}
+    </Modal>
   );
 }
 
@@ -377,9 +397,12 @@ export default function TaskBoard({ isOpen, onClose, onOpenSession, initialTaskI
     setNewSubject(''); setNewDesc(''); setNewType('Task'); setCreating(false); fetchTasks();
   };
 
-  const handleDelete = async (id: string) => {
+  const handleDelete = async (id: string): Promise<boolean> => {
+    const task = tasks.find(item => item.id === id);
+    if (!window.confirm(`Delete "${task?.subject || 'this task'}"? This cannot be undone.`)) return false;
     await fetch('/api/app-tasks', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'delete', id }) });
-    fetchTasks();
+    await fetchTasks();
+    return true;
   };
 
   const handleUpdate = async (id: string, changes: Record<string, unknown>) => {
@@ -616,43 +639,62 @@ export default function TaskBoard({ isOpen, onClose, onOpenSession, initialTaskI
 
   return (
     <>
-      <div onClick={onClose} style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.4)', zIndex: 46 }} />
-      <div style={{
-        position: 'fixed', top: 'var(--header-height)', right: 0, width,
-        height: 'calc(100vh - var(--header-height))', background: '#111118', borderLeft: '1px solid #222235',
-        zIndex: 47, display: 'flex', flexDirection: 'column', overflow: 'hidden',
-      }}>
+      <Modal
+        isOpen={isOpen}
+        onClose={onClose}
+        title="Task Board"
+        eyebrow="Work Routing"
+        description="Track app and Azure DevOps work, then route the selected task into an active CLI session."
+        icon={<ClipboardList size={16} />}
+        variant="drawer"
+        width={width}
+        bodyClassName="cc-task-board-body"
+        bodyStyle={{ padding: 0 }}
+        headerActions={(
+          <>
+            {tab === 'app' ? (
+              <button type="button" className="btn-primary" onClick={() => setCreating(true)}>
+                <Plus size={13} aria-hidden="true" />
+                New
+              </button>
+            ) : null}
+            <button
+              type="button"
+              className="btn-outline"
+              onClick={() => { tab === 'app' ? void fetchTasks() : void fetchAdoTasks(); }}
+            >
+              <RefreshCw size={13} aria-hidden="true" />
+              Refresh
+            </button>
+          </>
+        )}
+      >
+        <div className="cc-task-board-layout">
         {/* Resize handle */}
-        <div onMouseDown={handleMouseDown} style={{
-          position: 'absolute', top: 0, left: 0, width: 5, height: '100%',
-          cursor: 'col-resize', zIndex: 2, background: 'transparent',
-        }} />
-
-        {/* Header */}
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '16px 20px', borderBottom: '1px solid #1e1e30' }}>
-          <span style={{ fontSize: 20, fontWeight: 800, color: '#eee' }}>Task Board</span>
-          <div style={{ display: 'flex', gap: 8 }}>
-            {tab === 'app' && <button onClick={() => setCreating(true)} style={{ padding: '6px 14px', borderRadius: 6, border: 'none', background: '#4a9eff', color: '#fff', fontSize: 13, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit' }}>+ New</button>}
-            <button onClick={() => { tab === 'app' ? fetchTasks() : fetchAdoTasks(); }} style={{ padding: '6px 14px', borderRadius: 6, border: '1px solid #2a2a3e', background: '#1a1a2a', color: '#aaa', fontSize: 13, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit' }}>Refresh</button>
-            <button onClick={onClose} style={{ width: 28, height: 28, borderRadius: 6, border: '1px solid #2a2a3e', background: '#1a1a2a', color: '#888', fontSize: 14, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }}>X</button>
-          </div>
-        </div>
+        <div onMouseDown={handleMouseDown} className="cc-task-resize-handle" />
 
         {/* Tabs */}
-        <div style={{ display: 'flex', borderBottom: '1px solid #1e1e30', padding: '0 20px' }}>
+        <div className="cc-task-tabs" role="tablist" aria-label="Task source">
           {([['app', 'In App'], ['ado', 'Azure DevOps']] as [Tab, string][]).map(([key, label]) => (
-            <button key={key} onClick={() => setTab(key)} style={{
-              padding: '10px 20px', fontSize: 14, fontWeight: 700, cursor: 'pointer',
-              color: tab === key ? '#eee' : '#666', background: 'none', border: 'none', fontFamily: 'inherit',
-              borderBottom: `2px solid ${tab === key ? '#4a9eff' : 'transparent'}`,
-            }}>{label}</button>
+            <button
+              key={key}
+              type="button"
+              role="tab"
+              aria-selected={tab === key}
+              onClick={() => setTab(key)}
+            >
+              {label}
+            </button>
           ))}
         </div>
 
         {/* Search + Filters */}
         <div style={{ padding: '10px 20px', borderBottom: '1px solid #1e1e30' }}>
           <input value={search} onChange={e => setSearch(e.target.value)}
-            placeholder={tab === 'ado' ? 'Search by title or #ID...' : 'Search tasks...'}
+            name="task-search"
+            aria-label={tab === 'ado' ? 'Search Azure DevOps tasks' : 'Search tasks'}
+            autoComplete="off"
+            placeholder={tab === 'ado' ? 'Search by title or #ID…' : 'Search tasks…'}
             style={{ width: '100%', background: '#1a1a2a', border: '1px solid #2a2a3e', color: '#eee', borderRadius: 6, padding: '9px 14px', fontSize: 14, fontWeight: 600, fontFamily: 'inherit', marginBottom: 8 }}
           />
           {tab === 'app' && (
@@ -685,8 +727,8 @@ export default function TaskBoard({ isOpen, onClose, onOpenSession, initialTaskI
         {/* Create form */}
         {creating && tab === 'app' && (
           <div style={{ padding: '14px 20px', borderBottom: '1px solid #1e1e30' }}>
-            <input value={newSubject} onChange={e => setNewSubject(e.target.value)} onKeyDown={e => e.key === 'Enter' && handleCreate()} placeholder="Task name..." autoFocus style={{ width: '100%', background: '#1a1a2a', border: '1px solid #2a2a3e', color: '#eee', borderRadius: 6, padding: '10px 14px', fontSize: 15, fontWeight: 600, fontFamily: 'inherit', marginBottom: 8 }} />
-            <textarea value={newDesc} onChange={e => setNewDesc(e.target.value)} placeholder="Description..." rows={2} style={{ width: '100%', background: '#1a1a2a', border: '1px solid #2a2a3e', color: '#eee', borderRadius: 6, padding: '10px 14px', fontSize: 14, fontFamily: 'inherit', resize: 'vertical', marginBottom: 8 }} />
+            <input value={newSubject} onChange={e => setNewSubject(e.target.value)} onKeyDown={e => e.key === 'Enter' && handleCreate()} name="task-subject" aria-label="Task name" autoComplete="off" placeholder="Task name…" autoFocus style={{ width: '100%', background: '#1a1a2a', border: '1px solid #2a2a3e', color: '#eee', borderRadius: 6, padding: '10px 14px', fontSize: 15, fontWeight: 600, fontFamily: 'inherit', marginBottom: 8 }} />
+            <textarea value={newDesc} onChange={e => setNewDesc(e.target.value)} name="task-description" aria-label="Task description" autoComplete="off" placeholder="Description…" rows={2} style={{ width: '100%', background: '#1a1a2a', border: '1px solid #2a2a3e', color: '#eee', borderRadius: 6, padding: '10px 14px', fontSize: 14, fontFamily: 'inherit', resize: 'vertical', marginBottom: 8 }} />
             <div style={{ display: 'flex', gap: 6, marginBottom: 8 }}>
               {TASK_TYPES.slice(0, 4).map(t => (
                 <button key={t} onClick={() => setNewType(t)} style={{
@@ -724,15 +766,25 @@ export default function TaskBoard({ isOpen, onClose, onOpenSession, initialTaskI
                   {group.items.map((task, i) => {
                     const icon = TYPE_ICONS[task.type || ''] || (task.source === 'ado' ? '\uD83D\uDD35' : '');
                     return (
-                      <div key={task.id} onClick={() => setViewingTask(task)} style={{
-                        padding: '12px 14px', borderBottom: i < group.items.length - 1 ? '1px solid #1a1a28' : 'none',
-                        cursor: 'pointer', transition: 'background 0.1s',
-                      }}
+                      <div
+                        key={task.id}
+                        style={{
+                          borderBottom: i < group.items.length - 1 ? '1px solid #1a1a28' : 'none',
+                          transition: 'background 0.1s',
+                        }}
                         onMouseEnter={e => e.currentTarget.style.background = '#1a1a2e'}
                         onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
                       >
                         <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 10 }}>
-                          <div style={{ flex: 1, minWidth: 0 }}>
+                          <button
+                            type="button"
+                            onClick={() => setViewingTask(task)}
+                            style={{
+                              flex: 1, minWidth: 0, padding: '12px 14px',
+                              border: 0, color: 'inherit', textAlign: 'left',
+                              background: 'transparent', cursor: 'pointer',
+                            }}
+                          >
                             <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                               {icon && <span style={{ fontSize: 14 }}>{icon}</span>}
                               <span style={{ fontSize: 15, color: '#eee', fontWeight: 700 }}>{task.subject}</span>
@@ -740,22 +792,25 @@ export default function TaskBoard({ isOpen, onClose, onOpenSession, initialTaskI
                             {task.description && <div style={{ fontSize: 13, color: '#777', marginTop: 4, fontWeight: 500 }}>{task.description.slice(0, 80)}</div>}
                             <div style={{ display: 'flex', gap: 5, marginTop: 6, flexWrap: 'wrap', alignItems: 'center' }}>
                               {(() => { const st = task.state || task.adoState || 'Proposed'; return <span style={{ fontSize: 10, padding: '2px 8px', borderRadius: 10, background: (STATE_COLORS[st] || '#888') + '15', color: STATE_COLORS[st] || '#888', fontWeight: 700 }}>{st}</span>; })()}
-                              {task.adoId && adoConfig.configured && (
-                                <a href={getAdoItemUrl(adoConfig.organization, adoConfig.project, task.adoId)} target="_blank" rel="noopener noreferrer"
-                                  onClick={e => e.stopPropagation()}
-                                  style={{ fontSize: 10, padding: '2px 8px', borderRadius: 10, background: '#4a9eff10', color: '#4a9eff', fontWeight: 700, textDecoration: 'none', cursor: 'pointer' }}>
-                                  #{task.adoId} ↗
-                                </a>
-                              )}
                               {task.adoId && !adoConfig.configured && <span style={{ fontSize: 10, padding: '2px 8px', borderRadius: 10, background: '#4a9eff10', color: '#4a9eff', fontWeight: 700 }}>#{task.adoId}</span>}
                               {task.assignedToName && <span style={{ fontSize: 10, padding: '2px 8px', borderRadius: 10, background: '#4a9eff20', color: '#7aafff', fontWeight: 700 }}>{task.assignedToName}</span>}
                               {(task.discussions?.length || 0) > 0 && <span style={{ fontSize: 10, color: '#555', fontWeight: 600 }}>{task.discussions.length} comment{task.discussions.length > 1 ? 's' : ''}</span>}
                             </div>
-                          </div>
-                          <div style={{ display: 'flex', gap: 4, flexShrink: 0 }} onClick={e => e.stopPropagation()}>
+                          </button>
+                          <div style={{ display: 'flex', gap: 4, flexShrink: 0, padding: '12px 14px 12px 0' }}>
+                            {task.adoId && adoConfig.configured && (
+                              <a
+                                href={getAdoItemUrl(adoConfig.organization, adoConfig.project, task.adoId)}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                style={{ padding: '4px 8px', borderRadius: 4, border: '1px solid #4a9eff30', color: '#4a9eff', fontSize: 11, fontWeight: 700, textDecoration: 'none' }}
+                              >
+                                #{task.adoId} ↗
+                              </a>
+                            )}
                             {task.status === 'pending' && <button onClick={() => { setAssigningTask(task); setSelectedSessionId(sessionList[0]?.id || ''); }} style={{ padding: '4px 8px', borderRadius: 4, border: 'none', background: '#4a9eff', color: '#fff', fontSize: 11, fontWeight: 700, cursor: 'pointer' }}>Assign</button>}
                             {task.status === 'assigned' && <button onClick={() => handleUnassign(task)} style={{ padding: '4px 8px', borderRadius: 4, border: '1px solid #ffd43b40', background: 'transparent', color: '#ffd43b', fontSize: 11, fontWeight: 700, cursor: 'pointer' }}>Unassign</button>}
-                            <button onClick={() => handleDelete(task.id)} style={{ padding: '4px 8px', borderRadius: 4, border: '1px solid #ff6b6b30', background: 'transparent', color: '#ff6b6b', fontSize: 11, fontWeight: 700, cursor: 'pointer' }}>Del</button>
+                            <button onClick={() => void handleDelete(task.id)} style={{ padding: '4px 8px', borderRadius: 4, border: '1px solid #ff6b6b30', background: 'transparent', color: '#ff6b6b', fontSize: 11, fontWeight: 700, cursor: 'pointer' }}>Del</button>
                           </div>
                         </div>
                       </div>
@@ -776,8 +831,11 @@ export default function TaskBoard({ isOpen, onClose, onOpenSession, initialTaskI
                 <div style={{ fontSize: 16, fontWeight: 700, color: '#eee', marginBottom: 14 }}>Configure Azure DevOps</div>
                 <div style={{ marginBottom: 14 }}>
                   <div style={{ fontSize: 13, color: '#888', fontWeight: 700, marginBottom: 6 }}>Organization</div>
-                  <div style={{ display: 'flex', gap: 8 }}>
+                  <div className="cc-task-ado-org-row">
                     <input value={setupOrg} onChange={e => { setSetupOrg(e.target.value); setProjects([]); setOrgError(''); }}
+                      name="ado-organization"
+                      aria-label="Azure DevOps organization"
+                      autoComplete="off"
                       placeholder="e.g. mycompany" onKeyDown={e => { if (e.key === 'Enter' && setupOrg.trim()) fetchProjects(setupOrg.trim()); }}
                       style={{ flex: 1, background: '#1a1a2a', border: `1px solid ${orgError ? '#ff4444' : '#2a2a3e'}`, color: '#eee', borderRadius: 6, padding: '10px 14px', fontSize: 14, fontWeight: 600, fontFamily: 'inherit' }}
                     />
@@ -792,7 +850,7 @@ export default function TaskBoard({ isOpen, onClose, onOpenSession, initialTaskI
                 {projects.length > 0 && (
                   <div style={{ marginBottom: 14 }}>
                     <div style={{ fontSize: 13, color: '#888', fontWeight: 700, marginBottom: 6 }}>Project</div>
-                    <select value={setupProject} onChange={e => setSetupProject(e.target.value)} style={{ width: '100%', background: '#1a1a2a', border: '1px solid #2a2a3e', color: '#eee', borderRadius: 6, padding: '10px 14px', fontSize: 14, fontWeight: 600, fontFamily: 'inherit' }}>
+                    <select value={setupProject} onChange={e => setSetupProject(e.target.value)} name="ado-project" aria-label="Azure DevOps project" style={{ width: '100%', background: '#1a1a2a', border: '1px solid #2a2a3e', color: '#eee', borderRadius: 6, padding: '10px 14px', fontSize: 14, fontWeight: 600, fontFamily: 'inherit' }}>
                       {projects.map(p => <option key={p} value={p}>{p}</option>)}
                     </select>
                   </div>
@@ -836,31 +894,46 @@ export default function TaskBoard({ isOpen, onClose, onOpenSession, initialTaskI
             )
           )}
         </div>
-      </div>
+        </div>
+      </Modal>
 
       {/* Assign modal */}
       {assigningTask && (
-        <>
-          <div onClick={() => setAssigningTask(null)} style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', zIndex: 100 }} />
-          <div style={{ position: 'fixed', top: '50%', left: '50%', transform: 'translate(-50%, -50%)', width: 480, background: '#151520', border: '1px solid #2a2a3e', borderRadius: 12, zIndex: 101, padding: 20 }}>
-            <div style={{ fontSize: 18, fontWeight: 800, color: '#eee', marginBottom: 14 }}>Assign Task</div>
-            <div style={{ padding: '10px 14px', background: '#12121e', borderRadius: 8, border: '1px solid #1e1e30', marginBottom: 14 }}>
-              <div style={{ fontSize: 15, color: '#eee', fontWeight: 700 }}>{assigningTask.subject}</div>
+        <Modal
+          isOpen
+          onClose={() => setAssigningTask(null)}
+          title="Assign Task"
+          eyebrow="Work Routing"
+          description="Send the task context to an active session, then return to its embedded CLI."
+          icon={<ClipboardList size={16} />}
+          maxWidth={500}
+          footer={(
+            <div className="cc-modal-footer-row">
+              <button type="button" className="btn-outline" onClick={() => setAssigningTask(null)}>Cancel</button>
+              <button type="button" className="btn-primary" onClick={() => void handleAssign()} disabled={!selectedSessionId}>
+                Assign to Session
+              </button>
             </div>
-            <div style={{ marginBottom: 14 }}>
-              <div style={{ fontSize: 13, color: '#888', fontWeight: 700, marginBottom: 6 }}>Send to session</div>
-              {sessionList.length === 0 ? <div style={{ fontSize: 14, color: '#666', fontStyle: 'italic' }}>No active sessions</div> : (
-                <select value={selectedSessionId} onChange={e => setSelectedSessionId(e.target.value)} style={{ width: '100%', background: '#1a1a2a', border: '1px solid #2a2a3e', color: '#eee', borderRadius: 6, padding: '10px 14px', fontSize: 15, fontWeight: 600, fontFamily: 'inherit' }}>
-                  {sessionList.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
-                </select>
-              )}
-            </div>
-            <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
-              <button onClick={() => setAssigningTask(null)} style={{ padding: '8px 16px', borderRadius: 6, border: '1px solid #3a3a4e', background: '#1e1e30', color: '#aaa', fontSize: 14, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit' }}>Cancel</button>
-              <button onClick={handleAssign} disabled={!selectedSessionId} style={{ padding: '8px 16px', borderRadius: 6, border: 'none', background: selectedSessionId ? '#4a9eff' : '#1e1e30', color: selectedSessionId ? '#fff' : '#555', fontSize: 14, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit' }}>Assign</button>
-            </div>
+          )}
+        >
+          <div className="cc-task-assignment-summary">
+            <span>{assigningTask.type || 'Task'}</span>
+            <strong>{assigningTask.subject}</strong>
+            {assigningTask.description ? <p>{assigningTask.description}</p> : null}
           </div>
-        </>
+          <FormField label="Target session">
+            {sessionList.length === 0 ? (
+              <div className="cc-modal-empty">No active sessions are available.</div>
+            ) : (
+              <SelectInput
+                data-autofocus
+                value={selectedSessionId}
+                onChange={setSelectedSessionId}
+                options={sessionList.map(session => ({ value: session.id, label: session.name }))}
+              />
+            )}
+          </FormField>
+        </Modal>
       )}
 
       {/* Task detail modal */}

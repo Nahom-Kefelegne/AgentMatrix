@@ -79,3 +79,29 @@ Dashboard V2 console header:
   session from the active list.
 - Both actions require an explicit in-context confirmation and expose progress
   beside the live CLI.
+
+Session routing is now unified for Dashboard V2:
+
+- New and resumed sessions select the embedded Control Center CLI.
+- Task Board links route back to the embedded session instead of opening
+  `SessionDialog`.
+- Dashboard V2 owns its selected-session state; Office and Dashboard V1 retain
+  the legacy modal state only until their own migration/removal.
+- The legacy Info button was removed from the Control Center header.
+
+Active global dialogs now share the **Control Center modal system**:
+
+- New Session
+- Resume Session
+- Settings
+- Integration Status
+- Task Board drawer and nested task dialogs
+- Existing context handoff (future **Continue in Fresh Session**)
+
+The shared shell owns portal rendering, focus trapping/restoration, background
+isolation, responsive dialog/drawer behavior, reduced motion, and the same
+signal-line/typography language as Dashboard V2.
+
+Task functionality is intentionally unchanged in this phase. Its workflow is
+provisional and must be replanned against the console-first product goal before
+additional task features are added.

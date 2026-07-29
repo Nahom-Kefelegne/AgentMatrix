@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useCallback, useRef, useEffect, useMemo, type ComponentProps } from 'react';
+import { useState, useCallback, useRef, useEffect, useMemo } from 'react';
 import dynamic from 'next/dynamic';
 import type { CharacterData } from '@/lib/types';
 import { useSessionContext } from '@/lib/hooks/useSessionContext';
@@ -21,6 +21,7 @@ import AppSettingsModal from './components/AppSettingsModal';
 import FirstRunIntro from './components/FirstRunIntro';
 import SplashScreen from './components/SplashScreen';
 import type { DashboardV2Navigation } from './components/dashboard-v2/types';
+import type { DashboardV2ContainerProps } from './components/dashboard-v2/DashboardV2Container';
 import {
   CURRENT_RELEASE_BRIEFING,
   RELEASE_BRIEFING_STORAGE_KEY,
@@ -32,11 +33,7 @@ import {
 import { initPerfMonitor } from '@/lib/perf';
 
 const EditorView = dynamic(() => import('./components/editor/EditorView'), { ssr: false });
-interface DashboardV2Props extends ComponentProps<typeof DashboardView> {
-  initialSessionId?: string | null;
-  onSelectionChange?: (sessionId: string | null) => void;
-  navigation: DashboardV2Navigation;
-}
+type DashboardV2Props = DashboardV2ContainerProps;
 
 const DashboardV2Container = dynamic<DashboardV2Props>(
   () => import('./components/dashboard-v2/DashboardV2Container'),
@@ -69,6 +66,7 @@ function OfficeView() {
   const [viewMode, setViewMode] = useState<'office' | 'dashboard' | 'editor'>('dashboard');
   const [editorUnlocked, setEditorUnlocked] = useState(false);
   const canvasRef = useRef<OfficeCanvasHandle>(null);
+  const dashboardV2Active = viewMode === 'dashboard' && dashboardV2Loaded && dashboardV2Enabled;
 
   useEffect(() => {
     try {
@@ -148,20 +146,22 @@ function OfficeView() {
     }
   }, [dashboardV2Enabled, selectedSessionId]);
 
+  const activeSessionId = dashboardV2Active ? dashboardV2SessionId : selectedSessionId;
+
   // Opening a completed session acknowledges it. Attention is intentionally
   // NOT cleared here: it remains visible until the user actually responds and
   // Copilot/Claude emits new prompt/tool activity.
   useEffect(() => {
-    if (!selectedSessionId) return;
-    const session = sessions.get(selectedSessionId);
+    if (!activeSessionId) return;
+    const session = sessions.get(activeSessionId);
     if (session?.status === 'done') {
       fetch('/api/hooks/mcp-status', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ tool: '__clear_status', sessionId: selectedSessionId }),
+        body: JSON.stringify({ tool: '__clear_status', sessionId: activeSessionId }),
       }).catch(() => {});
     }
-  }, [selectedSessionId, sessions]);
+  }, [activeSessionId, sessions]);
 
   const sessionList = Array.from(sessions.values());
   const currentSessionIndex = selectedSessionId
@@ -186,6 +186,15 @@ function OfficeView() {
   const handleOpenTasks = useCallback(() => setShowTaskBoard(true), []);
   const handleOpenResume = useCallback(() => setShowResume(true), []);
   const handleOpenSpawn = useCallback(() => setShowSpawn(true), []);
+  const handleRouteToSession = useCallback((sessionId: string) => {
+    if (dashboardV2Loaded && dashboardV2Enabled) {
+      setSelectedSessionId(null);
+      setDashboardV2SessionId(sessionId);
+      setViewMode('dashboard');
+      return;
+    }
+    setSelectedSessionId(sessionId);
+  }, [dashboardV2Enabled, dashboardV2Loaded]);
   const handleIntroComplete = useCallback(() => {
     try {
       localStorage.setItem(WELCOME_COMPLETION_STORAGE_KEY, 'done');
@@ -219,8 +228,6 @@ function OfficeView() {
     handleViewChange,
     sessions.size,
   ]);
-
-  const dashboardV2Active = viewMode === 'dashboard' && dashboardV2Loaded && dashboardV2Enabled;
 
   if (introLaunch === undefined) return null;
 
@@ -281,11 +288,10 @@ function OfficeView() {
         </div>
       )}
 
-      {viewMode === 'dashboard' && dashboardV2Loaded && dashboardV2Enabled && !selectedSessionId && (
+      {viewMode === 'dashboard' && dashboardV2Loaded && dashboardV2Enabled && (
         <DashboardV2Container
           sessions={sessions}
           contextMap={contextMap}
-          onSelectSession={(id) => setSelectedSessionId(id)}
           initialSessionId={dashboardV2SessionId}
           onSelectionChange={setDashboardV2SessionId}
           navigation={dashboardV2Navigation}
@@ -300,36 +306,38 @@ function OfficeView() {
 
       {viewMode === 'editor' && <EditorView />}
 
-      <SessionDialog
-        sessionId={selectedSessionId}
-        sessions={sessions}
-        onClose={handleCloseDialog}
-        onPrev={handlePrevSession}
-        onNext={handleNextSession}
-        onSelectSession={(id) => setSelectedSessionId(id)}
-        onOpenTask={(taskId) => { setOpenTaskId(taskId); setShowTaskBoard(true); }}
-        sessionIndex={currentSessionIndex}
-        sessionTotal={sessionList.length}
-      />
+      {!dashboardV2Active ? (
+        <SessionDialog
+          sessionId={selectedSessionId}
+          sessions={sessions}
+          onClose={handleCloseDialog}
+          onPrev={handlePrevSession}
+          onNext={handleNextSession}
+          onSelectSession={handleRouteToSession}
+          onOpenTask={(taskId) => { setOpenTaskId(taskId); setShowTaskBoard(true); }}
+          sessionIndex={currentSessionIndex}
+          sessionTotal={sessionList.length}
+        />
+      ) : null}
 
       <SetupModal isOpen={showSetup} onClose={() => setShowSetup(false)} connected={connected} sessionCount={sessions.size} />
       {/* Lazy-mount the heavier modals so they don't reconcile on every
           OfficeView re-render (constant during streaming) while closed, and only
           fire their data fetches once actually opened. */}
       {showTaskBoard && (
-        <TaskBoard isOpen onClose={() => { setShowTaskBoard(false); setOpenTaskId(null); }} onOpenSession={(id) => setSelectedSessionId(id)} initialTaskId={openTaskId} />
+        <TaskBoard isOpen onClose={() => { setShowTaskBoard(false); setOpenTaskId(null); }} onOpenSession={handleRouteToSession} initialTaskId={openTaskId} />
       )}
       {showResume && (
         <ResumeModal
           isOpen
           onClose={() => setShowResume(false)}
           onResumeInApp={(session) => {
-            setSelectedSessionId(session.sessionId);
+            handleRouteToSession(session.sessionId);
             socketRef?.current?.emit('terminal:resume' as any, session);
           }}
         />
       )}
-      <SpawnModal isOpen={showSpawn} onClose={() => setShowSpawn(false)} onSessionSpawned={(sid) => setSelectedSessionId(sid)} />
+      <SpawnModal isOpen={showSpawn} onClose={() => setShowSpawn(false)} onSessionSpawned={handleRouteToSession} />
       <AppSettingsModal
         isOpen={showSettings}
         onClose={() => setShowSettings(false)}

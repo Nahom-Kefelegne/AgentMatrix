@@ -1,7 +1,23 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
+import { ArrowRightLeft } from 'lucide-react';
+import {
+  COPILOT_MODES,
+  EFFORT_LEVELS,
+  modelsForCli,
+  permissionModesForCli,
+} from '@/lib/cli/uiMetadata';
 import { useSocketContext } from './SocketProvider';
+import {
+  FormField,
+  Modal,
+  OptionButton,
+  OptionGroup,
+  SelectInput,
+  TextArea,
+  TextInput,
+} from './ui/Modal';
 
 interface HandoffModalProps {
   isOpen: boolean;
@@ -23,36 +39,20 @@ const STATUS_LABELS: Record<HandoffStatus, string> = {
   error: 'Handoff failed',
 };
 
-const MODELS = [
-  { value: '', label: 'Default' },
-  { value: 'opus', label: 'Opus' },
-  { value: 'sonnet', label: 'Sonnet' },
-  { value: 'haiku', label: 'Haiku' },
-];
-
-const PERMISSION_MODES = [
-  { value: 'bypassPermissions', label: 'Skip Permissions' },
-  { value: 'default', label: 'Default' },
-  { value: 'acceptEdits', label: 'Accept Edits' },
-  { value: 'plan', label: 'Plan' },
-  { value: 'auto', label: 'Auto' },
-];
-
-const EFFORT_LEVELS = [
-  { value: '', label: 'Default' },
-  { value: 'low', label: 'Low' },
-  { value: 'medium', label: 'Medium' },
-  { value: 'high', label: 'High' },
-];
-
 export default function HandoffModal({ isOpen, onClose, sourceSessionId, sourceCwd, onNewSession, onStatusChange }: HandoffModalProps) {
-  const { socketRef } = useSocketContext();
+  const { sessions, socketRef } = useSocketContext();
+  const rawSourceCliType = sessions.get(sourceSessionId)?.cliType;
+  const sourceCliType = rawSourceCliType === 'copilot' || rawSourceCliType === 'claude'
+    ? rawSourceCliType
+    : undefined;
+  const formCliType = sourceCliType || 'claude';
   const [contextRequest, setContextRequest] = useState('');
   const [targetCwd, setTargetCwd] = useState(sourceCwd || '');
   const [sessionName, setSessionName] = useState('');
-  const [permissionMode, setPermissionMode] = useState('bypassPermissions');
+  const [permissionMode, setPermissionMode] = useState('');
   const [model, setModel] = useState('');
   const [effort, setEffort] = useState('');
+  const [copilotMode, setCopilotMode] = useState('');
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [status, setStatus] = useState<HandoffStatus>('idle');
   const [error, setError] = useState('');
@@ -63,8 +63,12 @@ export default function HandoffModal({ isOpen, onClose, sourceSessionId, sourceC
   useEffect(() => {
     if (isOpen && status !== 'summarizing' && status !== 'spawning' && status !== 'injecting') {
       setTargetCwd(sourceCwd || '');
+      setPermissionMode('');
+      setModel('');
+      setEffort('');
+      setCopilotMode('');
     }
-  }, [isOpen, sourceCwd, status]);
+  }, [formCliType, isOpen, sourceCwd, status]);
 
   // Listen for handoff status updates
   useEffect(() => {
@@ -103,11 +107,13 @@ export default function HandoffModal({ isOpen, onClose, sourceSessionId, sourceC
       targetCwd: targetCwd || sourceCwd || '~',
       handoffId: id,
       sessionName: sessionName.trim() || undefined,
-      permissionMode,
+      permissionMode: permissionMode || undefined,
       model: model || undefined,
       effort: effort || undefined,
+      cliType: sourceCliType,
+      copilotMode: formCliType === 'copilot' ? copilotMode || undefined : undefined,
     });
-  }, [contextRequest, targetCwd, sourceCwd, sourceSessionId, socketRef, sessionName, permissionMode, model, effort]);
+  }, [contextRequest, targetCwd, sourceCwd, sourceSessionId, socketRef, sessionName, permissionMode, model, effort, sourceCliType, formCliType, copilotMode]);
 
   const handleOpenNewSession = useCallback(() => {
     if (newSessionId && onNewSession) {
@@ -120,209 +126,180 @@ export default function HandoffModal({ isOpen, onClose, sourceSessionId, sourceC
 
   const isProcessing = status === 'summarizing' || status === 'spawning' || status === 'injecting';
 
-  const pillStyle = (active: boolean) => ({
-    padding: '5px 12px', borderRadius: 6, fontSize: 13, fontWeight: 600 as const,
-    border: active ? '1px solid #4a9eff' : '1px solid #2a2a3e',
-    background: active ? '#152540' : '#1a1a2a',
-    color: active ? '#7aafff' : '#888',
-    cursor: isProcessing ? 'default' as const : 'pointer' as const,
-    fontFamily: 'inherit',
-    opacity: isProcessing ? 0.5 : 1,
-  });
-
   return (
-    <>
-      <div onClick={onClose} style={{
-        position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', zIndex: 200,
-      }} />
-      <div style={{
-        position: 'fixed', top: '50%', left: '50%', transform: 'translate(-50%, -50%)',
-        width: 540, maxHeight: '85vh', background: '#151520', border: '1px solid #2a2a3e',
-        borderRadius: 12, zIndex: 201, display: 'flex', flexDirection: 'column', overflow: 'hidden',
-      }}>
-        {/* Header */}
-        <div style={{
-          padding: '16px 20px', borderBottom: '1px solid #1e1e30',
-          display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-        }}>
-          <span style={{ fontSize: 18, fontWeight: 700, color: '#eee' }}>Transfer Context</span>
-          <button onClick={onClose} style={{
-            width: 28, height: 28, borderRadius: 6, border: '1px solid #3a3a4e',
-            background: '#1e1e30', color: '#aaa', fontSize: 14,
-            display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer',
-          }}>X</button>
+    <Modal
+      isOpen={isOpen}
+      onClose={onClose}
+      title="Continue in Fresh Session"
+      eyebrow="Context Handoff"
+      description="Summarize the relevant context, start a fresh CLI session, and inject the handoff automatically."
+      icon={<ArrowRightLeft size={16} />}
+      maxWidth={620}
+      bodyClassName="cc-handoff-body"
+      footer={(
+        <div className="cc-modal-footer-row">
+          <span className="cc-modal-footer-status" role="status" aria-live="polite">
+            {status === 'error' ? error || STATUS_LABELS.error : isProcessing ? STATUS_LABELS[status] : ''}
+          </span>
+          <button type="button" className="btn-outline" onClick={onClose}>
+            {isProcessing ? 'Hide' : status === 'done' ? 'Close' : 'Cancel'}
+          </button>
+          {status === 'done' && newSessionId ? (
+            <button type="button" className="btn-primary" onClick={handleOpenNewSession}>
+              Open New Session
+            </button>
+          ) : (
+            <button
+              type="button"
+              className="btn-primary"
+              onClick={handleStart}
+              disabled={!contextRequest.trim() || isProcessing}
+            >
+              {isProcessing ? 'Transferring…' : 'Continue'}
+            </button>
+          )}
         </div>
-
-        {/* Body */}
-        <div style={{ flex: 1, overflowY: 'auto', padding: '16px 20px', display: 'flex', flexDirection: 'column', gap: 14 }}>
-          {/* Context request */}
-          <div>
-            <div style={{ fontSize: 14, color: '#b0b0c8', fontWeight: 600, marginBottom: 6 }}>
-              What context to transfer?
-            </div>
-            <textarea
+      )}
+    >
+        <div className="cc-handoff-layout">
+          <FormField
+            label="Context to transfer"
+            description="Describe the decisions, files, and unfinished work the new session needs."
+            required
+          >
+            <TextArea
+              data-autofocus
+              name="handoff-context"
+              autoComplete="off"
               value={contextRequest}
-              onChange={e => setContextRequest(e.target.value)}
-              placeholder="e.g. Everything about the auth refactor, API changes, and pending test fixes..."
-              rows={3}
+              onChange={setContextRequest}
+              placeholder="Everything about the auth refactor, API changes, and pending test fixes…"
+              rows={4}
               disabled={isProcessing}
-              style={{
-                width: '100%', background: '#1a1a2a', border: '1px solid #2a2a3e',
-                color: '#eee', borderRadius: 6, padding: '10px 14px', fontSize: 14,
-                fontFamily: 'inherit', resize: 'vertical', lineHeight: 1.5,
-                opacity: isProcessing ? 0.5 : 1,
-              }}
             />
-          </div>
+          </FormField>
 
-          {/* Session name */}
-          <div>
-            <div style={{ fontSize: 14, color: '#b0b0c8', fontWeight: 600, marginBottom: 6 }}>
-              New session name
-            </div>
-            <input
+          <FormField label="New session name" optional>
+            <TextInput
+              name="handoff-session-name"
+              autoComplete="off"
               value={sessionName}
-              onChange={e => setSessionName(e.target.value)}
-              placeholder="Optional..."
+              onChange={setSessionName}
+              placeholder="auth-refactor-follow-up…"
               disabled={isProcessing}
-              style={{
-                width: '100%', background: '#1a1a2a', border: '1px solid #2a2a3e',
-                color: '#eee', borderRadius: 6, padding: '10px 14px', fontSize: 14,
-                fontFamily: 'inherit', opacity: isProcessing ? 0.5 : 1,
-              }}
             />
-          </div>
+          </FormField>
 
-          {/* Target CWD */}
-          <div>
-            <div style={{ fontSize: 14, color: '#b0b0c8', fontWeight: 600, marginBottom: 6 }}>
-              Working directory
-            </div>
-            <input
+          <FormField label="Working directory">
+            <TextInput
+              name="handoff-working-directory"
+              autoComplete="off"
               value={targetCwd}
-              onChange={e => setTargetCwd(e.target.value)}
+              onChange={setTargetCwd}
+              mono
               disabled={isProcessing}
-              style={{
-                width: '100%', background: '#1a1a2a', border: '1px solid #2a2a3e',
-                color: '#eee', borderRadius: 6, padding: '10px 14px', fontSize: 14,
-                fontFamily: "'Courier New', monospace", opacity: isProcessing ? 0.5 : 1,
-              }}
             />
-          </div>
+          </FormField>
 
-          {/* Permission mode */}
-          <div>
-            <div style={{ fontSize: 14, color: '#b0b0c8', fontWeight: 600, marginBottom: 6 }}>
-              Permission mode
-            </div>
-            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-              {PERMISSION_MODES.map(pm => (
-                <button key={pm.value} onClick={() => !isProcessing && setPermissionMode(pm.value)}
-                  style={pillStyle(permissionMode === pm.value)}>
-                  {pm.label}
-                </button>
+          <FormField label="Permission mode">
+            <OptionGroup>
+              {[
+                { value: '', label: 'Inherit Source', desc: 'Preserve the source session permission profile' },
+                ...permissionModesForCli(formCliType),
+              ].map(mode => (
+                <OptionButton
+                  key={mode.value}
+                  selected={permissionMode === mode.value}
+                  disabled={isProcessing}
+                  onClick={() => setPermissionMode(mode.value)}
+                >
+                  {mode.label}
+                </OptionButton>
               ))}
-            </div>
-          </div>
+            </OptionGroup>
+          </FormField>
 
           {/* Advanced toggle */}
-          <button onClick={() => setShowAdvanced(!showAdvanced)} style={{
-            fontSize: 13, color: '#666', background: 'none', border: 'none',
-            cursor: 'pointer', fontFamily: 'inherit', textAlign: 'left', padding: 0,
-          }}>
-            {showAdvanced ? '▼ Hide advanced' : '▶ Advanced options'}
+          <button
+            type="button"
+            className="cc-advanced-toggle"
+            aria-expanded={showAdvanced}
+            onClick={() => setShowAdvanced(!showAdvanced)}
+          >
+            {showAdvanced ? 'Hide advanced options' : 'Show advanced options'}
           </button>
 
           {showAdvanced && (
             <>
-              <div>
-                <div style={{ fontSize: 14, color: '#b0b0c8', fontWeight: 600, marginBottom: 6 }}>Model</div>
-                <div style={{ display: 'flex', gap: 6 }}>
-                  {MODELS.map(m => (
-                    <button key={m.value} onClick={() => !isProcessing && setModel(m.value)}
-                      style={pillStyle(model === m.value)}>
-                      {m.label}
-                    </button>
+              <FormField label="Model">
+                <SelectInput
+                  name="handoff-model"
+                  value={model}
+                  onChange={setModel}
+                  options={modelsForCli(formCliType)}
+                  disabled={isProcessing}
+                />
+              </FormField>
+              {formCliType === 'copilot' ? (
+                <FormField label="Agent mode">
+                  <OptionGroup>
+                    {COPILOT_MODES.map(mode => (
+                      <OptionButton
+                        key={mode.value}
+                        selected={copilotMode === mode.value}
+                        disabled={isProcessing}
+                        onClick={() => setCopilotMode(mode.value)}
+                        description={mode.desc}
+                      >
+                        {mode.label}
+                      </OptionButton>
+                    ))}
+                    <OptionButton
+                      selected={copilotMode === ''}
+                      disabled={isProcessing}
+                      onClick={() => setCopilotMode('')}
+                      description="Preserve the source session mode"
+                    >
+                      Inherit Source
+                    </OptionButton>
+                  </OptionGroup>
+                </FormField>
+              ) : null}
+              <FormField label="Effort">
+                <OptionGroup>
+                  {EFFORT_LEVELS.map(level => (
+                    <OptionButton
+                      key={level.value}
+                      selected={effort === level.value}
+                      disabled={isProcessing}
+                      onClick={() => setEffort(level.value)}
+                    >
+                      {level.label}
+                    </OptionButton>
                   ))}
-                </div>
-              </div>
-              <div>
-                <div style={{ fontSize: 14, color: '#b0b0c8', fontWeight: 600, marginBottom: 6 }}>Effort</div>
-                <div style={{ display: 'flex', gap: 6 }}>
-                  {EFFORT_LEVELS.map(e => (
-                    <button key={e.value} onClick={() => !isProcessing && setEffort(e.value)}
-                      style={pillStyle(effort === e.value)}>
-                      {e.label}
-                    </button>
-                  ))}
-                </div>
-              </div>
+                </OptionGroup>
+              </FormField>
             </>
           )}
 
           {/* Status */}
           {status !== 'idle' && (
-            <div style={{
-              padding: '12px 14px', borderRadius: 8,
-              background: status === 'error' ? '#1a0e0e' : status === 'done' ? '#0e1a0e' : '#0e1a2e',
-              border: `1px solid ${status === 'error' ? '#ff6b6b30' : status === 'done' ? '#51cf6640' : '#4a9eff30'}`,
-            }}>
+            <div className={`cc-handoff-status cc-handoff-status--${status}`}>
               {isProcessing && (
-                <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                  <div style={{
-                    width: 16, height: 16, border: '2px solid #2a2a3e', borderTopColor: '#4a9eff',
-                    borderRadius: '50%', animation: 'spin 0.8s linear infinite',
-                  }} />
-                  <span style={{ fontSize: 14, color: '#7aafff' }}>{STATUS_LABELS[status]}</span>
-                  <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
+                <div>
+                  <span className="cc-handoff-spinner" aria-hidden="true" />
+                  <span>{STATUS_LABELS[status]}</span>
                 </div>
               )}
               {status === 'done' && (
-                <div style={{ fontSize: 14, color: '#51cf66', fontWeight: 600 }}>{STATUS_LABELS.done}</div>
+                <div>{STATUS_LABELS.done}</div>
               )}
               {status === 'error' && (
-                <div style={{ fontSize: 14, color: '#ff6b6b' }}>{error || STATUS_LABELS.error}</div>
+                <div>{error || STATUS_LABELS.error}</div>
               )}
             </div>
           )}
         </div>
-
-        {/* Footer */}
-        <div style={{
-          padding: '12px 20px', borderTop: '1px solid #1e1e30',
-          display: 'flex', justifyContent: 'flex-end', gap: 8,
-        }}>
-          <button onClick={onClose} style={{
-            padding: '8px 16px', borderRadius: 6, border: '1px solid #3a3a4e',
-            background: '#1e1e30', color: '#aaa', fontSize: 14, fontWeight: 600,
-            cursor: 'pointer', fontFamily: 'inherit',
-          }}>
-            {status === 'done' ? 'Close' : 'Cancel'}
-          </button>
-          {status === 'done' && newSessionId ? (
-            <button onClick={handleOpenNewSession} style={{
-              padding: '8px 16px', borderRadius: 6, border: 'none',
-              background: '#4a9eff', color: '#fff', fontSize: 14, fontWeight: 600,
-              cursor: 'pointer', fontFamily: 'inherit',
-            }}>
-              Open New Session
-            </button>
-          ) : (
-            <button
-              onClick={handleStart}
-              disabled={!contextRequest.trim() || isProcessing}
-              style={{
-                padding: '8px 16px', borderRadius: 6, border: 'none',
-                background: contextRequest.trim() && !isProcessing ? '#cc5de8' : '#1e1e30',
-                color: contextRequest.trim() && !isProcessing ? '#fff' : '#555',
-                fontSize: 14, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit',
-              }}
-            >
-              {isProcessing ? 'Transferring...' : 'Transfer'}
-            </button>
-          )}
-        </div>
-      </div>
-    </>
+    </Modal>
   );
 }

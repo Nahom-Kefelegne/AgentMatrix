@@ -2,11 +2,11 @@
 
 import {
   AlertTriangle,
+  ArrowRightLeft,
   Bot,
   ChevronDown,
   Clock3,
   GitCompareArrows,
-  Info,
   Maximize2,
   PanelRightOpen,
   Power,
@@ -79,12 +79,14 @@ function SessionPowerControl({
   available,
   onRestart,
   onEnd,
+  onContinue,
 }: {
   session: SessionData;
   state: SessionControlState | null;
   available: boolean;
   onRestart: (sessionId: string) => void;
   onEnd: (sessionId: string) => void;
+  onContinue: (sessionId: string) => void;
 }) {
   const rootRef = useRef<HTMLDivElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
@@ -252,6 +254,20 @@ function SessionPowerControl({
               <button
                 type="button"
                 className="mc-session-control-action"
+                onClick={() => {
+                  closePanel(false);
+                  onContinue(session.id);
+                }}
+              >
+                <ArrowRightLeft size={16} aria-hidden="true" />
+                <span>
+                  <strong>Continue in Fresh Session</strong>
+                  <small>Carry selected context into a new session with the same provider profile.</small>
+                </span>
+              </button>
+              <button
+                type="button"
+                className="mc-session-control-action"
                 onClick={() => setConfirmation('restart')}
               >
                 <RotateCcw size={16} aria-hidden="true" />
@@ -410,7 +426,6 @@ function ConsoleWorkspace(props: DashboardV2ViewProps) {
     consoleVisible,
     canvas,
     changes,
-    onOpenSession,
     onReviewChanges,
     onRequestSummary,
     onFullscreenSession,
@@ -418,6 +433,7 @@ function ConsoleWorkspace(props: DashboardV2ViewProps) {
     sessionControlsAvailable,
     onRestartSession,
     onEndSession,
+    onContinueSession,
   } = props;
 
   if (!selectedSession) {
@@ -497,14 +513,12 @@ function ConsoleWorkspace(props: DashboardV2ViewProps) {
             >
               <Maximize2 size={16} aria-hidden="true" />
             </button>
-            <button type="button" className="mc-icon-button" onClick={() => onOpenSession(selectedSession.id)} aria-label="Open legacy session details" title="Session Details">
-              <Info size={16} aria-hidden="true" />
-            </button>
             <SessionPowerControl
               key={selectedSession.id}
               session={selectedSession}
               state={sessionControlState}
               available={sessionControlsAvailable}
+              onContinue={onContinueSession}
               onRestart={onRestartSession}
               onEnd={onEndSession}
             />

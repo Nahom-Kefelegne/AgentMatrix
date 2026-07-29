@@ -122,6 +122,10 @@ function discoveredSessionName(cliType: CliType | undefined, sessionId: string):
   }
 }
 
+function validCliType(value: unknown): CliType | undefined {
+  return value === 'copilot' || value === 'claude' ? value : undefined;
+}
+
 export function setupTerminalBridge(io: SocketIOServer, ptyManager: PtyManager): void {
   // Sessions currently mid-teardown (terminal:end fired, animation + kill
   // pending). Shared across sockets. While a session is here, terminal:resume
@@ -676,8 +680,23 @@ export function setupTerminalBridge(io: SocketIOServer, ptyManager: PtyManager):
       model?: string;
       effort?: string;
       systemPrompt?: string;
+      cliType?: CliType;
+      copilotMode?: string;
     }) => {
       const { sourceSessionId, contextRequest, targetCwd, handoffId } = data;
+      const sourceProfile = getActiveSession(sourceSessionId);
+      const sourceSession = getSession(sourceSessionId);
+      const cliType = validCliType(data.cliType)
+        || validCliType(sourceSession?.cliType)
+        || validCliType(sourceProfile?.cliType)
+        || 'claude';
+      const permissionMode = data.permissionMode
+        || sourceProfile?.permissionMode
+        || require('../lib/state/appSettings').getSettings().defaultPermissionMode;
+      const model = data.model || sourceProfile?.model;
+      const effort = data.effort || sourceProfile?.effort;
+      const allowedTools = sourceProfile?.allowedTools;
+      const copilotMode = data.copilotMode || sourceProfile?.copilotMode;
 
       // Step 1: Generate summary from source session
       socket.emit('session:handoff-status', { handoffId, status: 'summarizing' });
@@ -695,7 +714,7 @@ export function setupTerminalBridge(io: SocketIOServer, ptyManager: PtyManager):
       const name = data.sessionName || `handoff-${handoffId}`;
       const { setCachedName } = require('../lib/state/nameCache');
 
-      const sessionData = createSessionEntry(sessionUuid, name, targetCwd);
+      const sessionData = createSessionEntry(sessionUuid, name, targetCwd, cliType);
       addSession(sessionData);
       setCachedName(sessionUuid, name);
       io.emit(SOCKET_EVENTS.SESSION_START, sessionData);
@@ -703,10 +722,14 @@ export function setupTerminalBridge(io: SocketIOServer, ptyManager: PtyManager):
       ptyManager.spawnNew(sessionUuid, {
         cwd: targetCwd,
         sessionUuid,
-        permissionMode: data.permissionMode || 'bypassPermissions',
-        model: data.model,
-        effort: data.effort,
+        name,
+        permissionMode,
+        model,
+        effort,
+        allowedTools,
         systemPrompt: data.systemPrompt,
+        cliType,
+        copilotMode,
       });
 
       const active = getActiveSessions().filter(session => session.id !== sessionUuid);
@@ -714,10 +737,12 @@ export function setupTerminalBridge(io: SocketIOServer, ptyManager: PtyManager):
         id: sessionUuid,
         name,
         cwd: targetCwd,
-        cliType: 'claude',
-        permissionMode: data.permissionMode || 'bypassPermissions',
-        model: data.model,
-        effort: data.effort,
+        cliType,
+        permissionMode,
+        model,
+        effort,
+        allowedTools,
+        copilotMode,
       });
       saveActiveSessions(active);
 

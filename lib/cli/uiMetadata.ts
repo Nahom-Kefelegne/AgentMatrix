@@ -94,6 +94,26 @@ export const COPILOT_MODES: CopilotMode[] = [
   { value: 'autopilot', label: 'Autopilot', desc: 'Work autonomously end-to-end' },
 ];
 
+export function modelsForCli(cliType: 'claude' | 'copilot'): ModelOption[] {
+  return cliType === 'copilot' ? COPILOT_MODELS : CLAUDE_MODELS;
+}
+
+export function permissionModesForCli(cliType: 'claude' | 'copilot'): PermissionMode[] {
+  return cliType === 'copilot' ? COPILOT_PERMISSION_MODES : CLAUDE_PERMISSION_MODES;
+}
+
+export function defaultPermissionModeForCli(cliType: 'claude' | 'copilot'): string {
+  return cliType === 'copilot' ? 'default' : 'bypassPermissions';
+}
+
+export function validOptionValue<T extends { value: string }>(
+  options: T[],
+  value: string | undefined,
+  fallback = '',
+): string {
+  return value && options.some(option => option.value === value) ? value : fallback;
+}
+
 // ── Pure-string helpers (safe in browser) ─────────────────────────
 
 /**

@@ -6,6 +6,7 @@ import { deriveDashboardModel } from '@/lib/dashboard/attentionQueue';
 import { perfRender } from '@/lib/perf';
 import type { SessionData, SessionEndStatus, SessionRestartStatus } from '@/lib/types';
 import { useContextCanvas } from '../context-canvas/useContextCanvas';
+import HandoffModal from '../HandoffModal';
 import { useSocketContext } from '../SocketProvider';
 import DashboardV2 from './DashboardV2';
 import type { DashboardV2Navigation, SessionControlState } from './types';
@@ -21,7 +22,6 @@ function lifecycleTimerKey(sessionId: string, kind: LifecycleTimerKind): string 
 export interface DashboardV2ContainerProps {
   sessions: Map<string, SessionData>;
   contextMap: Record<string, number>;
-  onSelectSession: (id: string) => void;
   initialSessionId?: string | null;
   onSelectionChange?: (sessionId: string | null) => void;
   navigation: DashboardV2Navigation;
@@ -30,7 +30,6 @@ export interface DashboardV2ContainerProps {
 export default function DashboardV2Container({
   sessions,
   contextMap,
-  onSelectSession,
   initialSessionId,
   onSelectionChange,
   navigation,
@@ -47,7 +46,12 @@ export default function DashboardV2Container({
   const [selectedSessionId, setSelectedSessionId] = useState<string | null>(() => (
     initialSessionId && sessions.has(initialSessionId) ? initialSessionId : null
   ));
+  const [pendingSelectionId, setPendingSelectionId] = useState<string | null>(() => (
+    initialSessionId && !sessions.has(initialSessionId) ? initialSessionId : null
+  ));
   const [fullscreenSessionId, setFullscreenSessionId] = useState<string | null>(null);
+  const [handoffSessionId, setHandoffSessionId] = useState<string | null>(null);
+  const [handoffOpen, setHandoffOpen] = useState(false);
   const [sessionControls, setSessionControls] = useState<Record<string, SessionControlState>>({});
   const lifecycleTimersRef = useRef<Map<string, number>>(new Map());
   const canvas = useContextCanvas(selectedSessionId, socketRef);
@@ -145,15 +149,35 @@ export default function DashboardV2Container({
   useEffect(() => {
     const stillExists = selectedSessionId ? sessions.has(selectedSessionId) : false;
     if (stillExists) return;
+    if (pendingSelectionId && !sessions.has(pendingSelectionId)) return;
     const next = model.queue[0]?.sessionId
       ?? model.working[0]?.session.id
       ?? model.idle[0]?.session.id
       ?? null;
     setSelectedSessionId(next);
     onSelectionChange?.(next);
-  }, [model.idle, model.queue, model.working, onSelectionChange, selectedSessionId, sessions]);
+  }, [model.idle, model.queue, model.working, onSelectionChange, pendingSelectionId, selectedSessionId, sessions]);
+
+  useEffect(() => {
+    if (!initialSessionId || initialSessionId === selectedSessionId) return;
+    if (sessions.has(initialSessionId)) {
+      setSelectedSessionId(initialSessionId);
+      setPendingSelectionId(null);
+      return;
+    }
+    setPendingSelectionId(initialSessionId);
+  }, [initialSessionId, selectedSessionId, sessions]);
+
+  useEffect(() => {
+    if (!pendingSelectionId) return;
+    if (sessions.has(pendingSelectionId)) {
+      setSelectedSessionId(pendingSelectionId);
+      setPendingSelectionId(null);
+    }
+  }, [pendingSelectionId, sessions]);
 
   const handleSelectSession = useCallback((sessionId: string) => {
+    setPendingSelectionId(null);
     setSelectedSessionId(sessionId);
     onSelectionChange?.(sessionId);
   }, [onSelectionChange]);
@@ -177,6 +201,11 @@ export default function DashboardV2Container({
   const handleReviewChanges = useCallback(() => {
     canvas.openSessionDiff();
   }, [canvas]);
+
+  const handleContinueSession = useCallback((sessionId: string) => {
+    setHandoffSessionId(sessionId);
+    setHandoffOpen(true);
+  }, []);
 
   const handleRestartSession = useCallback((sessionId: string) => {
     clearSessionLifecycleTimers(sessionId);
@@ -256,10 +285,10 @@ export default function DashboardV2Container({
         sessionControlState={selectedSessionId ? sessionControls[selectedSessionId] ?? null : null}
         sessionControlsAvailable={connected}
         onSelectSession={handleSelectSession}
-        onOpenSession={onSelectSession}
         onReviewChanges={handleReviewChanges}
         onRequestSummary={handleRequestSummary}
         onFullscreenSession={setFullscreenSessionId}
+        onContinueSession={handleContinueSession}
         onRestartSession={handleRestartSession}
         onEndSession={handleEndSession}
       />
@@ -268,6 +297,20 @@ export default function DashboardV2Container({
           session={fullscreenSession}
           sessions={sessions}
           onExit={() => setFullscreenSessionId(null)}
+        />
+      ) : null}
+      {handoffSessionId && sessions.has(handoffSessionId) ? (
+        <HandoffModal
+          key={handoffSessionId}
+          isOpen={handoffOpen}
+          onClose={() => setHandoffOpen(false)}
+          sourceSessionId={handoffSessionId}
+          sourceCwd={sessions.get(handoffSessionId)?.cwd}
+          onNewSession={sessionId => {
+            setHandoffOpen(false);
+            setHandoffSessionId(null);
+            handleSelectSession(sessionId);
+          }}
         />
       ) : null}
     </>
