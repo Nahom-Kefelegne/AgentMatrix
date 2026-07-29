@@ -2,7 +2,15 @@ import type { Server as SocketIOServer } from 'socket.io';
 import { PtyManager } from './pty/PtyManager';
 import { randomUUID } from 'crypto';
 import { homedir } from 'os';
-import { addSession, getAllSessions, getSession, removeSession, updateSession } from '../lib/state/sessionStore';
+import {
+  addSession,
+  finishSessionRestart,
+  getAllSessions,
+  getSession,
+  markSessionRestarting,
+  removeSession,
+  updateSession,
+} from '../lib/state/sessionStore';
 import { getCachedName, setCachedName } from '../lib/state/nameCache';
 import {
   getActiveSession,
@@ -18,6 +26,7 @@ import {
 import { requestSummary } from './services/SummaryService';
 import { queryOrchestrator, getOrchestratorId, isOrchestrator, resetOrchestrator } from './services/OrchestratorService';
 import { generateHandoffSummary, injectHandoffIntoSession } from './services/HandoffService';
+import { restartPtySession } from './services/SessionLifecycleService';
 import { OutputParser } from './pty/OutputParser';
 import { reapOrphansForSessions, logReapResult } from './services/OrphanReaper';
 import type { PtySession } from './pty/PtyManager';
@@ -446,13 +455,141 @@ export function setupTerminalBridge(io: SocketIOServer, ptyManager: PtyManager):
       }
     });
 
+    socket.on('terminal:restart', ({ sessionId }: { sessionId: string }) => {
+      void (async () => {
+        if (endingSessions.has(sessionId)) {
+          socket.emit('session:restart-status', {
+            sessionId,
+            phase: 'error',
+            error: 'This session is already shutting down.',
+          });
+          return;
+        }
+
+        const session = getSession(sessionId);
+        if (!session) {
+          socket.emit('session:restart-status', {
+            sessionId,
+            phase: 'error',
+            error: 'The session is no longer active.',
+          });
+          return;
+        }
+
+        const cachedProfile = getActiveSession(sessionId);
+        const defaultPermissionMode = require('../lib/state/appSettings').getSettings().defaultPermissionMode as string;
+        const cliType = session.cliType || cachedProfile?.cliType || 'claude';
+        const cwd = session.cwd || cachedProfile?.cwd || ptyManager.findSessionCwd(sessionId, cliType) || homedir();
+        const permissionMode = cachedProfile?.permissionMode || defaultPermissionMode;
+
+        const active = getActiveSessions().filter(item => item.id !== sessionId);
+        active.push({
+          id: sessionId,
+          name: session.name,
+          cwd,
+          cliType,
+          permissionMode,
+          model: cachedProfile?.model,
+          effort: cachedProfile?.effort,
+          allowedTools: cachedProfile?.allowedTools,
+          copilotMode: cachedProfile?.copilotMode,
+        });
+        saveActiveSessions(active);
+        endingSessions.add(sessionId);
+        const restartGeneration = markSessionRestarting(sessionId);
+        const changes: Partial<SessionData> = {
+          status: 'idle',
+          currentTool: undefined,
+          statusReason: undefined,
+          lastActivity: Date.now(),
+        };
+        updateSession(sessionId, changes);
+        io.emit(SOCKET_EVENTS.SESSION_UPDATE, { sessionId, changes });
+
+        try {
+          await restartPtySession(ptyManager, {
+            sessionId,
+            cwd,
+            cliType,
+            permissionMode,
+            model: cachedProfile?.model,
+            effort: cachedProfile?.effort,
+            allowedTools: cachedProfile?.allowedTools,
+            copilotMode: cachedProfile?.copilotMode,
+          }, {
+            onPhase: phase => socket.emit('session:restart-status', { sessionId, phase }),
+            beforeResume: () => {
+              const reaped = reapOrphansForSessions([sessionId]);
+              if (reaped.killed > 0) logReapResult(`restart ${session.name}`, reaped);
+            },
+            onSpawned: restartedPty => new Promise<void>((resolve, reject) => {
+              subscribeOutput(sessionId);
+              let settled = false;
+              let exitSubscription: { dispose: () => void } | null = null;
+              const readinessTimeout = setTimeout(() => {
+                if (settled) return;
+                settled = true;
+                exitSubscription?.dispose();
+                reject(new Error('The CLI did not become ready within 20 seconds.'));
+              }, 20_000);
+              const finishReady = () => {
+                if (settled) return;
+                settled = true;
+                clearTimeout(readinessTimeout);
+                exitSubscription?.dispose();
+                socket.emit('session:restart-status', { sessionId, phase: 'ready' });
+                resolve();
+              };
+              exitSubscription = restartedPty.pty.onExit(({ exitCode }) => {
+                if (settled) return;
+                settled = true;
+                clearTimeout(readinessTimeout);
+                reject(new Error(`The CLI exited during restart (code ${exitCode}).`));
+              });
+              restartedPty.onStateChange = info => {
+                io.emit('session:state', { sessionId, ...info });
+                if (info.state === 'ready') finishReady();
+              };
+              restartedPty.onContextUpdate = usage => {
+                io.emit('session:context', { sessionId, usage });
+              };
+              watchForTrustPrompt(ptyManager, sessionId, session.name);
+              if (restartedPty.status === 'ready') finishReady();
+              if (restartedPty.status === 'closed' && !settled) {
+                settled = true;
+                clearTimeout(readinessTimeout);
+                exitSubscription?.dispose();
+                reject(new Error('The CLI exited before restart completed.'));
+              }
+            }),
+          });
+        } catch (error) {
+          const message = error instanceof Error ? error.message : 'Session restart failed.';
+          console.error(`[terminal:restart] ${sessionId}`, error);
+          socket.emit('session:restart-status', { sessionId, phase: 'error', error: message });
+        } finally {
+          endingSessions.delete(sessionId);
+          finishSessionRestart(sessionId, restartGeneration);
+        }
+      })();
+    });
+
     // End a session — fire animation, then /exit, then cleanup
     socket.on('terminal:end', ({ sessionId }: { sessionId: string }) => {
       try {
+        if (endingSessions.has(sessionId)) {
+          socket.emit('session:end-status', {
+            sessionId,
+            phase: 'error',
+            error: 'This session is already shutting down.',
+          });
+          return;
+        }
         // Mark as ending so terminal:resume refuses to reconnect/respawn it
         // during the close animation window (guards the click-while-closing
         // race).
         endingSessions.add(sessionId);
+        socket.emit('session:end-status', { sessionId, phase: 'ending' });
 
         // Remove from auto-resume list
         saveActiveSessions(getActiveSessions().filter(s => s.id !== sessionId));
@@ -479,6 +616,11 @@ export function setupTerminalBridge(io: SocketIOServer, ptyManager: PtyManager):
       } catch (err) {
         console.error('[terminal:end]', err);
         endingSessions.delete(sessionId);
+        socket.emit('session:end-status', {
+          sessionId,
+          phase: 'error',
+          error: err instanceof Error ? err.message : 'Session shutdown failed.',
+        });
       }
     });
 

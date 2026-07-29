@@ -8,11 +8,32 @@ if (!g.__deskAssignments) g.__deskAssignments = new Map<number, string>();
 if (!g.__exitedAgentTypes) g.__exitedAgentTypes = new Set<string>();
 if (!g.__agentIdToName) g.__agentIdToName = new Map<string, string>();
 if (!g.__appManagedIds) g.__appManagedIds = new Set<string>();
+if (!(g.__restartingSessionIds instanceof Map)) g.__restartingSessionIds = new Map<string, number>();
 const sessions = g.__sessions as Map<string, SessionData>;
 const deskAssignments = g.__deskAssignments as Map<number, string>;
 const exitedAgentTypes = g.__exitedAgentTypes as Set<string>;
 const agentIdToName = g.__agentIdToName as Map<string, string>;
 const appManagedIds = g.__appManagedIds as Set<string>;
+const restartingSessionIds = g.__restartingSessionIds as Map<string, number>;
+
+export function markSessionRestarting(sessionId: string): number {
+  const generation = (restartingSessionIds.get(sessionId) ?? 0) + 1;
+  restartingSessionIds.set(sessionId, generation);
+  return generation;
+}
+
+export function isSessionRestarting(sessionId: string): boolean {
+  return restartingSessionIds.has(sessionId);
+}
+
+export function finishSessionRestart(sessionId: string, generation: number): void {
+  // Keep a short grace window for delayed provider SessionEnd hooks from the
+  // old CLI process. A deliberate End still removes the session through the
+  // terminal:end cleanup path after its transcript flush.
+  setTimeout(() => {
+    if (restartingSessionIds.get(sessionId) === generation) restartingSessionIds.delete(sessionId);
+  }, 10_000);
+}
 
 export function markAsAppManaged(sessionId: string): void {
   appManagedIds.add(sessionId);

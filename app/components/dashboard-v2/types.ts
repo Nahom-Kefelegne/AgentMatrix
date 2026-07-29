@@ -29,6 +29,11 @@ export interface ChangeSummaryState {
   error: string | null;
 }
 
+export type SessionControlState =
+  | { kind: 'restart'; phase: 'stopping' | 'starting' | 'ready' }
+  | { kind: 'end'; phase: 'ending' }
+  | { kind: 'error'; message: string };
+
 export interface DashboardV2ViewProps {
   model: DashboardModel;
   selectedSession: SessionData | null;
@@ -39,9 +44,13 @@ export interface DashboardV2ViewProps {
   navigation: DashboardV2Navigation;
   canvas: ContextCanvasController;
   changes: ChangeSummaryState;
+  sessionControlState: SessionControlState | null;
+  sessionControlsAvailable: boolean;
   onSelectSession: (sessionId: string) => void;
   onOpenSession: (sessionId: string) => void;
   onReviewChanges: (sessionId: string) => void;
   onRequestSummary: (sessionId: string) => void;
   onFullscreenSession: (sessionId: string) => void;
+  onRestartSession: (sessionId: string) => void;
+  onEndSession: (sessionId: string) => void;
 }

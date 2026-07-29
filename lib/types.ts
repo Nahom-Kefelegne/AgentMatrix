@@ -25,6 +25,20 @@ export interface SessionFilesChangedEvent {
   changes?: SessionFileChange[];
 }
 
+export type SessionRestartPhase = 'stopping' | 'starting' | 'ready' | 'error';
+
+export interface SessionRestartStatus {
+  sessionId: string;
+  phase: SessionRestartPhase;
+  error?: string;
+}
+
+export interface SessionEndStatus {
+  sessionId: string;
+  phase: 'ending' | 'error';
+  error?: string;
+}
+
 // ===== CLI Types =====
 
 export type CliType = 'claude' | 'copilot';
@@ -197,6 +211,8 @@ export interface ServerToClientEvents {
   'terminal:consent': (data: { sessionId: string }) => void;
   'session:context': (data: { sessionId: string; usage: number }) => void;
   'session:state': (data: { sessionId: string; state: string; actionType?: string; actionLabel?: string; activity?: string }) => void;
+  'session:restart-status': (data: SessionRestartStatus) => void;
+  'session:end-status': (data: SessionEndStatus) => void;
   // Editor shell terminals
   'editor:terminal:data': (data: { id: string; data: string }) => void;
   'editor:terminal:exit': (data: { id: string; exitCode: number }) => void;
@@ -214,6 +230,8 @@ export interface ClientToServerEvents {
   'terminal:input': (data: { sessionId: string; data: string }) => void;
   'terminal:spawn': (data: { sessionId: string }) => void;
   'terminal:resume': (data: ResumeSessionRequest) => void;
+  'terminal:restart': (data: { sessionId: string }) => void;
+  'terminal:end': (data: { sessionId: string }) => void;
   'terminal:resize': (data: { sessionId: string; cols: number; rows: number }) => void;
   // Editor shell terminals
   'editor:terminal:spawn': (data: { id: string; cwd: string }) => void;

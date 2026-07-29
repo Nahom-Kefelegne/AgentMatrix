@@ -218,8 +218,13 @@ export class PtyManager {
     ptyProcess.onExit(({ exitCode }: { exitCode: number }) => {
       console.log(`[pty:exit] id=${id.slice(0, 12)} code=${exitCode}`);
       session.status = 'closed';
-      this.sessions.delete(id);
-      clearNavigationCapability(id);
+      // A restart can replace this PTY under the same session ID before the
+      // old process delivers its delayed exit callback. Never let the old
+      // callback delete the replacement session or its navigation capability.
+      if (this.sessions.get(id) === session) {
+        this.sessions.delete(id);
+        clearNavigationCapability(id);
+      }
     });
 
     this.sessions.set(id, session);

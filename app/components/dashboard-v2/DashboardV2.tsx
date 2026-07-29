@@ -3,23 +3,25 @@
 import {
   AlertTriangle,
   Bot,
+  ChevronDown,
   Clock3,
-  ExternalLink,
   GitCompareArrows,
   Info,
   Maximize2,
   PanelRightOpen,
+  Power,
+  RotateCcw,
   ScrollText,
   Terminal,
 } from 'lucide-react';
-import { memo } from 'react';
+import { memo, useCallback, useEffect, useRef, useState } from 'react';
 import type { AttentionItem, LaneItem } from '@/lib/dashboard/attentionQueue';
 import type { SessionData } from '@/lib/types';
 import CliIcon from '../CliIcon';
 import ContextCanvas from '../context-canvas/ContextCanvas';
 import SessionConsole from '../SessionConsole';
 import DashboardV2Nav from './DashboardV2Nav';
-import type { DashboardV2ViewProps } from './types';
+import type { DashboardV2ViewProps, SessionControlState } from './types';
 
 const STATUS_LABEL: Record<SessionData['status'], string> = {
   attention: 'Needs You',
@@ -68,6 +70,239 @@ function MiniContext({ usage }: { usage: number | null }) {
         <span className={`mc-console-context-fill mc-console-context-fill--${tone}`} style={{ width: `${Math.min(100, usage)}%` }} />
       </span>
     </span>
+  );
+}
+
+function SessionPowerControl({
+  session,
+  state,
+  available,
+  onRestart,
+  onEnd,
+}: {
+  session: SessionData;
+  state: SessionControlState | null;
+  available: boolean;
+  onRestart: (sessionId: string) => void;
+  onEnd: (sessionId: string) => void;
+}) {
+  const rootRef = useRef<HTMLDivElement>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const panelRef = useRef<HTMLDivElement>(null);
+  const [open, setOpen] = useState(false);
+  const [confirmation, setConfirmation] = useState<'restart' | 'end' | null>(null);
+  const busy = (state?.kind === 'restart' && state.phase !== 'ready')
+    || state?.kind === 'end';
+  const triggerLabel = !available
+    ? 'Offline'
+    : state?.kind === 'restart'
+    ? state.phase === 'ready' ? 'Restarted' : state.phase === 'starting' ? 'Starting' : 'Stopping'
+    : state?.kind === 'end'
+      ? 'Ending'
+      : 'Session';
+
+  const closePanel = useCallback((restoreFocus: boolean) => {
+    setOpen(false);
+    setConfirmation(null);
+    if (restoreFocus) {
+      window.requestAnimationFrame(() => triggerRef.current?.focus());
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!open) return;
+    const inerted: Array<{ element: HTMLElement; wasInert: boolean }> = [];
+    let branch: HTMLElement | null = rootRef.current;
+    while (branch?.parentElement) {
+      const parent: HTMLElement = branch.parentElement;
+      for (const sibling of Array.from(parent.children)) {
+        if (sibling === branch || !(sibling instanceof HTMLElement)) continue;
+        inerted.push({ element: sibling, wasInert: sibling.inert });
+        sibling.inert = true;
+      }
+      branch = parent;
+      if (parent === document.body) break;
+    }
+    const handlePointerDown = (event: PointerEvent) => {
+      if (!rootRef.current?.contains(event.target as Node)) {
+        closePanel(false);
+      }
+    };
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        closePanel(true);
+        return;
+      }
+      if (event.key !== 'Tab' || !panelRef.current) return;
+      const focusable = Array.from(
+        panelRef.current.querySelectorAll<HTMLButtonElement>('button:not([disabled])'),
+      );
+      if (focusable.length === 0) return;
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    };
+    document.addEventListener('pointerdown', handlePointerDown, true);
+    document.addEventListener('keydown', handleKeyDown);
+    return () => {
+      document.removeEventListener('pointerdown', handlePointerDown, true);
+      document.removeEventListener('keydown', handleKeyDown);
+      for (const { element, wasInert } of inerted) element.inert = wasInert;
+    };
+  }, [closePanel, open]);
+
+  useEffect(() => {
+    if (!available && open) closePanel(true);
+  }, [available, closePanel, open]);
+
+  useEffect(() => {
+    if (!open) return;
+    const frame = window.requestAnimationFrame(() => {
+      panelRef.current?.querySelector<HTMLButtonElement>('button:not([disabled])')?.focus();
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [confirmation, open]);
+
+  const runAction = () => {
+    if (confirmation === 'restart') onRestart(session.id);
+    if (confirmation === 'end') onEnd(session.id);
+    closePanel(true);
+  };
+
+  return (
+    <div ref={rootRef} className="mc-session-control">
+      <button
+        ref={triggerRef}
+        type="button"
+        className={`mc-session-control-trigger ${state?.kind === 'error' ? 'mc-session-control-trigger--error' : ''}`}
+        onClick={() => {
+          if (busy || !available) return;
+          setOpen(value => !value);
+          setConfirmation(null);
+        }}
+        aria-disabled={busy || !available}
+        aria-expanded={open}
+        aria-haspopup="dialog"
+        aria-label={`${triggerLabel} controls for ${session.name}`}
+        title={!available ? 'Reconnect AgentMatrix to manage this session' : 'Session Controls'}
+      >
+        <span
+          className={`mc-session-control-led ${busy ? 'mc-session-control-led--busy' : ''} ${!available ? 'mc-session-control-led--offline' : ''}`}
+          aria-hidden="true"
+        />
+        <Power size={14} aria-hidden="true" />
+        <span className="mc-session-control-label">{triggerLabel}</span>
+        {!busy ? <ChevronDown size={12} aria-hidden="true" /> : null}
+      </button>
+
+      {open ? (
+        <div
+          ref={panelRef}
+          className="mc-session-control-panel"
+          role="dialog"
+          aria-modal="true"
+          aria-label={`Session controls for ${session.name}`}
+        >
+          {confirmation ? (
+            <div className={`mc-session-confirm mc-session-confirm--${confirmation}`}>
+              <span className="mc-session-control-kicker">
+                {confirmation === 'restart' ? 'Controlled restart' : 'End active session'}
+              </span>
+              <strong>
+                {confirmation === 'restart' ? `Restart ${session.name}?` : `End ${session.name}?`}
+              </strong>
+              <p>
+                {confirmation === 'restart'
+                  ? 'AgentMatrix will exit the CLI cleanly, then resume it with the same model, effort, permissions, and tools.'
+                  : 'The CLI will close after its transcript flushes. You can still find and resume the saved conversation later.'}
+              </p>
+              <div className="mc-session-confirm-actions">
+                <button type="button" onClick={() => setConfirmation(null)}>Cancel</button>
+                <button
+                  type="button"
+                  className={confirmation === 'end' ? 'mc-session-confirm-danger' : 'mc-session-confirm-primary'}
+                  onClick={runAction}
+                >
+                  {confirmation === 'restart' ? 'Restart Session' : 'End Session'}
+                </button>
+              </div>
+            </div>
+          ) : (
+            <>
+              <div className="mc-session-control-heading">
+                <div>
+                  <span className="mc-session-control-kicker">Session power</span>
+                  <strong>{session.name}</strong>
+                </div>
+                <code>{session.id.slice(0, 8)}</code>
+              </div>
+              {state?.kind === 'error' ? (
+                <div className="mc-session-control-error" role="alert">
+                  <AlertTriangle size={14} aria-hidden="true" />
+                  <span>{state.message}</span>
+                </div>
+              ) : null}
+              <button
+                type="button"
+                className="mc-session-control-action"
+                onClick={() => setConfirmation('restart')}
+              >
+                <RotateCcw size={16} aria-hidden="true" />
+                <span>
+                  <strong>Restart Session</strong>
+                  <small>Clean exit, then resume the same conversation and launch profile.</small>
+                </span>
+              </button>
+              <button
+                type="button"
+                className="mc-session-control-action mc-session-control-action--danger"
+                onClick={() => setConfirmation('end')}
+              >
+                <Power size={16} aria-hidden="true" />
+                <span>
+                  <strong>End Session</strong>
+                  <small>Close the active CLI and remove it from this session list.</small>
+                </span>
+              </button>
+            </>
+          )}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function SessionLifecycleNotice({ state }: { state: SessionControlState }) {
+  const tone = state.kind === 'error' ? 'error' : state.kind === 'end' ? 'ending' : 'restart';
+  const message = state.kind === 'error'
+    ? state.message
+    : state.kind === 'end'
+      ? 'Ending session · flushing the transcript before closing.'
+      : state.phase === 'stopping'
+        ? 'Restarting session · closing the current CLI cleanly.'
+        : state.phase === 'starting'
+          ? 'Restarting session · restoring the previous launch profile.'
+          : 'Session restarted · terminal connection restored.';
+  return (
+    <div
+      className={`mc-session-lifecycle mc-session-lifecycle--${tone}`}
+      role={state.kind === 'error' ? 'alert' : 'status'}
+      aria-live="polite"
+    >
+      {state.kind === 'error'
+        ? <AlertTriangle size={14} aria-hidden="true" />
+        : state.kind === 'end'
+          ? <Power size={14} aria-hidden="true" />
+          : <RotateCcw size={14} aria-hidden="true" />}
+      <span>{message}</span>
+    </div>
   );
 }
 
@@ -179,6 +414,10 @@ function ConsoleWorkspace(props: DashboardV2ViewProps) {
     onReviewChanges,
     onRequestSummary,
     onFullscreenSession,
+    sessionControlState,
+    sessionControlsAvailable,
+    onRestartSession,
+    onEndSession,
   } = props;
 
   if (!selectedSession) {
@@ -261,6 +500,14 @@ function ConsoleWorkspace(props: DashboardV2ViewProps) {
             <button type="button" className="mc-icon-button" onClick={() => onOpenSession(selectedSession.id)} aria-label="Open legacy session details" title="Session Details">
               <Info size={16} aria-hidden="true" />
             </button>
+            <SessionPowerControl
+              key={selectedSession.id}
+              session={selectedSession}
+              state={sessionControlState}
+              available={sessionControlsAvailable}
+              onRestart={onRestartSession}
+              onEnd={onEndSession}
+            />
           </div>
         </div>
 
@@ -277,6 +524,7 @@ function ConsoleWorkspace(props: DashboardV2ViewProps) {
             {changes.error}
           </div>
         ) : null}
+        {sessionControlState ? <SessionLifecycleNotice state={sessionControlState} /> : null}
       </header>
 
       <div className={`mc-session-surface ${canvas.isOpen ? 'mc-session-surface--canvas' : ''}`}>
