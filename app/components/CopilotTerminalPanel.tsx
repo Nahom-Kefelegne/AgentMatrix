@@ -7,6 +7,10 @@ import type { NavigationRequest } from '@/lib/navigation/types';
 import { TERMINAL_THEME } from '@/lib/terminalTheme';
 import { perfEvent } from '@/lib/perf';
 import { getCleanTerminalSelection } from '@/lib/terminal-copy';
+import {
+  installAlternateScreenSelectionAutoScroll,
+  type SelectionScrollDirection,
+} from '@/lib/terminal-selection-autoscroll';
 
 // Copilot's timeline scrolling has two regimes:
 //
@@ -32,8 +36,8 @@ const PAGE_DOWN = '\x1b[6~';
 // Mouse-tracking DECSET modes that make Copilot accept SGR mouse reports. 1006
 // (SGR encoding) rides alongside these but isn't a tracking mode on its own.
 const MOUSE_TRACKING_MODES = new Set(['1000', '1002', '1003']);
-// SGR mouse-wheel translation (mouse-tracking-on path). Copilot scrolls ~3 lines
-// per wheel report, so emitting one report per notch yields line-by-line feel.
+// SGR mouse-wheel translation (mouse-tracking-on path). In the live 27-row TUI,
+// one report shifts the timeline region by 6 rows while fixed chrome stays put.
 // Coordinates are irrelevant to Copilot (verified), so we report over cell 1;1.
 const SGR_WHEEL_UP = '\x1b[<64;1;1M';   // button 64 = wheel up (older content)
 const SGR_WHEEL_DOWN = '\x1b[<65;1;1M'; // button 65 = wheel down (newer content)
@@ -115,6 +119,7 @@ export default function CopilotTerminalPanel({ sessionId, sessionName, cwd, visi
   // Carries the tail of the previous PTY chunk so a mouse DECSET split across a
   // chunk boundary (e.g. "\x1b[?100" + "3h") is still detected.
   const mouseScanTailRef = useRef('');
+  const selectionAutoScrollCleanupRef = useRef<(() => void) | null>(null);
 
   // Out-of-band (ACP) query activity echoed into the console for transparency.
   const [acpLog, setAcpLog] = useState<AcpActivity[]>([]);
@@ -171,10 +176,34 @@ export default function CopilotTerminalPanel({ sessionId, sessionName, cwd, visi
   const handleReady = useCallback((term: any) => {
     const socket = socketRef.current;
     if (!socket) return;
+    selectionAutoScrollCleanupRef.current?.();
+    selectionAutoScrollCleanupRef.current = readOnly
+      ? null
+      : installAlternateScreenSelectionAutoScroll({
+          terminal: term,
+          expectedShift: () => mouseTrackingRef.current ? 6 : undefined,
+          scroll: (direction: SelectionScrollDirection) => {
+            const sequence = mouseTrackingRef.current
+              ? direction < 0 ? SGR_WHEEL_UP : SGR_WHEEL_DOWN
+              : direction < 0 ? PAGE_UP : PAGE_DOWN;
+            writeInput(sequence);
+          },
+        });
     socket.emit('terminal:resize', { sessionId, cols: term.cols, rows: term.rows });
     setStatus('connecting');
     socket.emit('terminal:resume' as any, { sessionId });
-  }, [sessionId, socketRef]);
+  }, [readOnly, sessionId, socketRef, writeInput]);
+
+  useEffect(() => {
+    if (readOnly) {
+      selectionAutoScrollCleanupRef.current?.();
+      selectionAutoScrollCleanupRef.current = null;
+    }
+    return () => {
+      selectionAutoScrollCleanupRef.current?.();
+      selectionAutoScrollCleanupRef.current = null;
+    };
+  }, [readOnly]);
 
   const { containerRef, write, fit, focus, getTerminal } = useXterm({
     theme: TERMINAL_THEME,
@@ -184,6 +213,7 @@ export default function CopilotTerminalPanel({ sessionId, sessionName, cwd, visi
     // xterm's scrollback buffer is unused. Keep it minimal (main-screen
     // startup output only).
     scrollback: 1000,
+    macOptionClickForcesSelection: true,
     readOnly,
     onData: writeInput,
     onResize: emitResize,

@@ -9,8 +9,10 @@ interface XtermSelectionPosition {
 
 interface XtermCopySource {
   cols: number;
+  hasSelection?(): boolean;
   getSelection(): string;
   getSelectionPosition(): XtermSelectionPosition | undefined;
+  __agentMatrixVirtualSelection?: string;
   buffer: {
     active: {
       getLine(y: number): {
@@ -32,7 +34,7 @@ function escapeRegExp(value: string): string {
  * which pollutes clipboard text with a trailing "|" glyph. Only remove a glyph
  * when the selected buffer confirms the same right-edge rail on several rows.
  */
-export function getCleanTerminalSelection(terminal: XtermCopySource): string {
+export function getPhysicalTerminalSelection(terminal: XtermCopySource): string {
   const selection = terminal.getSelection();
   const position = terminal.getSelectionPosition();
   if (!selection || !position || position.start.y === position.end.y || terminal.cols < 2) {
@@ -102,4 +104,14 @@ export function getCleanTerminalSelection(terminal: XtermCopySource): string {
     else output.push(text);
   }
   return output.join(selection.includes('\r\n') ? '\r\n' : '\n');
+}
+
+export function getCleanTerminalSelection(terminal: XtermCopySource): string {
+  if (
+    terminal.__agentMatrixVirtualSelection
+    && (terminal.hasSelection?.() ?? Boolean(terminal.getSelection()))
+  ) {
+    return terminal.__agentMatrixVirtualSelection;
+  }
+  return getPhysicalTerminalSelection(terminal);
 }

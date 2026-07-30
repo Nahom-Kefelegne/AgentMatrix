@@ -25,6 +25,7 @@ export interface UseXtermOptions {
   scrollback?: number;
   cursorBlink?: boolean;
   cursorStyle?: 'bar' | 'block' | 'underline';
+  macOptionClickForcesSelection?: boolean;
   sessionId?: string;
   onNavigate?: (request: NavigationRequest) => void;
 }
@@ -115,6 +116,7 @@ export function useXterm(options: UseXtermOptions): UseXtermHandle {
         cursorStyle: o.cursorStyle ?? 'bar',
         scrollback: o.scrollback ?? 5000,
         scrollOnUserInput: true,
+        macOptionClickForcesSelection: o.macOptionClickForcesSelection ?? false,
         linkHandler: terminalLinks.linkHandler,
       });
 
