@@ -27,6 +27,7 @@ interface SelectionScrollTerminal {
   buffer: {
     active: {
       type: 'normal' | 'alternate';
+      baseY: number;
       getLine(y: number): BufferLine | undefined;
     };
   };
@@ -55,6 +56,11 @@ export interface ViewportRow {
   isWrapped: boolean;
   rightEdge: boolean;
   rightGlyph?: string;
+}
+
+export interface SelectionScrollRegion {
+  start: number;
+  end: number;
 }
 
 interface ViewportSnapshot {
@@ -94,6 +100,12 @@ export function selectionEdgeDirection(
   if (clientY < bounds.top) return -1;
   if (clientY > bounds.bottom) return 1;
   return 0;
+}
+
+export function needsApplicationSelectionScroll(
+  buffer: Pick<SelectionScrollTerminal['buffer']['active'], 'type' | 'baseY'>,
+): boolean {
+  return buffer.type === 'alternate' || buffer.baseY === 0;
 }
 
 function intervalForEdgeDistance(distance: number): number {
@@ -149,14 +161,16 @@ function trailingRailGlyph(row: string): string | undefined {
   return glyph && RIGHT_RAIL_GLYPHS.has(glyph) ? glyph : undefined;
 }
 
-function scrollRegionBoundary(before: string[], after: string[]): { start: number; end: number } | null {
-  let best: { start: number; end: number } | null = null;
+export function detectRailBoundedRegion(
+  rightGlyphs: Array<string | undefined>,
+): SelectionScrollRegion | null {
+  let best: SelectionScrollRegion | null = null;
   let currentStart = -1;
-  for (let index = 0; index <= before.length; index += 1) {
-    const hasRail = index < before.length
-      && Boolean(trailingRailGlyph(before[index]) || trailingRailGlyph(after[index]));
+  for (let index = 0; index <= rightGlyphs.length; index += 1) {
+    const hasRail = index < rightGlyphs.length
+      && Boolean(rightGlyphs[index] && RIGHT_RAIL_GLYPHS.has(rightGlyphs[index]!));
     if (hasRail && currentStart < 0) currentStart = index;
-    if ((!hasRail || index === before.length) && currentStart >= 0) {
+    if ((!hasRail || index === rightGlyphs.length) && currentStart >= 0) {
       const end = index - 1;
       if (!best || end - currentStart > best.end - best.start) {
         best = { start: currentStart, end };
@@ -164,7 +178,22 @@ function scrollRegionBoundary(before: string[], after: string[]): { start: numbe
       currentStart = -1;
     }
   }
-  if (best && best.end - best.start + 1 >= MIN_TRANSITION_OVERLAP_ROWS) return best;
+  return best && best.end - best.start + 1 >= MIN_TRANSITION_OVERLAP_ROWS
+    ? best
+    : null;
+}
+
+function scrollRegionBoundary(before: string[], after: string[]): { start: number; end: number } | null {
+  const beforeRegion = detectRailBoundedRegion(before.map(trailingRailGlyph));
+  const afterRegion = detectRailBoundedRegion(after.map(trailingRailGlyph));
+  if (
+    beforeRegion
+    && afterRegion
+    && beforeRegion.start === afterRegion.start
+    && beforeRegion.end === afterRegion.end
+  ) {
+    return beforeRegion;
+  }
 
   const changed = before
     .map((row, index) => row === after[index] ? -1 : index)
@@ -174,6 +203,30 @@ function scrollRegionBoundary(before: string[], after: string[]): { start: numbe
   // intentionally fails closed when unchanged boundary rows make the region
   // ambiguous.
   return { start: changed[0], end: changed[changed.length - 1] };
+}
+
+function currentSelectionScrollRegion(terminal: SelectionScrollTerminal): SelectionScrollRegion | null {
+  const rightGlyphs: Array<string | undefined> = [];
+  for (let y = 0; y < terminal.rows; y += 1) {
+    rightGlyphs.push(terminal.buffer.active.getLine(y)?.getCell(terminal.cols - 1)?.getChars());
+  }
+  return detectRailBoundedRegion(rightGlyphs);
+}
+
+export function regionBounds(
+  screenBounds: Pick<DOMRect, 'top' | 'bottom' | 'height'>,
+  rowCount: number,
+  region: SelectionScrollRegion | null,
+): { top: number; bottom: number } {
+  if (!region || rowCount <= 0) return {
+    top: screenBounds.top,
+    bottom: screenBounds.bottom,
+  };
+  const rowHeight = screenBounds.height / rowCount;
+  return {
+    top: screenBounds.top + region.start * rowHeight,
+    bottom: screenBounds.top + (region.end + 1) * rowHeight,
+  };
 }
 
 /**
@@ -358,15 +411,15 @@ function createVirtualSelection(
 ): VirtualSelection | null {
   const selected = captureSelectedRows(terminal);
   if (selected.length === 0) return null;
-  const prefix = selected.filter(row => row.y < transition.regionStart);
   const timeline = selected.filter(row => row.y >= transition.regionStart && row.y <= transition.regionEnd);
-  const suffix = selected.filter(row => row.y > transition.regionEnd);
   if (timeline.length === 0) return null;
   return {
     initialDirection: direction,
-    prefix,
+    // Copilot's top tabs and bottom composer are fixed chrome. Virtual copy is
+    // intentionally clamped to the rail-bounded conversation region.
+    prefix: [],
     timeline,
-    suffix,
+    suffix: [],
     segments: [],
     separator: terminal.getSelection().includes('\r\n') ? '\r\n' : '\n',
   };
@@ -412,11 +465,12 @@ function applyScrollSegment(
 }
 
 /**
- * xterm's built-in drag selection scrolls its own viewport. Alternate-screen
- * TUIs such as Copilot own their timeline and have no xterm scrollback, so that
- * timer cannot move. This bridge snapshots the full TUI before/after one
- * application scroll, derives every newly introduced timeline row, and builds
- * a virtual clipboard selection while preserving xterm's visible selection.
+ * xterm's built-in drag selection scrolls its own viewport. Copilot owns its
+ * timeline and has no xterm scrollback; resumed sessions may repaint into
+ * either the alternate buffer or a normal buffer with baseY=0. This bridge
+ * snapshots the full TUI before/after one application scroll, derives every
+ * newly introduced timeline row, and builds a virtual clipboard selection
+ * while preserving xterm's visible selection.
  */
 export function installAlternateScreenSelectionAutoScroll(
   options: SelectionAutoScrollOptions,
@@ -459,7 +513,7 @@ export function installAlternateScreenSelectionAutoScroll(
       if (
         !dragging
         || direction === 0
-        || terminal.buffer.active.type !== 'alternate'
+        || !needsApplicationSelectionScroll(terminal.buffer.active)
         || !terminal.hasSelection()
       ) {
         schedule();
@@ -504,11 +558,9 @@ export function installAlternateScreenSelectionAutoScroll(
             const currentRows = captureSelectedRows(terminal);
             virtualSelection = createVirtualSelection(terminal, transition, activeDirection);
             if (virtualSelection && beforeSelectionRows.length > 0) {
-              virtualSelection.prefix = beforeSelectionRows.filter(row => row.y < transition.regionStart);
               virtualSelection.timeline = beforeSelectionRows.filter(
                 row => row.y >= transition.regionStart && row.y <= transition.regionEnd,
               );
-              virtualSelection.suffix = beforeSelectionRows.filter(row => row.y > transition.regionEnd);
               if (virtualSelection.timeline.length === 0 && currentRows.length > 0) {
                 virtualSelection = null;
               }
@@ -549,12 +601,17 @@ export function installAlternateScreenSelectionAutoScroll(
       stop();
       return;
     }
-    if (terminal.buffer.active.type !== 'alternate') {
+    if (!needsApplicationSelectionScroll(terminal.buffer.active)) {
       direction = 0;
       clearScrollTimer();
       return;
     }
-    const bounds = screen().getBoundingClientRect();
+    const screenBounds = screen().getBoundingClientRect();
+    const bounds = regionBounds(
+      screenBounds,
+      terminal.rows,
+      currentSelectionScrollRegion(terminal),
+    );
     const nextDirection = selectionEdgeDirection(event.clientY, bounds);
     if (nextDirection === 0) {
       direction = 0;
@@ -581,7 +638,7 @@ export function installAlternateScreenSelectionAutoScroll(
   const handleMouseUp = () => stop(false);
 
   const handleMouseDown = (event: MouseEvent) => {
-    if (event.button !== 0 || terminal.buffer.active.type !== 'alternate') return;
+    if (event.button !== 0 || !needsApplicationSelectionScroll(terminal.buffer.active)) return;
     stop(true);
     clearAllTimers();
     dragging = true;
