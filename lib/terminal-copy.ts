@@ -1,6 +1,7 @@
 const RIGHT_RAIL_GLYPHS = new Set([
   '|', '│', '┃', '║', '╎', '▏', '▎', '▍', '▌', '▋', '▊', '▉', '▐', '▕', '█',
 ]);
+const MAX_OSC52_BASE64_LENGTH = 8 * 1024 * 1024;
 
 interface XtermSelectionPosition {
   start: { x: number; y: number };
@@ -12,7 +13,6 @@ interface XtermCopySource {
   hasSelection?(): boolean;
   getSelection(): string;
   getSelectionPosition(): XtermSelectionPosition | undefined;
-  __agentMatrixVirtualSelection?: string;
   buffer: {
     active: {
       getLine(y: number): {
@@ -22,6 +22,32 @@ interface XtermCopySource {
       } | undefined;
     };
   };
+}
+
+/**
+ * Decode an OSC 52 clipboard write from Copilot. Clipboard reads (`?`) and
+ * non-clipboard targets are intentionally rejected.
+ */
+export function decodeOsc52Clipboard(data: string): string | null {
+  const separator = data.indexOf(';');
+  if (separator < 0 || data.slice(0, separator) !== 'c') return null;
+
+  const payload = data.slice(separator + 1);
+  if (
+    payload === '?'
+    || payload.length > MAX_OSC52_BASE64_LENGTH
+    || !/^[A-Za-z0-9+/]*={0,2}$/.test(payload)
+  ) {
+    return null;
+  }
+
+  try {
+    const binary = atob(payload);
+    const bytes = Uint8Array.from(binary, character => character.charCodeAt(0));
+    return new TextDecoder('utf-8', { fatal: true }).decode(bytes);
+  } catch {
+    return null;
+  }
 }
 
 function escapeRegExp(value: string): string {
@@ -107,11 +133,5 @@ export function getPhysicalTerminalSelection(terminal: XtermCopySource): string 
 }
 
 export function getCleanTerminalSelection(terminal: XtermCopySource): string {
-  if (
-    terminal.__agentMatrixVirtualSelection
-    && (terminal.hasSelection?.() ?? Boolean(terminal.getSelection()))
-  ) {
-    return terminal.__agentMatrixVirtualSelection;
-  }
   return getPhysicalTerminalSelection(terminal);
 }

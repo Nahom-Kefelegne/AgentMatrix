@@ -11,6 +11,12 @@ import {
 } from '../../lib/navigation/rootRegistry';
 import { buildAgentMatrixCopilotMcpConfig } from '../services/mcpConfig';
 import { prependManagedNpmPolicy } from '../services/npmPolicy';
+import {
+  createTerminalProtocolState,
+  terminalProtocolReplaySequence,
+  updateTerminalProtocolState,
+  type TerminalProtocolState,
+} from '../../lib/terminal-protocol';
 
 // Opt-in raw PTY stream tee — set AGENTMATRIX_DEBUG_PTY=1 to dump every
 // chunk to ~/.agentmatrix/debug/<sessionId>.bin. Used to diagnose TUI
@@ -52,6 +58,7 @@ export interface PtySession {
   currentState: PtyState;
   contextUsage: number | null; // % used (0-100)
   outputBuffer: string[];
+  terminalProtocolState: TerminalProtocolState;
   cols: number;
   rows: number;
   subscribers: Set<(data: string) => void>;
@@ -142,6 +149,7 @@ export class PtyManager {
       id, pty: ptyProcess, cliType, status: 'starting',
       currentState: 'busy', contextUsage: null,
       outputBuffer: [],
+      terminalProtocolState: createTerminalProtocolState(),
       cols: 80, rows: 24,
       subscribers: new Set(), onReady: null, onStateChange: null, onContextUpdate: null,
       pendingPrompt: null,
@@ -149,6 +157,10 @@ export class PtyManager {
 
     ptyProcess.onData((data: string) => {
       const perfT0 = PERF ? performance.now() : 0;
+      session.terminalProtocolState = updateTerminalProtocolState(
+        session.terminalProtocolState,
+        data,
+      );
       session.outputBuffer.push(data);
       if (session.outputBuffer.length > 500) session.outputBuffer = session.outputBuffer.slice(-300);
       // Fan out to every live subscriber (socket emit, trust/context monitors,
@@ -475,6 +487,10 @@ export class PtyManager {
   hasPty(sessionId: string): boolean { return this.sessions.has(sessionId); }
   getSession(sessionId: string): PtySession | undefined { return this.sessions.get(sessionId); }
   getAllSessions(): PtySession[] { return Array.from(this.sessions.values()); }
+  getTerminalProtocolReplay(sessionId: string): string {
+    const session = this.sessions.get(sessionId);
+    return session ? terminalProtocolReplaySequence(session.terminalProtocolState) : '';
+  }
 
   /**
    * Force a full-screen TUI (notably Copilot) to repaint its current frame by

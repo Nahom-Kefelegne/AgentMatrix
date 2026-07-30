@@ -343,8 +343,15 @@ export function setupTerminalBridge(io: SocketIOServer, ptyManager: PtyManager):
           //   which makes Copilot redraw the current frame at the live dims via
           //   SIGWINCH. We subscribed this client above first, so the redraw
           //   reaches it — even for an idle session with no buffered output.
-          //   Never Ctrl+L (that clears the screen).
+          //   First replay persistent terminal modes that were negotiated before
+          //   this xterm existed. Without Copilot's 1003/1006 mouse modes, xterm
+          //   takes ownership of drag selection instead of forwarding it to
+          //   Copilot's timeline selector. Never Ctrl+L (that clears the screen).
           if (existingPty?.cliType === 'copilot') {
+            const protocolReplay = ptyManager.getTerminalProtocolReplay(sessionId);
+            if (protocolReplay) {
+              socket.emit('terminal:data', { sessionId, data: protocolReplay });
+            }
             setTimeout(() => ptyManager.forceRepaint(sessionId), 75);
           } else if (existingPty && existingPty.outputBuffer.length > 0) {
             const replay = existingPty.outputBuffer.join('');

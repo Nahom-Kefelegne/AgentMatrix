@@ -6,11 +6,15 @@ import { useXterm } from '@/lib/hooks/useXterm';
 import type { NavigationRequest } from '@/lib/navigation/types';
 import { TERMINAL_THEME } from '@/lib/terminalTheme';
 import { perfEvent } from '@/lib/perf';
-import { getCleanTerminalSelection } from '@/lib/terminal-copy';
 import {
-  installAlternateScreenSelectionAutoScroll,
-  type SelectionScrollDirection,
-} from '@/lib/terminal-selection-autoscroll';
+  decodeOsc52Clipboard,
+  getCleanTerminalSelection,
+} from '@/lib/terminal-copy';
+import {
+  createTerminalProtocolState,
+  isTerminalMouseTrackingActive,
+  updateTerminalProtocolState,
+} from '@/lib/terminal-protocol';
 
 // Copilot's timeline scrolling has two regimes:
 //
@@ -33,9 +37,7 @@ import {
 // mouse tracking on (line-by-line), else fall back to PgUp/PgDn pages.
 const PAGE_UP = '\x1b[5~';
 const PAGE_DOWN = '\x1b[6~';
-// Mouse-tracking DECSET modes that make Copilot accept SGR mouse reports. 1006
-// (SGR encoding) rides alongside these but isn't a tracking mode on its own.
-const MOUSE_TRACKING_MODES = new Set(['1000', '1002', '1003']);
+const XTERM_MOUSE_DISABLE = '\x1b[?1000;1002;1003;1006l';
 // SGR mouse-wheel translation (mouse-tracking-on path). In the live 27-row TUI,
 // one report shifts the timeline region by 6 rows while fixed chrome stays put.
 // Coordinates are irrelevant to Copilot (verified), so we report over cell 1;1.
@@ -50,22 +52,10 @@ const WHEEL_SGR_MAX_PER_EVENT = 3; // cap reports per DOM event so a flick can't
 const WHEEL_PAGE_STEP_PX = 130; // accumulated wheel delta (px) needed per page
 const WHEEL_LINE_DELTA_PX = 16; // px-per-line when a device reports line deltas
 const WHEEL_FIRE_COOLDOWN_MS = 170; // min gap between page emits (~6 pages/s cap)
-
-// Scan a raw PTY chunk for mouse-tracking DECSET (…h) / DECRST (…l) toggles and
-// return the resulting state, or null if the chunk toggles none. Copilot may
-// group modes (e.g. CSI ? 1002 ; 1006 h), so split each parameter list.
-function scanMouseTracking(chunk: string): boolean | null {
-  let state: boolean | null = null;
-  const re = /\x1b\[\?([0-9;]+)([hl])/g;
-  let m: RegExpExecArray | null;
-  while ((m = re.exec(chunk)) !== null) {
-    const enable = m[2] === 'h';
-    for (const p of m[1].split(';')) {
-      if (MOUSE_TRACKING_MODES.has(p)) state = enable;
-    }
-  }
-  return state;
-}
+const MODIFIER_KEYS = new Set([
+  'Alt', 'AltGraph', 'Control', 'Meta', 'Shift',
+  'CapsLock', 'NumLock', 'ScrollLock',
+]);
 
 // Shift+Enter → insert a newline in the prompt instead of submitting. xterm.js
 // doesn't implement modifyOtherKeys/kitty, so left alone it sends a bare CR for
@@ -107,19 +97,12 @@ export default function CopilotTerminalPanel({ sessionId, sessionName, cwd, visi
   statusRef.current = status;
   const [initializing, setInitializing] = useState(false);
 
-  // Whether Copilot currently has SGR mouse tracking enabled. Defaults to TRUE
-  // because the app always launches Copilot with `--mouse` (see CopilotProvider
-  // buildSpawnArgs/buildResumeArgs), so mouse tracking is on for every session.
-  // We can't rely on catching the startup DECSET `1003h` live: it's emitted once
-  // at process start, and when the panel attaches to an already-running session
-  // the server seeds via SIGWINCH repaint (not a buffer replay), which never
-  // re-emits it. scanMouseTracking still flips this off if Copilot explicitly
-  // disables mouse mode (e.g. on teardown).
-  const mouseTrackingRef = useRef(true);
-  // Carries the tail of the previous PTY chunk so a mouse DECSET split across a
-  // chunk boundary (e.g. "\x1b[?100" + "3h") is still detected.
-  const mouseScanTailRef = useRef('');
-  const selectionAutoScrollCleanupRef = useRef<(() => void) | null>(null);
+  // A newly mounted xterm receives the current mode state from the PTY manager
+  // before Copilot repaints. Normal drag then belongs to Copilot's logical
+  // timeline selector; Option/Shift remains xterm's explicit local override.
+  const terminalProtocolRef = useRef(createTerminalProtocolState());
+  const osc52DisposableRef = useRef<{ dispose(): void } | null>(null);
+  const appSelectionTextRef = useRef('');
 
   // Out-of-band (ACP) query activity echoed into the console for transparency.
   const [acpLog, setAcpLog] = useState<AcpActivity[]>([]);
@@ -131,6 +114,16 @@ export default function CopilotTerminalPanel({ sessionId, sessionName, cwd, visi
     if (electronAPI?.terminalWrite) electronAPI.terminalWrite(sessionId, data);
     else socketRef.current?.emit('terminal:input', { sessionId, data });
   }, [sessionId, socketRef]);
+
+  const writeClipboard = useCallback((text: string) => {
+    if (!navigator.clipboard?.writeText) {
+      console.warn('[terminal] Clipboard writes are unavailable');
+      return;
+    }
+    void navigator.clipboard.writeText(text).catch(error => {
+      console.warn('[terminal] Clipboard write failed', error);
+    });
+  }, []);
 
   // Only the visible/owning panel drives PTY size, so a hidden modal panel and
   // an open fullscreen panel for the same session don't fight over the single
@@ -148,62 +141,63 @@ export default function CopilotTerminalPanel({ sessionId, sessionName, cwd, visi
   const customKeyHandler = useCallback((e: KeyboardEvent, term: any) => {
     // Shift+Enter — insert a newline in the prompt rather than submit.
     if (e.key === 'Enter' && e.shiftKey) {
-      if (e.type === 'keydown') writeInput(SHIFT_ENTER);
+      if (e.type === 'keydown') {
+        appSelectionTextRef.current = '';
+        writeInput(SHIFT_ENTER);
+      }
       return false;
     }
     if (e.type === 'keydown' && e.code === 'KeyC' && e.shiftKey && e.ctrlKey) {
-      const sel = getCleanTerminalSelection(term);
-      if (sel) navigator.clipboard.writeText(sel);
+      const sel = getCleanTerminalSelection(term) || appSelectionTextRef.current;
+      if (sel) writeClipboard(sel);
       return false;
     }
     if (e.code === 'KeyV' && e.shiftKey && e.ctrlKey) {
       if (e.type === 'keydown') {
+        appSelectionTextRef.current = '';
         e.preventDefault();
         navigator.clipboard.readText().then(text => { if (text) writeInput(text); });
       }
       return false;
     }
     if (e.type === 'keydown' && e.code === 'KeyC' && e.metaKey && !e.shiftKey) {
-      const sel = getCleanTerminalSelection(term);
-      if (sel) { navigator.clipboard.writeText(sel); return false; }
+      const sel = getCleanTerminalSelection(term) || appSelectionTextRef.current;
+      if (sel) {
+        writeClipboard(sel);
+        return false;
+      }
       return true;
     }
+    if (e.type === 'keydown' && !MODIFIER_KEYS.has(e.key)) {
+      appSelectionTextRef.current = '';
+    }
     return true;
-  }, [writeInput]);
+  }, [writeClipboard, writeInput]);
 
   // Resize BEFORE resume so Copilot's SIGWINCH redraw targets the real xterm
   // dimensions (replaying at stale dims paints orphan borders / phantom text).
   const handleReady = useCallback((term: any) => {
     const socket = socketRef.current;
     if (!socket) return;
-    selectionAutoScrollCleanupRef.current?.();
-    selectionAutoScrollCleanupRef.current = readOnly
-      ? null
-      : installAlternateScreenSelectionAutoScroll({
-          terminal: term,
-          expectedShift: () => mouseTrackingRef.current ? 6 : undefined,
-          scroll: (direction: SelectionScrollDirection) => {
-            const sequence = mouseTrackingRef.current
-              ? direction < 0 ? SGR_WHEEL_UP : SGR_WHEEL_DOWN
-              : direction < 0 ? PAGE_UP : PAGE_DOWN;
-            writeInput(sequence);
-          },
-        });
+    osc52DisposableRef.current?.dispose();
+    osc52DisposableRef.current = term.parser.registerOscHandler(52, (data: string) => {
+      const text = decodeOsc52Clipboard(data);
+      if (text === null) return true;
+      appSelectionTextRef.current = text;
+      writeClipboard(text);
+      return true;
+    });
     socket.emit('terminal:resize', { sessionId, cols: term.cols, rows: term.rows });
     setStatus('connecting');
     socket.emit('terminal:resume' as any, { sessionId });
-  }, [readOnly, sessionId, socketRef, writeInput]);
+  }, [sessionId, socketRef, writeClipboard]);
 
   useEffect(() => {
-    if (readOnly) {
-      selectionAutoScrollCleanupRef.current?.();
-      selectionAutoScrollCleanupRef.current = null;
-    }
     return () => {
-      selectionAutoScrollCleanupRef.current?.();
-      selectionAutoScrollCleanupRef.current = null;
+      osc52DisposableRef.current?.dispose();
+      osc52DisposableRef.current = null;
     };
-  }, [readOnly]);
+  }, []);
 
   const { containerRef, write, fit, focus, getTerminal } = useXterm({
     theme: TERMINAL_THEME,
@@ -213,6 +207,8 @@ export default function CopilotTerminalPanel({ sessionId, sessionName, cwd, visi
     // xterm's scrollback buffer is unused. Keep it minimal (main-screen
     // startup output only).
     scrollback: 1000,
+    // Normal drag is Copilot-owned. Option-drag explicitly selects the current
+    // xterm screen instead, matching native terminal modifier behavior.
     macOptionClickForcesSelection: true,
     readOnly,
     onData: writeInput,
@@ -222,6 +218,18 @@ export default function CopilotTerminalPanel({ sessionId, sessionName, cwd, visi
     sessionId,
     onNavigate,
   });
+
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container) return;
+    const clearAppSelection = () => {
+      appSelectionTextRef.current = '';
+    };
+    container.addEventListener('mousedown', clearAppSelection, { capture: true });
+    return () => {
+      container.removeEventListener('mousedown', clearAppSelection, { capture: true });
+    };
+  }, [containerRef]);
 
   // Session initializing state (summary generation on startup).
   useEffect(() => {
@@ -271,12 +279,22 @@ export default function CopilotTerminalPanel({ sessionId, sessionName, cwd, visi
     const handleData = (msg: { sessionId: string; data: string }) => {
       if (msg.sessionId !== sessionId) return;
       perfEvent('terminal:data', msg.data.length);
-      // Track Copilot's mouse-tracking state (prepend the previous chunk's tail
-      // so a DECSET split across chunks is still caught) to pick the wheel path.
-      const ms = scanMouseTracking(mouseScanTailRef.current + msg.data);
-      if (ms !== null) mouseTrackingRef.current = ms;
-      mouseScanTailRef.current = msg.data.slice(-16);
+      const previousProtocol = terminalProtocolRef.current;
+      const nextProtocol = updateTerminalProtocolState(
+        previousProtocol,
+        msg.data,
+      );
+      terminalProtocolRef.current = nextProtocol;
       write(msg.data);
+      // Read-only consoles have no PTY input sink. Keep xterm's local selection
+      // enabled instead of trapping drag events in application mouse mode.
+      if (
+        readOnly
+        && isTerminalMouseTrackingActive(nextProtocol)
+        && nextProtocol.mouseModeRevision !== previousProtocol.mouseModeRevision
+      ) {
+        write(XTERM_MOUSE_DISABLE);
+      }
       if (statusRef.current !== 'connected') setStatus('connected');
     };
     const handleExit = (msg: { sessionId: string; exitCode: number }) => {
@@ -291,7 +309,7 @@ export default function CopilotTerminalPanel({ sessionId, sessionName, cwd, visi
       socket.off('terminal:data' as any, handleData);
       socket.off('terminal:exit' as any, handleExit);
     };
-  }, [sessionId, socketRef, write]);
+  }, [readOnly, sessionId, socketRef, write]);
 
   // Mouse-wheel handling. When Copilot has mouse tracking on (launched with
   // --mouse), translate the wheel into SGR mouse-wheel reports so Copilot
@@ -324,7 +342,7 @@ export default function CopilotTerminalPanel({ sessionId, sessionName, cwd, visi
       }
       accum += Math.abs(px);
 
-      if (mouseTrackingRef.current) {
+      if (isTerminalMouseTrackingActive(terminalProtocolRef.current)) {
         // Line-by-line: emit one SGR wheel report per WHEEL_SGR_STEP_PX of delta
         // (each report ≈ 3 timeline lines), capped so a fast flick can't blast.
         let count = Math.floor(accum / WHEEL_SGR_STEP_PX);
