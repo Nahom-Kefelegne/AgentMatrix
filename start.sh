@@ -11,7 +11,7 @@ cd "$(dirname "$0")" || exit 1
 # block. Keep every npm request on the Microsoft proxy and disable background
 # registry checks.
 export NPM_CONFIG_REGISTRY="https://packagefeedproxy.microsoft.io/npm/"
-export NPM_CONFIG_REPLACE_REGISTRY_HOST="never"
+export NPM_CONFIG_REPLACE_REGISTRY_HOST="npmjs"
 export NPM_CONFIG_UPDATE_NOTIFIER="false"
 export NPM_CONFIG_AUDIT="false"
 export NPM_CONFIG_FUND="false"
@@ -88,7 +88,7 @@ install_dependencies() {
     echo "Installing dependencies from the Microsoft mirror..."
     npm --no-update-notifier ci \
         --registry="$NPM_CONFIG_REGISTRY" \
-        --replace-registry-host=never \
+        --replace-registry-host=npmjs \
         --prefer-offline \
         --fetch-timeout=30000 \
         --fetch-retry-maxtimeout=30000 \

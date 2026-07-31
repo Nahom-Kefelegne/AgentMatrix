@@ -6,7 +6,7 @@
 set -e
 
 export NPM_CONFIG_REGISTRY="https://packagefeedproxy.microsoft.io/npm/"
-export NPM_CONFIG_REPLACE_REGISTRY_HOST="never"
+export NPM_CONFIG_REPLACE_REGISTRY_HOST="npmjs"
 export NPM_CONFIG_UPDATE_NOTIFIER="false"
 export NPM_CONFIG_AUDIT="false"
 export NPM_CONFIG_FUND="false"
@@ -163,7 +163,7 @@ echo -e "${BLUE}Installing dependencies...${NC}"
 npm_install_resilient() {
     npm --no-update-notifier ci \
       --registry="$NPM_CONFIG_REGISTRY" \
-      --replace-registry-host=never \
+      --replace-registry-host=npmjs \
       --prefer-offline \
       --fetch-timeout=30000 --fetch-retry-maxtimeout=30000 --fetch-retries=1 \
       --no-audit --no-fund --no-progress

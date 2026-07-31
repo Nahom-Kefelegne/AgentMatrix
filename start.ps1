@@ -8,7 +8,7 @@ Set-Location (Split-Path -Parent $MyInvocation.MyCommand.Path)
 # Keep npm on Microsoft's approved proxy and suppress npm's launch-time update
 # check, which otherwise triggers the corporate NPM URL block notification.
 $env:NPM_CONFIG_REGISTRY = "https://packagefeedproxy.microsoft.io/npm/"
-$env:NPM_CONFIG_REPLACE_REGISTRY_HOST = "never"
+$env:NPM_CONFIG_REPLACE_REGISTRY_HOST = "npmjs"
 $env:NPM_CONFIG_UPDATE_NOTIFIER = "false"
 $env:NPM_CONFIG_AUDIT = "false"
 $env:NPM_CONFIG_FUND = "false"
@@ -53,7 +53,7 @@ function Install-AgentMatrixDependencies {
     Write-Host "Installing dependencies from the Microsoft mirror..." -ForegroundColor Blue
     & npm --no-update-notifier ci `
         --registry="$env:NPM_CONFIG_REGISTRY" `
-        --replace-registry-host=never `
+        --replace-registry-host=npmjs `
         --prefer-offline `
         --fetch-timeout=30000 `
         --fetch-retry-maxtimeout=30000 `
@@ -137,4 +137,29 @@ if ($needsDependencies) {
     Write-Host "  Dependencies match package-lock.json" -ForegroundColor Green
 }
 
-npm --no-update-notifier run electron:dev
+# Normal startup does not need npm after dependency validation. Invoke the
+# checked-in local tools directly so npm cannot perform any registry/update
+# request merely because Agent Matrix was launched.
+$esbuild = Join-Path (Get-Location) "node_modules\.bin\esbuild.cmd"
+$electron = Join-Path (Get-Location) "node_modules\.bin\electron.cmd"
+if (-not (Test-Path $esbuild) -or -not (Test-Path $electron)) {
+    Write-Host "  Local Electron tools are missing after dependency validation." -ForegroundColor Red
+    Write-Host "  Run .\update.ps1, then retry." -ForegroundColor Yellow
+    exit 1
+}
+
+Write-Host "Building Electron preload..." -ForegroundColor Blue
+& $esbuild electron/preload.ts `
+    --bundle `
+    --platform=node `
+    --format=cjs `
+    --external:electron `
+    --outfile=electron/preload.js
+if ($LASTEXITCODE -ne 0) {
+    Write-Host "  Electron preload build failed." -ForegroundColor Red
+    exit $LASTEXITCODE
+}
+
+Write-Host "Starting Agent Matrix..." -ForegroundColor Blue
+& $electron .
+exit $LASTEXITCODE

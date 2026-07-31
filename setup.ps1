@@ -5,7 +5,7 @@
 $ErrorActionPreference = "Stop"
 
 $env:NPM_CONFIG_REGISTRY = "https://packagefeedproxy.microsoft.io/npm/"
-$env:NPM_CONFIG_REPLACE_REGISTRY_HOST = "never"
+$env:NPM_CONFIG_REPLACE_REGISTRY_HOST = "npmjs"
 $env:NPM_CONFIG_UPDATE_NOTIFIER = "false"
 $env:NPM_CONFIG_AUDIT = "false"
 $env:NPM_CONFIG_FUND = "false"
@@ -160,7 +160,7 @@ Write-Host "Installing dependencies..." -ForegroundColor Blue
 function Invoke-NpmInstallResilient {
     npm --no-update-notifier ci `
         --registry="$env:NPM_CONFIG_REGISTRY" `
-        --replace-registry-host=never `
+        --replace-registry-host=npmjs `
         --prefer-offline `
         --fetch-timeout=30000 `
         --fetch-retry-maxtimeout=30000 `
