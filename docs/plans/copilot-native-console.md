@@ -1,6 +1,9 @@
-# Copilot-Native Console — Build Plan
+# Copilot-Native Console - Implementation Plan and History
 
-Status: **implemented** · Branch: `copilot-refactor-phase0`
+Status: **implemented**
+
+Authoritative as-built design:
+`docs/design/copilot-terminal.md`
 
 AgentMatrix is going **Copilot-first** (Claude access is ending). The embedded
 terminal console was built for Claude's inline-scrolling TUI; Copilot renders very
@@ -8,8 +11,9 @@ differently, so the console needs a targeted rebuild rather than patches. This p
 covers (1) the Copilot-native console and (2) how it integrates cleanly with the rest
 of the app.
 
-Related design docs: `docs/design/terminal-fitting.md`, `docs/design/electron-pty.md`,
-`docs/design/frontend-ui.md`, `docs/design/copilot-first-design.md`,
+Related design docs: `docs/design/copilot-terminal.md`,
+`docs/design/terminal-fitting.md`, `docs/design/electron-pty.md`,
+`docs/design/frontend-ui.md`, `docs/design/copilot-first-design.md`, and
 `docs/design/cli-provider-architecture.md`.
 
 ---
@@ -324,5 +328,7 @@ for Claude. **Findings:**
   stagger; `OrphanReaper.ts` synchronous kill + Copilot stale-lock cleanup.
 - Nothing commits without user go-ahead.
 
-Once Track A ships, write a proper design doc at `docs/design/copilot-terminal.md`
-describing the as-built console.
+The as-built architecture is documented in
+`docs/design/copilot-terminal.md`, including the later native
+Copilot-owned selection/autoscroll design that replaced the synthetic
+screen-snapshot selection bridge.

@@ -253,28 +253,39 @@ Two fullscreen options:
 
 ## Terminal System
 
+The authoritative Copilot terminal design is
+`docs/design/copilot-terminal.md`. This section summarizes the frontend-facing
+contract.
+
 ```mermaid
 sequenceDiagram
     participant UI as SessionConsole
+    participant XT as xterm.js
+    participant IPC as Electron IPC
     participant Socket as Socket.io
     participant PTY as PTY Manager (Electron)
 
     UI->>UI: Dynamic import xterm.js + FitAddon + WebglAddon
+    UI->>XT: Open and fit terminal
+    UI->>XT: Register OSC 52 clipboard handler
+    UI->>Socket: emit("terminal:resize", real dimensions)
     UI->>Socket: emit("terminal:resume", {sessionId})
     Socket->>PTY: Attach to existing PTY
-    PTY-->>Socket: Output buffer replay (300 chunks)
+    PTY-->>Socket: Copilot mode replay, then SIGWINCH repaint
     Socket-->>UI: "terminal:data" events
-    UI->>UI: terminal.write(data) or legacy stripClear(data)
+    UI->>XT: terminal.write(raw data)
 
     Note over UI: User types
-    UI->>Socket: emit("terminal:input", {sessionId, data})
-    Socket->>PTY: Write to PTY stdin
+    XT->>UI: onData(encoded input)
+    UI->>IPC: terminalWrite(sessionId, data)
+    IPC->>PTY: Write to PTY stdin
+    Note over UI,Socket: Socket terminal:input is the fallback
 
     Note over UI: Shift+Enter
-    UI->>Socket: emit("terminal:input", {sessionId, data: "\\x1b[13;2u"})
+    UI->>PTY: Copilot/Claude-specific modified Enter sequence
 
     Note over UI: Window resize
-    UI->>UI: FitAddon.fit()
+    UI->>XT: FitAddon.fit()
     UI->>Socket: emit("terminal:resize", {sessionId, cols, rows})
     Socket->>PTY: pty.resize(cols, rows)
 
@@ -285,15 +296,17 @@ sequenceDiagram
 ### xterm.js Configuration
 
 - **Terminal**: fontSize 16, Menlo/Monaco font, custom dark theme. Legacy Claude panels use larger scrollback; Copilot's alt-screen panel keeps xterm scrollback minimal because Copilot owns its timeline.
-- **Renderer ladder**: WebGL where appropriate, Canvas fallback/preference on Windows/RDP, DOM as last resort.
+- **Renderer ladder**: WebGL then Canvas on macOS/Linux; Windows intentionally uses DOM so ClearType/RDP text stays crisp.
 - **FitAddon**: Auto-fits terminal to container, debounced ResizeObserver + window resize handler
-- **CSS**: Custom scrollbar styling injected via `<style>` tag
+- **CSS**: xterm CSS is loaded once by the shared hook.
 - **Clear stripping**: Legacy `TerminalPanel` removes select clear sequences for Claude history. `CopilotTerminalPanel` is raw passthrough and never strips alt-screen/cursor/erase bytes.
+- **Warm attach**: Copilot's persistent alternate-screen, bracketed-paste, and mouse modes are replayed locally before a SIGWINCH repaint. Historical Copilot PTY output is not replayed.
 
 ### Keyboard Handling
 
 - **Shift+Enter**: Intercepted via `attachCustomKeyEventHandler`; Claude and Copilot use their provider-specific encodings for multiline input.
-- **All other keys**: Handled by xterm's default `onData` handler, forwarded to PTY
+- **Copy/paste**: Host conventions are intercepted; Copilot logical selection arrives through OSC 52.
+- **All other keys**: Handled by xterm's default `onData` handler and forwarded through direct Electron IPC, with Socket.io fallback.
 
 ### Copilot mouse-wheel handling
 
@@ -302,6 +315,13 @@ mouse tracking (`1003` + `1006`). `CopilotTerminalPanel` tracks DECSET/DECRST
 mouse-mode toggles and translates DOM wheel events into SGR wheel reports for
 line-by-line timeline scrolling. If mouse tracking is off, it falls back to
 PgUp/PgDn page events.
+
+Normal mouse drag is not synthesized by AgentMatrix. xterm forwards SGR
+down/move/up reports to Copilot, which owns logical conversation selection,
+fixed-chrome boundaries, edge autoscroll, and the copied text. Option-drag on
+macOS and Shift-drag elsewhere force a local current-screen xterm selection.
+Read-only panels locally disable application mouse reporting so normal selection
+continues to work without a PTY input sink.
 
 ### Session Initializing Overlay
 

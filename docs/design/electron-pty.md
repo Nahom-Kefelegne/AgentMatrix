@@ -33,6 +33,9 @@ Agent Matrix is an Electron application that wraps a Next.js web app and manages
 2. **PTY layer** (`electron/pty/`) -- spawns and manages provider-backed CLI processes
 3. **Bridge layer** (`electron/terminalBridge.ts`) -- connects browser xterm.js terminals to PTY processes via Socket.io
 
+The detailed Copilot renderer/terminal protocol contract is documented in
+`docs/design/copilot-terminal.md`.
+
 ```mermaid
 graph TB
     subgraph Electron Main Process
@@ -229,10 +232,14 @@ The `PtyManager` class is the central coordinator for all provider-backed CLI PT
 interface PtySession {
   id: string;
   pty: IPty;                              // node-pty process handle
+  cliType: CliType;
   status: 'starting' | 'ready' | 'busy' | 'closed';
   currentState: PtyState;                 // 'busy' | 'ready'
   contextUsage: number | null;            // % used (0-100)
   outputBuffer: string[];                 // last 500 chunks (trimmed to 300)
+  terminalProtocolState: TerminalProtocolState;
+  cols: number;
+  rows: number;
   subscribers: Set<(data: string) => void>;
   onReady: (() => void) | null;
   onStateChange: ((info: StateInfo) => void) | null;
@@ -304,6 +311,14 @@ The `CLAUDECODE` environment variable is removed from the spawned process to avo
 For Copilot sessions, `COPILOT_HOOK_ALLOW_LOCALHOST=1` is added so the app's
 localhost HTTP hooks are delivered.
 
+Managed Copilot sessions also receive AgentMatrix-owned npm/npx shims first on
+`PATH`. The shims force public npm traffic through the Microsoft package proxy
+for default and scoped registries, rewrite public npm lockfile hosts, disable
+npm update/audit/fund traffic, and use cached Teams MCP launchers offline. An
+uncached Teams launcher may retain Agency's authenticated `pkgs.dev.azure.com`
+Azure Artifacts registry; other caller registry overrides and explicit public
+npm tarball URLs are rejected or removed.
+
 Default PTY dimensions: 80 cols x 24 rows. The terminal panel resizes the PTY when it opens via `terminal:resize`.
 
 ### Resuming a Session
@@ -346,13 +361,16 @@ For Copilot, `findSessionCwd` is O(1): it opens
 
 Each `PtySession` maintains an `outputBuffer` of the last 300-500 output chunks. On every data event:
 
-1. The chunk is appended to the buffer (trimmed to 300 if exceeds 500)
-2. Every subscriber in `PtySession.subscribers` is invoked (Socket.io emitters,
+1. Persistent terminal modes are updated from the raw chunk. This tracks the
+   alternate screen, bracketed paste, active mouse protocol, and SGR mouse
+   encoding needed by a late-attaching Copilot xterm.
+2. The chunk is appended to the buffer (trimmed to 300 if exceeds 500)
+3. Every subscriber in `PtySession.subscribers` is invoked (Socket.io emitters,
    trust/startup monitors, context monitors, etc.)
-3. Context usage is parsed from output when the provider supports TUI parsing
+4. Context usage is parsed from output when the provider supports TUI parsing
    (Claude), or read asynchronously from provider-owned state on ready transitions
    (Copilot's `session-store.db`)
-4. State transitions are detected:
+5. State transitions are detected:
    - If `provider.detectPromptReady()` detects the prompt -> state becomes `ready`
    - If a `pendingPrompt` is queued, it's sent immediately and state stays `busy`
    - If state was `ready` and new non-prompt output arrives -> state becomes `busy`
@@ -592,13 +610,22 @@ The 8-second delay allows the walk-to-exit animation to complete (shocked: 1s + 
 When a client reconnects to an existing session (`terminal:resume`):
 
 1. If PTY already exists in memory:
-   - Replay the `outputBuffer` (all buffered chunks joined) so the terminal isn't blank
-   - Re-attach the `onOutput` callback to the new socket
+   - Attach the output subscriber before seeding the renderer.
+   - For Claude, replay the bounded output buffer.
+   - For Copilot, do not replay historical screen output. Emit the tracked
+     terminal modes to the renderer only, then nudge the PTY dimensions so
+     Copilot performs a fresh SIGWINCH redraw at the current size.
+   - The mode replay restores alternate screen (`1049`), bracketed paste
+     (`2004`), mouse protocol (`1000`/`1002`/`1003`), and SGR encoding (`1006`)
+     that may have been emitted before the new xterm existed.
 2. If PTY doesn't exist (fresh resume from provider session store):
    - Find CWD via provider, create session entry, emit `SESSION_START`
    - Spawn via `ptyManager.spawnResume()`
    - Wire all callbacks
    - Save to auto-resume list
+
+Copilot's warm-attach ordering and selection ownership are detailed in
+`docs/design/copilot-terminal.md`.
 
 ---
 
