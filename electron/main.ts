@@ -19,6 +19,7 @@ import { ensureCopilotHooksConfig } from './services/copilotHooksConfig';
 import { ensureAgentMatrixMcpConfig } from './services/mcpConfig';
 import { getProvider } from '../lib/cli';
 import { setRendererApiToken } from '../lib/navigation/rendererAuth';
+import { getCanvasRequestSnapshot } from '../lib/canvas/requestStore';
 
 // Dev vs prod is determined by whether Electron is running from a packaged
 // app bundle — NOT by NODE_ENV, which is unset when a packaged app is
@@ -215,6 +216,7 @@ async function startServer(): Promise<void> {
         const { getOrchestratorId } = require('./services/OrchestratorService');
         const orchId = getOrchestratorId();
         if (orchId) socket.emit('orchestrator:id', { sessionId: orchId });
+        socket.emit('canvas:snapshot', getCanvasRequestSnapshot());
       });
 
       setupTerminalBridge(io!, ptyManager);

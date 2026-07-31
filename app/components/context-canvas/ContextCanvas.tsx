@@ -1,7 +1,7 @@
 'use client';
 
 import dynamic from 'next/dynamic';
-import { useCallback, useRef } from 'react';
+import { useCallback, useMemo, useRef } from 'react';
 import {
   ArrowLeft,
   ArrowRight,
@@ -13,7 +13,15 @@ import {
   PinOff,
   Search,
 } from 'lucide-react';
-import type { NavigationRequest } from '@/lib/navigation/types';
+import {
+  artifactCreatedLabel,
+  artifactIsRenderable,
+  artifactSourceLabel,
+  artifactSummary,
+  artifactTitle,
+  artifactRenderer,
+  navigationRequestForArtifact,
+} from './canvasArtifact';
 import type { ContextCanvasController } from './useContextCanvas';
 
 const CodePreview = dynamic(() => import('./CodePreview'), {
@@ -43,15 +51,26 @@ interface ContextCanvasProps {
   controller: ContextCanvasController;
 }
 
-function canvasTitle(request: NavigationRequest | null): string {
-  if (!request) return 'Context Canvas';
-  if (request.action === 'open_review' || request.action === 'open_diff') return 'Session Review';
-  if (request.action === 'open_symbol') return request.query ? `Symbol: ${request.query}` : 'Symbol Search';
-  if (request.action === 'show_search_results') return request.query ? `Search: ${request.query}` : 'Repository Search';
-  return request.target?.path ?? 'Code Preview';
-}
-
-function CanvasEmpty() {
+function CanvasEmpty({
+  queuedCount,
+  hasRenderableQueue,
+}: {
+  queuedCount: number;
+  hasRenderableQueue: boolean;
+}) {
+  if (queuedCount > 0) {
+    return (
+      <div className="cc-empty">
+        <Code2 size={24} aria-hidden="true" />
+        <strong>{queuedCount} Queued Canvas {queuedCount === 1 ? 'Artifact' : 'Artifacts'}</strong>
+        <span>
+          {hasRenderableQueue
+            ? 'Open the queued item from the Canvas toolbar.'
+            : 'These artifacts are retained and will become available as their Canvas components are added.'}
+        </span>
+      </div>
+    );
+  }
   return (
     <div className="cc-empty">
       <Code2 size={24} aria-hidden="true" />
@@ -65,7 +84,15 @@ export default function ContextCanvas({ sessionId, sessionName, cwd, controller 
   const canvasRef = useRef<HTMLElement>(null);
   const frameRef = useRef<number | null>(null);
   const { state } = controller;
-  const request = state.request;
+  const artifact = state.activeArtifact;
+  const request = useMemo(
+    () => navigationRequestForArtifact(artifact),
+    [artifact],
+  );
+  const renderer = artifact ? artifactRenderer(artifact) : null;
+  const title = artifactTitle(artifact);
+  const createdLabel = artifactCreatedLabel(artifact);
+  const nextQueued = state.queuedArtifacts.find(artifactIsRenderable);
 
   const handleResizeStart = useCallback((event: React.PointerEvent<HTMLButtonElement>) => {
     const canvas = canvasRef.current;
@@ -141,19 +168,24 @@ export default function ContextCanvas({ sessionId, sessionName, cwd, controller 
 
         <div className="cc-title">
           <span className="cc-title-label">Context Canvas</span>
-          <strong title={canvasTitle(request)}>{canvasTitle(request)}</strong>
+          <strong title={title}>{title}</strong>
         </div>
 
         <div className="cc-toolbar-actions">
-          {state.queuedRequests.length > 0 ? (
+          {state.queuedArtifacts.length > 0 ? (
             <button
               type="button"
               className="cc-queued"
-              onClick={() => controller.showQueued(state.queuedRequests[0].requestRef)}
-              aria-label={`Show ${state.queuedRequests.length} queued navigation requests`}
-              title="Show Queued Request"
+              onClick={() => {
+                if (nextQueued) controller.showQueued(nextQueued.request.requestRef);
+              }}
+              disabled={!nextQueued}
+              aria-label={nextQueued
+                ? `Show next of ${state.queuedArtifacts.length} queued Canvas artifacts`
+                : `${state.queuedArtifacts.length} queued Canvas artifacts await their components`}
+              title={nextQueued ? 'Show Queued Request' : 'Queued artifacts await their components'}
             >
-              {state.queuedRequests.length}
+              {state.queuedArtifacts.length}
             </button>
           ) : null}
           <button
@@ -173,30 +205,41 @@ export default function ContextCanvas({ sessionId, sessionName, cwd, controller 
       </header>
 
       <div className="cc-provenance">
-        <span>{
-          request?.source === 'mcp'
-            ? 'Opened by Session'
-            : request?.source === 'session_event'
-              ? 'Auto-preview from Session'
-              : request?.source === 'terminal_link'
-                ? 'Terminal Link'
-                : 'Developer Opened'
-        }</span>
-        <span>{request?.intent.summary ?? 'Session-scoped preview'}</span>
-        {state.disposition === 'pinned' ? <span><LockKeyhole size={11} aria-hidden="true" /> Pinned</span> : null}
+        <span className="cc-provenance-source">{artifactSourceLabel(artifact)}</span>
+        <span className="cc-provenance-summary">{artifactSummary(artifact)}</span>
+        {createdLabel ? (
+          <time
+            className="cc-provenance-time"
+            dateTime={new Date(artifact!.request.createdAt).toISOString()}
+            suppressHydrationWarning
+          >
+            {createdLabel}
+          </time>
+        ) : null}
+        {state.disposition === 'pinned' ? (
+          <span className="cc-provenance-pin">
+            <LockKeyhole size={11} aria-hidden="true" /> Pinned
+          </span>
+        ) : null}
       </div>
 
       <div className="cc-content">
-        {!request ? <CanvasEmpty /> : null}
-        {request && state.mode === 'code' ? <CodePreview request={request} /> : null}
-        {request && state.mode === 'document' ? (
+        {!artifact ? (
+          <CanvasEmpty
+            queuedCount={state.queuedArtifacts.length}
+            hasRenderableQueue={Boolean(nextQueued)}
+          />
+        ) : null}
+        {request && renderer === 'code' ? <CodePreview request={request} /> : null}
+        {request && renderer === 'document' ? (
           <MarkdownPreview request={request} controller={controller} />
         ) : null}
-        {request && state.mode === 'search' ? (
+        {request && renderer === 'search' ? (
           <SearchResults request={request} onOpenFile={controller.openFile} />
         ) : null}
-        {request && (state.mode === 'diff' || state.mode === 'review') ? (
+        {request && (renderer === 'diff' || renderer === 'review') ? (
           <DiffCanvas
+            key={request.requestRef}
             sessionId={sessionId}
             sessionName={sessionName}
             cwd={cwd}

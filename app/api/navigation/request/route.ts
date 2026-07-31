@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { NavigationServiceError } from '@/lib/navigation/NavigationService';
 import { createNavigationRequest, emitNavigationRequested } from '@/lib/navigation/requests';
 import { verifyNavigationCapability } from '@/lib/navigation/rootRegistry';
+import { getSession } from '@/lib/state/sessionStore';
 
 export const runtime = 'nodejs';
 
@@ -21,6 +22,12 @@ export async function POST(request: Request) {
       return NextResponse.json(
         { error: { code: 'UNAUTHORIZED_MCP_IDENTITY', message: 'A managed MCP capability is required.' } },
         { status: 401 },
+      );
+    }
+    if (!getSession(sessionId)) {
+      return NextResponse.json(
+        { error: { code: 'SESSION_NOT_FOUND', message: 'The managed session is no longer active.' } },
+        { status: 404 },
       );
     }
     const body = await request.json() as Record<string, unknown>;
@@ -43,6 +50,15 @@ export async function POST(request: Request) {
       intentKind: 'agent_progress',
       signal: request.signal,
     });
+    if (
+      !getSession(sessionId)
+      || !verifyNavigationCapability(sessionId, capability)
+    ) {
+      return NextResponse.json(
+        { error: { code: 'SESSION_ENDED', message: 'The managed session ended before navigation was accepted.' } },
+        { status: 410 },
+      );
+    }
     const result = emitNavigationRequested(navigation);
     return NextResponse.json({ request: navigation, result }, { status: 202 });
   } catch (error) {

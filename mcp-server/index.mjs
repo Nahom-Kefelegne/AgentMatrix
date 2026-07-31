@@ -21,7 +21,7 @@ const sessionId = process.env.AGENTMATRIX_SESSION_ID || process.env.CLAUDE_SESSI
 const capability = process.env.AGENTMATRIX_NAVIGATION_CAPABILITY || '';
 
 const server = new Server(
-  { name: 'agentmatrix', version: '1.1.0' },
+  { name: 'agentmatrix', version: '1.2.0' },
   {
     capabilities: { tools: {} },
     instructions: AGENTMATRIX_MCP_INSTRUCTIONS,
@@ -33,6 +33,23 @@ const rangeProperties = {
   startColumn: { type: 'integer', minimum: 1, description: '1-based start column.' },
   endLine: { type: 'integer', minimum: 1, description: '1-based exclusive end line.' },
   endColumn: { type: 'integer', minimum: 1, description: '1-based end column.' },
+};
+
+const locationProperties = {
+  path: {
+    type: 'string',
+    maxLength: 1024,
+    description: 'Verified repository-relative POSIX path.',
+  },
+  line: { type: 'integer', minimum: 1, description: '1-based line.' },
+  column: { type: 'integer', minimum: 1, description: 'Optional 1-based column.' },
+  endLine: { type: 'integer', minimum: 1, description: 'Optional 1-based end line.' },
+  endColumn: { type: 'integer', minimum: 1, description: 'Optional 1-based end column.' },
+  label: {
+    type: 'string',
+    maxLength: 300,
+    description: 'Short explanation of why this location matters.',
+  },
 };
 
 server.setRequestHandler(ListToolsRequestSchema, async () => ({
@@ -57,6 +74,213 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
         additionalProperties: false,
       },
     },
+    {
+      name: 'present_code',
+      description: 'Present an exact repository file or range when seeing it materially helps the user understand the result. Markdown renders as a document. Do not use for routine internal exploration or duplicate an automatic design-doc preview.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          path: {
+            type: 'string',
+            maxLength: 1024,
+            description: 'Repository-relative POSIX path. Absolute paths and parent traversal are forbidden.',
+          },
+          ...rangeProperties,
+          title: { type: 'string', maxLength: 200 },
+          summary: {
+            type: 'string',
+            maxLength: 1000,
+            description: 'Why this code or document is useful to the user now.',
+          },
+        },
+        required: ['path'],
+        additionalProperties: false,
+      },
+    },
+    {
+      name: 'present_locations',
+      description: 'Present several verified repository locations when the user benefits from comparing callers, implementations, references, or candidates. Supply exact locations already discovered; do not guess or use this as an internal search tool.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          title: { type: 'string', maxLength: 200 },
+          summary: {
+            type: 'string',
+            maxLength: 1000,
+            description: 'What connects these locations and why they matter.',
+          },
+          locations: {
+            type: 'array',
+            minItems: 1,
+            maxItems: 30,
+            items: {
+              type: 'object',
+              properties: locationProperties,
+              required: ['path', 'line'],
+              additionalProperties: false,
+            },
+          },
+        },
+        required: ['locations'],
+        additionalProperties: false,
+      },
+    },
+    {
+      name: 'present_changes',
+      description: 'Present the meaningful session-attributed change set when edits are ready for inspection or the user asks what changed. Prefer this over opening every modified file separately.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          scope: {
+            type: 'string',
+            enum: ['session'],
+            description: 'Initial release supports the current managed session only.',
+          },
+          title: { type: 'string', maxLength: 200 },
+          summary: { type: 'string', maxLength: 1000 },
+        },
+        required: ['scope'],
+        additionalProperties: false,
+      },
+    },
+    {
+      name: 'request_decision',
+      description: 'Request a structured user decision only when human judgment genuinely blocks progress. After calling, provide one concise text fallback and stop until the user responds. Use request_attention instead for questions that cannot be expressed as choices.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          question: { type: 'string', maxLength: 1000 },
+          options: {
+            type: 'array',
+            minItems: 2,
+            maxItems: 6,
+            items: {
+              type: 'object',
+              properties: {
+                id: { type: 'string', maxLength: 100 },
+                label: { type: 'string', maxLength: 300 },
+                description: { type: 'string', maxLength: 1000 },
+              },
+              required: ['id', 'label'],
+              additionalProperties: false,
+            },
+          },
+          allowCustom: { type: 'boolean', description: 'Allow a freeform user response. Defaults to true.' },
+          title: { type: 'string', maxLength: 200 },
+          summary: { type: 'string', maxLength: 1000 },
+        },
+        required: ['question', 'options'],
+        additionalProperties: false,
+      },
+    },
+    {
+      name: 'present_validation',
+      description: 'Present test, build, lint, or check results only after the validation actually ran. Never infer, predict, or fabricate a result. Include only the failures that help the user act.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          title: { type: 'string', maxLength: 200 },
+          status: { type: 'string', enum: ['passed', 'failed', 'warning'] },
+          summary: { type: 'string', maxLength: 1000 },
+          command: { type: 'string', maxLength: 2000 },
+          failures: {
+            type: 'array',
+            maxItems: 50,
+            items: {
+              type: 'object',
+              properties: {
+                label: { type: 'string', maxLength: 1000 },
+                path: { type: 'string', maxLength: 1024 },
+                line: { type: 'integer', minimum: 1 },
+                column: { type: 'integer', minimum: 1 },
+              },
+              required: ['label'],
+              additionalProperties: false,
+            },
+          },
+        },
+        required: ['title', 'status', 'summary'],
+        additionalProperties: false,
+      },
+    },
+    {
+      name: 'update_plan',
+      description: 'Create or replace the retained session plan when the work enters a meaningful new phase. Do not update it for every tool call or trivial step.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          title: { type: 'string', maxLength: 200 },
+          summary: { type: 'string', maxLength: 1000 },
+          items: {
+            type: 'array',
+            minItems: 1,
+            maxItems: 100,
+            items: {
+              type: 'object',
+              properties: {
+                id: { type: 'string', maxLength: 100 },
+                label: { type: 'string', maxLength: 500 },
+                status: {
+                  type: 'string',
+                  enum: ['pending', 'in_progress', 'done', 'blocked'],
+                },
+              },
+              required: ['id', 'label', 'status'],
+              additionalProperties: false,
+            },
+          },
+        },
+        required: ['items'],
+        additionalProperties: false,
+      },
+    },
+    {
+      name: 'present_runtime_evidence',
+      description: 'Present concise observed runtime evidence—logs, errors, or requests—when it proves or disproves a user-relevant hypothesis. Never include secrets or speculative evidence.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          title: { type: 'string', maxLength: 200 },
+          summary: { type: 'string', maxLength: 1000 },
+          evidence: {
+            type: 'array',
+            minItems: 1,
+            maxItems: 50,
+            items: {
+              type: 'object',
+              properties: {
+                kind: { type: 'string', enum: ['log', 'error', 'request'] },
+                label: { type: 'string', maxLength: 300 },
+                text: { type: 'string', maxLength: 8000 },
+                path: { type: 'string', maxLength: 1024 },
+                line: { type: 'integer', minimum: 1 },
+                column: { type: 'integer', minimum: 1 },
+              },
+              required: ['kind', 'label', 'text'],
+              additionalProperties: false,
+            },
+          },
+        },
+        required: ['title', 'summary', 'evidence'],
+        additionalProperties: false,
+      },
+    },
+    {
+      name: 'present_browser_preview',
+      description: 'Request a preview of a known running local web application when visual inspection would help the user. The initial contract accepts credential-free loopback HTTP(S) URLs only; never guess that a server is running.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          url: { type: 'string', maxLength: 2048 },
+          title: { type: 'string', maxLength: 200 },
+          summary: { type: 'string', maxLength: 1000 },
+        },
+        required: ['url'],
+        additionalProperties: false,
+      },
+    },
+    // Compatibility tools. New sessions should prefer the present_*/request_*
+    // tools above; these stay available until their callers are migrated.
     {
       name: 'open_file',
       description: 'Ask AgentMatrix Canvas to open a repository-relative POSIX file path. Markdown renders as a document with Source available. Returns UI status only.',
@@ -209,6 +433,29 @@ async function requestNavigation(action, args) {
   return result(`AgentMatrix navigation ${status}${requestRef ? ` (request ${requestRef})` : ''}.`);
 }
 
+async function requestCanvas(kind, args) {
+  const payload = await post('/api/canvas/request', { kind, args });
+  const requestRef = payload?.result?.requestRef;
+  const delivery = payload?.result?.delivery || 'event_only';
+  if (kind === 'decision') {
+    return result(
+      `AgentMatrix accepted the decision request${requestRef ? ` (${requestRef})` : ''}. `
+      + 'Provide one concise text fallback for the decision, then stop and wait for the user.',
+    );
+  }
+  if (delivery === 'canvas_renderer') {
+    return result(
+      `AgentMatrix queued ${kind.replace(/_/g, ' ')} for the session Canvas`
+      + `${requestRef ? ` (${requestRef})` : ''}. Include a concise text fallback in your response.`,
+    );
+  }
+  return result(
+    `AgentMatrix accepted the typed ${kind.replace(/_/g, ' ')} request`
+    + `${requestRef ? ` (${requestRef})` : ''}. The dedicated renderer may not be connected yet; `
+    + 'include a concise text fallback in your response.',
+  );
+}
+
 server.setRequestHandler(CallToolRequestSchema, async (request) => {
   const { name, arguments: args = {} } = request.params;
   try {
@@ -224,6 +471,19 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
     }
     if (['open_file', 'reveal_range', 'open_symbol', 'show_search_results', 'open_diff', 'open_review'].includes(name)) {
       return await requestNavigation(name, args);
+    }
+    const canvasTools = {
+      present_code: 'code',
+      present_locations: 'locations',
+      present_changes: 'changes',
+      request_decision: 'decision',
+      present_validation: 'validation',
+      update_plan: 'plan',
+      present_runtime_evidence: 'runtime_evidence',
+      present_browser_preview: 'browser_preview',
+    };
+    if (name in canvasTools) {
+      return await requestCanvas(canvasTools[name], args);
     }
     return result(`Unknown AgentMatrix tool: ${name}`, true);
   } catch (error) {

@@ -185,11 +185,17 @@
   white-space: nowrap;
 }
 
-.cc-provenance span:nth-child(2) {
+.cc-provenance-summary {
   flex: 1;
 }
 
-.cc-provenance span:last-child {
+.cc-provenance-time {
+  flex-shrink: 0;
+  color: var(--mc-faint);
+  font-variant-numeric: tabular-nums;
+}
+
+.cc-provenance-pin {
   display: inline-flex;
   gap: 4px;
   align-items: center;

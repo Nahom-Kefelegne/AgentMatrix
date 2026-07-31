@@ -1,4 +1,5 @@
 import type { NavigationRequest, NavigationResult, ReviewFeedback } from './navigation/types';
+import type { CanvasRequest, CanvasRequestResult } from './canvas/types';
 
 // ===== Review Comments =====
 
@@ -222,10 +223,15 @@ export interface ServerToClientEvents {
   'navigation:acknowledged': (result: NavigationResult) => void;
   'navigation:applied': (result: NavigationResult) => void;
   'navigation:failed': (result: NavigationResult) => void;
+  // Typed agent-to-Canvas requests. Components subscribe as they are built.
+  'canvas:requested': (request: CanvasRequest) => void;
+  'canvas:acknowledged': (result: CanvasRequestResult) => void;
+  'canvas:snapshot': (requests: CanvasRequest[]) => void;
   'review:feedback': (feedback: ReviewFeedback) => void;
 }
 
 export interface ClientToServerEvents {
+  'canvas:get-snapshot': () => void;
   'prompt:send': (data: { sessionId: string; prompt: string }) => void;
   'terminal:input': (data: { sessionId: string; data: string }) => void;
   'terminal:spawn': (data: { sessionId: string }) => void;
@@ -268,5 +274,9 @@ export const SOCKET_EVENTS = {
   NAVIGATION_ACKNOWLEDGED: 'navigation:acknowledged',
   NAVIGATION_APPLIED: 'navigation:applied',
   NAVIGATION_FAILED: 'navigation:failed',
+  CANVAS_REQUESTED: 'canvas:requested',
+  CANVAS_ACKNOWLEDGED: 'canvas:acknowledged',
+  CANVAS_SNAPSHOT: 'canvas:snapshot',
+  CANVAS_GET_SNAPSHOT: 'canvas:get-snapshot',
   REVIEW_FEEDBACK: 'review:feedback',
 } as const;

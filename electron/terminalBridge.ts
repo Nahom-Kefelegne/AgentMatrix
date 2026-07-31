@@ -32,6 +32,7 @@ import { reapOrphansForSessions, logReapResult } from './services/OrphanReaper';
 import type { PtySession } from './pty/PtyManager';
 import { getProvider } from '../lib/cli';
 import type { CliType } from '../lib/types';
+import { getCanvasRequestSnapshot } from '../lib/canvas/requestStore';
 export { requestSummary };
 
 /**
@@ -134,6 +135,9 @@ export function setupTerminalBridge(io: SocketIOServer, ptyManager: PtyManager):
   const endingSessions = new Set<string>();
 
   io.on('connection', (socket) => {
+    socket.on('canvas:get-snapshot', () => {
+      socket.emit('canvas:snapshot', getCanvasRequestSnapshot());
+    });
 
     // Track this socket's PTY output subscriptions so wiring is idempotent:
     // re-subscribing (remount / reconnect / repeated resume) replaces the

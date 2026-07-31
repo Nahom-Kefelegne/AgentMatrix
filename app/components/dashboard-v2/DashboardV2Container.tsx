@@ -54,7 +54,7 @@ export default function DashboardV2Container({
   const [handoffOpen, setHandoffOpen] = useState(false);
   const [sessionControls, setSessionControls] = useState<Record<string, SessionControlState>>({});
   const lifecycleTimersRef = useRef<Map<string, number>>(new Map());
-  const canvas = useContextCanvas(selectedSessionId, socketRef);
+  const canvas = useContextCanvas(selectedSessionId, socketRef, connected, sessions);
   const clearLifecycleTimer = useCallback((sessionId: string, kind: LifecycleTimerKind) => {
     const key = lifecycleTimerKey(sessionId, kind);
     const timer = lifecycleTimersRef.current.get(key);

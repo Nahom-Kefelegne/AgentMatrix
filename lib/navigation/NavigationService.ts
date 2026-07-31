@@ -172,6 +172,56 @@ function isBinary(buffer: Buffer): boolean {
   return controlCharacters / sample.length > 0.2;
 }
 
+function validateRangeWithinContent(range: SourceRange | undefined, content: string): void {
+  validateSourceRange(range);
+  if (!range) return;
+
+  const lines = content.split(/\r\n|\r|\n/);
+  const lineCount = lines.length;
+  if (range.start.line > lineCount) {
+    throw new NavigationServiceError(
+      'INVALID_RANGE',
+      `Range start line ${range.start.line} exceeds the file's ${lineCount} lines.`,
+    );
+  }
+  if (range.end && range.end.line > lineCount) {
+    throw new NavigationServiceError(
+      'INVALID_RANGE',
+      `Range end line ${range.end.line} exceeds the file's ${lineCount} lines.`,
+    );
+  }
+
+  const validateColumn = (
+    line: number,
+    column: number | undefined,
+    field: string,
+  ) => {
+    if (column === undefined) return;
+    const maximum = (lines[line - 1]?.length ?? 0) + 1;
+    if (column > maximum) {
+      throw new NavigationServiceError(
+        'INVALID_RANGE',
+        `${field} ${column} exceeds line ${line}'s maximum column ${maximum}.`,
+      );
+    }
+  };
+  validateColumn(range.start.line, range.start.column, 'Range start column');
+  if (range.end) {
+    validateColumn(range.end.line, range.end.column, 'Range end column');
+    if (
+      range.end.line === range.start.line
+      && range.start.column !== undefined
+      && range.end.column !== undefined
+      && range.end.column < range.start.column
+    ) {
+      throw new NavigationServiceError(
+        'INVALID_RANGE',
+        'Range end column must not precede its start column on the same line.',
+      );
+    }
+  }
+}
+
 function detectLanguage(filePath: string): string {
   const extension = path.extname(filePath).toLowerCase();
   const languages: Record<string, string> = {
@@ -575,6 +625,49 @@ export class NavigationService {
     if (!target) return undefined;
     const root = await this.resolveRoot(sessionId, signal);
     const resolved = await this.resolveModelPath(root, target.path, signal);
+    return {
+      path: resolved.relativePath,
+      range: target.range,
+      symbol: target.symbol,
+      fragment: target.fragment,
+    };
+  }
+
+  async validateFileTarget(
+    sessionId: string,
+    target: NavigationRequest['target'],
+    signal?: AbortSignal,
+  ): Promise<NavigationRequest['target']> {
+    if (!target) return undefined;
+    const root = await this.resolveRoot(sessionId, signal);
+    const resolved = await this.resolveModelPath(root, target.path, signal);
+    throwIfAborted(signal);
+    let fileStat;
+    try {
+      fileStat = await stat(resolved.absolutePath);
+    } catch {
+      throw new NavigationServiceError('FILE_NOT_FOUND', 'The requested file does not exist.', 404);
+    }
+    if (!fileStat.isFile()) {
+      throw new NavigationServiceError('NOT_A_FILE', 'The requested path is not a file.');
+    }
+    if (fileStat.size > MAX_FILE_BYTES) {
+      throw new NavigationServiceError(
+        'FILE_TOO_LARGE',
+        `The requested file exceeds the ${MAX_FILE_BYTES / (1024 * 1024)} MB navigation limit.`,
+        413,
+      );
+    }
+    const contentBuffer = await readFile(resolved.absolutePath);
+    throwIfAborted(signal);
+    if (isBinary(contentBuffer)) {
+      throw new NavigationServiceError(
+        'BINARY_FILE',
+        'The requested file appears to be binary and cannot be displayed.',
+        415,
+      );
+    }
+    validateRangeWithinContent(target.range, contentBuffer.toString('utf8'));
     return {
       path: resolved.relativePath,
       range: target.range,

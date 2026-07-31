@@ -1,5 +1,7 @@
 import type { SessionData, Action, AgentData } from '../types';
 import { DESK_POSITIONS, OVERFLOW_POSITIONS, MAX_RECENT_ACTIONS } from '../constants';
+import { clearCanvasRequests } from '../canvas/requestStore';
+import { clearNavigationCapability } from '../navigation/rootRegistry';
 
 // Persist all state on globalThis to survive Next.js dev hot reloads
 const g = globalThis as Record<string, unknown>;
@@ -86,6 +88,8 @@ export function removeSession(id: string): void {
     deskAssignments.delete(session.deskIndex);
     sessions.delete(id);
   }
+  clearCanvasRequests(id);
+  clearNavigationCapability(id);
 }
 
 export function updateSession(id: string, changes: Partial<SessionData>): void {
