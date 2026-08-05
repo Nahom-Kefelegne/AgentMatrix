@@ -1,4 +1,4 @@
-# Agent Matrix Update Script (Windows PowerShell)
+﻿# Agent Matrix Update Script (Windows PowerShell)
 
 $ErrorActionPreference = "Stop"
 

@@ -1,4 +1,4 @@
-# Agent Matrix Setup Script (Windows PowerShell)
+﻿# Agent Matrix Setup Script (Windows PowerShell)
 # Checks prerequisites, configures Claude + Copilot hooks, installs dependencies
 # (resilient to blocked npm mirrors), sets up native modules, and launches the app.
 
