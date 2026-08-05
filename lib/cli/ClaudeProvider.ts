@@ -13,6 +13,7 @@ import type {
   PermissionMode,
 } from './CliProvider';
 import { CLAUDE_MODELS, CLAUDE_PERMISSION_MODES } from './uiMetadata';
+import { pickSpawnableBinary } from './binaryPath';
 
 /**
  * Strip ANSI escape codes from terminal output.
@@ -126,21 +127,22 @@ export class ClaudeProvider implements CliProvider {
   findBinary(): string {
     try {
       const cmd = process.platform === 'win32' ? 'where claude' : 'which claude';
-      const result = execSync(cmd, {
+      const output = execSync(cmd, {
         encoding: 'utf-8',
         stdio: ['pipe', 'pipe', 'pipe'],
-      }).trim().split(/\r?\n/)[0].trim();
+      });
+      const result = pickSpawnableBinary(output.trim().split(/\r?\n/));
       if (result) return result;
     } catch { /* ignore */ }
 
     const home = homedir();
     const candidates = process.platform === 'win32'
+      // Extensionless npm shims are POSIX shell scripts; CreateProcess rejects
+      // them with error 193, so Windows only ever lists executable extensions.
       ? [
           join(home, '.local', 'bin', 'claude.exe'),
-          join(home, '.local', 'bin', 'claude'),
           join(home, 'AppData', 'Local', 'Programs', 'claude', 'claude.exe'),
           join(home, 'AppData', 'Roaming', 'npm', 'claude.cmd'),
-          join(home, 'AppData', 'Roaming', 'npm', 'claude'),
           'C:\\Program Files\\Claude\\claude.exe',
         ]
       : [

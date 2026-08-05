@@ -13,6 +13,7 @@ import type {
   PermissionMode,
 } from './CliProvider';
 import { COPILOT_MODELS, COPILOT_PERMISSION_MODES } from './uiMetadata';
+import { pickSpawnableBinary } from './binaryPath';
 
 /**
  * Strip ANSI escape codes from terminal output.
@@ -226,10 +227,11 @@ export class CopilotProvider implements CliProvider {
   findBinary(): string {
     try {
       const cmd = process.platform === 'win32' ? 'where copilot' : 'which copilot';
-      const result = execSync(cmd, {
+      const output = execSync(cmd, {
         encoding: 'utf-8',
         stdio: ['pipe', 'pipe', 'pipe'],
-      }).trim().split(/\r?\n/)[0].trim();
+      });
+      const result = pickSpawnableBinary(output.trim().split(/\r?\n/));
       if (result) return result;
     } catch { /* ignore */ }
 
