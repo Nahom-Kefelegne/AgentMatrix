@@ -48,14 +48,27 @@ else
     MISSING=1
 fi
 
-# Check GitHub Copilot CLI (primary) and Claude CLI — at least one is required.
+# Check provider launch paths. A standalone CLI is optional when Agency can
+# launch Copilot on the user's behalf.
 HAVE_CLI=0
+HAVE_AGENCY_COPILOT=0
+if command -v agency &> /dev/null && agency copilot --help &> /dev/null; then
+    AGENCY_VERSION=$(agency --version 2>/dev/null | head -1)
+    echo -e "  ${CHECK} Agency Copilot available${AGENCY_VERSION:+ (${AGENCY_VERSION})}"
+    HAVE_CLI=1
+    HAVE_AGENCY_COPILOT=1
+elif command -v agency &> /dev/null; then
+    echo -e "  ${WARN} Agency found, but its Copilot command is unavailable"
+fi
+
 if command -v copilot &> /dev/null; then
     echo -e "  ${CHECK} GitHub Copilot CLI found (primary)"
     HAVE_CLI=1
+elif [ $HAVE_AGENCY_COPILOT -eq 1 ]; then
+    echo -e "  ${CHECK} Standalone Copilot CLI not required — Agency provides Copilot"
 else
     echo -e "  ${WARN} GitHub Copilot CLI not found (recommended primary)"
-    echo -e "     Install from: https://github.com/github/copilot-cli"
+    echo -e "     Install Copilot CLI or Agency with Copilot support."
 fi
 
 if command -v claude &> /dev/null; then
@@ -67,7 +80,8 @@ else
 fi
 
 if [ $HAVE_CLI -eq 0 ]; then
-    echo -e "  ${CROSS} Neither GitHub Copilot CLI nor Claude CLI found — install at least one."
+    echo -e "  ${CROSS} No supported CLI launch path found."
+    echo -e "     Install Copilot CLI, Claude Code CLI, or Agency with Copilot support."
     MISSING=1
 fi
 
