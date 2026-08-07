@@ -1,4 +1,4 @@
-# Agent Matrix Setup Script (Windows PowerShell)
+﻿# Agent Matrix Setup Script (Windows PowerShell)
 # Checks prerequisites, configures Claude + Copilot hooks, installs dependencies
 # (resilient to blocked npm mirrors), sets up native modules, and launches the app.
 
@@ -123,7 +123,21 @@ settings.hooks = { ...settings.hooks, ...hooks };
 fs.writeFileSync(path, JSON.stringify(settings, null, 2));
 console.log('Hooks configured successfully (silent-fail when app not running)');
 "@
-node -e $nodeScript
+# Run from a temp file, never `node -e $nodeScript`: Windows PowerShell does not
+# escape embedded double quotes when handing a string to a native command, so the
+# quotes around "Content-Type: application/json" are stripped and Node gets
+# unparseable JS. The failure is silent unless the exit code is checked.
+$hookScriptPath = Join-Path $env:TEMP "agentmatrix-hooks.js"
+[IO.File]::WriteAllText($hookScriptPath, $nodeScript, (New-Object Text.UTF8Encoding $false))
+try {
+    node $hookScriptPath
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host "  [X] Hook configuration failed (node exit $LASTEXITCODE)" -ForegroundColor Red
+        exit 1
+    }
+} finally {
+    Remove-Item $hookScriptPath -Force -ErrorAction SilentlyContinue
+}
 
 Write-Host "  [OK] Hooks configured in $settingsFile" -ForegroundColor Green
 Write-Host ""
