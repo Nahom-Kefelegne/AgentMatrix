@@ -1,11 +1,12 @@
 import { readFileSync, writeFileSync } from 'fs';
 import { ACTIVE_SESSIONS_PATH as CACHE_PATH, ensureDir, AGENTMATRIX_DIR } from './paths';
+import type { CliType } from '../cli/CliProvider';
 
 export interface CachedSession {
   id: string;
   name: string;
   cwd: string;
-  cliType?: 'claude' | 'copilot';
+  cliType?: CliType;
   permissionMode?: string;
   model?: string;
   effort?: string;

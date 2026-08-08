@@ -1,4 +1,4 @@
-export type CliType = 'claude' | 'copilot';
+export type CliType = 'claude' | 'copilot' | 'kimi';
 
 export interface CliHealth {
   type: CliType;

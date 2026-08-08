@@ -165,7 +165,7 @@ export function setupTerminalBridge(io: SocketIOServer, ptyManager: PtyManager):
       effort?: string;
       allowedTools?: string;
       systemPrompt?: string;
-      cliType?: 'claude' | 'copilot';
+      cliType?: CliType;
       copilotMode?: string;
     }) => {
       const sessionUuid = randomUUID();
@@ -786,8 +786,13 @@ export function setupTerminalBridge(io: SocketIOServer, ptyManager: PtyManager):
     });
 
     // Query the orchestrator
-    socket.on('orchestrator:query', async ({ query, queryId }: { query: string; queryId: string }) => {
-      const result = await queryOrchestrator(query);
+    socket.on('orchestrator:query', async (
+      { query, queryId, timeoutMs }: { query: string; queryId: string; timeoutMs?: number },
+    ) => {
+      // Honour the caller's budget. Deep search greps ~/.claude and ~/.copilot
+      // and legitimately runs past captureQuery's 45s default; without this the
+      // server gave up early and the client saw an empty result.
+      const result = await queryOrchestrator(query, timeoutMs ? { timeoutMs } : undefined);
       socket.emit('orchestrator:result', { queryId, ...result });
     });
 

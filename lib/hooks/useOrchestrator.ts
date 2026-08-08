@@ -10,6 +10,12 @@ export interface OrchestratorResult {
 }
 
 /**
+ * How long the client waits beyond the server's own budget before giving up.
+ * Covers socket/IPC round-trip so the server's answer always lands first.
+ */
+const CLIENT_TIMEOUT_GRACE_MS = 5000;
+
+/**
  * Hook for querying the orchestrator session.
  * Returns a `query` function that sends an instruction and returns the result.
  */
@@ -42,15 +48,24 @@ export function useOrchestrator() {
 
     return new Promise((resolve) => {
       pendingRef.current.set(queryId, resolve);
-      socket.emit('orchestrator:query' as any, { query: instruction, queryId });
+      // `timeoutMs` must cross the wire, not just arm the local timer below.
+      // The server otherwise falls back to captureQuery's 45s default, so a
+      // caller asking for longer (deep search asks for 120s) had its query
+      // abandoned server-side at 45s while the client kept waiting — surfacing
+      // as a silent empty result.
+      socket.emit('orchestrator:query' as any, { query: instruction, queryId, timeoutMs });
 
-      // Timeout
+      // Client-side safety net: fires only if the server never answers at all
+      // (socket dropped, main process died). Deliberately LATER than the
+      // server's own budget by CLIENT_TIMEOUT_GRACE_MS — at exactly `timeoutMs`
+      // the two race, and the client can discard a real server response that
+      // was already on its way.
       setTimeout(() => {
         if (pendingRef.current.has(queryId)) {
           pendingRef.current.delete(queryId);
           resolve({ success: false, content: '', lines: [] });
         }
-      }, timeoutMs);
+      }, timeoutMs + CLIENT_TIMEOUT_GRACE_MS);
     });
   }, [socketRef, ensureListener]);
 

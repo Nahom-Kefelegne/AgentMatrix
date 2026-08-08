@@ -1,4 +1,4 @@
-import type { PermissionMode } from './CliProvider';
+import type { CliType, PermissionMode } from './CliProvider';
 
 /**
  * Pure data tables describing each CLI's UI surface (model picker,
@@ -80,6 +80,33 @@ export const COPILOT_PERMISSION_MODES: PermissionMode[] = [
   { value: 'bypassPermissions', label: 'YOLO', desc: 'Allow all tools and paths' },
 ];
 
+// ── Kimi ──────────────────────────────────────────────────────────
+
+/**
+ * Kimi Code CLI's built-in managed model aliases, from its reference config
+ * (`kimi-code/k3` is the documented `default_model`). NOT exhaustive: Kimi's
+ * model list is user-extensible via config.toml and `/provider` imports.
+ */
+export const KIMI_MODELS: ModelOption[] = [
+  { value: '', label: 'Default' },
+  { value: 'kimi-code/k3', label: 'Kimi K3' },
+  { value: 'kimi-code/kimi-for-coding', label: 'Kimi for Coding' },
+  { value: 'kimi-code/kimi-for-coding-highspeed', label: 'Kimi for Coding (High Speed)' },
+];
+
+/**
+ * Kimi exposes `--yolo`/`-y` and `--auto` (documented as mutually exclusive)
+ * plus `--plan`. There is deliberately NO `acceptEdits` entry — Claude's mode of
+ * that name has no Kimi counterpart, and mapping it to something approximate
+ * would silently grant the wrong permissions.
+ */
+export const KIMI_PERMISSION_MODES: PermissionMode[] = [
+  { value: 'default', label: 'Default', desc: 'Ask before each tool use' },
+  { value: 'bypassPermissions', label: 'YOLO', desc: 'Auto-approve regular tool calls' },
+  { value: 'auto', label: 'Auto', desc: 'Let Kimi handle approvals automatically' },
+  { value: 'plan', label: 'Plan Mode', desc: 'Start in Plan mode (read-only exploration)' },
+];
+
 export interface CopilotMode {
   value: string;
   label: string;
@@ -94,16 +121,28 @@ export const COPILOT_MODES: CopilotMode[] = [
   { value: 'autopilot', label: 'Autopilot', desc: 'Work autonomously end-to-end' },
 ];
 
-export function modelsForCli(cliType: 'claude' | 'copilot'): ModelOption[] {
-  return cliType === 'copilot' ? COPILOT_MODELS : CLAUDE_MODELS;
+// These switch exhaustively rather than using a `=== 'copilot' ? … : …`
+// ternary: with three providers a binary test silently hands the newcomer
+// Claude's tables, which is how a new CLI ends up offering models it can't run.
+
+export function modelsForCli(cliType: CliType): ModelOption[] {
+  switch (cliType) {
+    case 'copilot': return COPILOT_MODELS;
+    case 'kimi': return KIMI_MODELS;
+    default: return CLAUDE_MODELS;
+  }
 }
 
-export function permissionModesForCli(cliType: 'claude' | 'copilot'): PermissionMode[] {
-  return cliType === 'copilot' ? COPILOT_PERMISSION_MODES : CLAUDE_PERMISSION_MODES;
+export function permissionModesForCli(cliType: CliType): PermissionMode[] {
+  switch (cliType) {
+    case 'copilot': return COPILOT_PERMISSION_MODES;
+    case 'kimi': return KIMI_PERMISSION_MODES;
+    default: return CLAUDE_PERMISSION_MODES;
+  }
 }
 
-export function defaultPermissionModeForCli(cliType: 'claude' | 'copilot'): string {
-  return cliType === 'copilot' ? 'default' : 'bypassPermissions';
+export function defaultPermissionModeForCli(cliType: CliType): string {
+  return cliType === 'claude' ? 'bypassPermissions' : 'default';
 }
 
 export function validOptionValue<T extends { value: string }>(
@@ -124,12 +163,17 @@ export function validOptionValue<T extends { value: string }>(
  * Keep in sync with ClaudeProvider / CopilotProvider behavior.
  */
 export function buildResumeShellCommand(opts: {
-  cliType: 'claude' | 'copilot';
+  cliType: CliType;
   resumeId: string;
   fork?: boolean;
 }): string {
   if (opts.cliType === 'copilot') {
     return `copilot --resume ${opts.resumeId}`;
+  }
+  // Kimi resumes with `--session <id>`; it has no --fork-session equivalent
+  // (`/fork` is TUI-only), so `fork` is intentionally ignored here.
+  if (opts.cliType === 'kimi') {
+    return `kimi --session ${opts.resumeId}`;
   }
   const parts = ['claude', '--resume', opts.resumeId, '--dangerously-skip-permissions'];
   if (opts.fork) parts.push('--fork-session');
