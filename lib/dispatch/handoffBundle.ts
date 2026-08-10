@@ -402,6 +402,10 @@ const CLAUDE_LOCAL_COMMAND_CAVEAT = 'Caveat: The messages below were generated b
 function isGenuineUserText(text: string): boolean {
   const trimmed = text.trim();
   if (trimmed.length === 0) return false;
+  // Prefix check only. A marker appearing MID-string means the user's own text
+  // and an injected prompt were submitted as one turn — see
+  // `stripInjectedTail`, which recovers the user's half rather than discarding
+  // the whole turn.
   if (trimmed.startsWith(AGENTMATRIX_INJECTION_MARKER)) return false;
   if (trimmed.startsWith(CLAUDE_LOCAL_COMMAND_CAVEAT)) return false;
   return !CLAUDE_LOCAL_COMMAND_PREFIXES.some(prefix => trimmed.startsWith(prefix));
@@ -436,6 +440,27 @@ function claudeContentText(content: unknown): string | undefined {
  * Malformed trailing lines are tolerated, so a caller may pass a bounded HEAD of
  * a multi-megabyte transcript rather than the whole file.
  */
+/**
+ * Recover the user's half of a turn that also contains an injected prompt.
+ *
+ * `PromptInjector` types into the session's input box. If the user had text
+ * sitting there unsubmitted when a summary/handoff fired, both are submitted as
+ * ONE user turn and the transcript records them concatenated — observed live:
+ *   "…Do not modify any source file.[agentmatrix] URGENT: Complete in under 30s…"
+ *
+ * Rejecting the whole turn would lose the ask entirely; keeping it would let
+ * AgentMatrix's own words masquerade as the user's. Cutting at the marker keeps
+ * exactly the user-authored prefix, still byte-for-byte — no rewriting.
+ *
+ * Returns undefined when nothing user-authored remains.
+ */
+export function stripInjectedTail(text: string): string | undefined {
+  const at = text.indexOf(AGENTMATRIX_INJECTION_MARKER);
+  if (at < 0) return text;
+  const head = text.slice(0, at).replace(/[\r\n]+$/, '');
+  return head.trim().length > 0 ? head : undefined;
+}
+
 export function extractFirstUserMessage(
   transcriptText: string,
   cliType: CliType,
@@ -457,14 +482,20 @@ export function extractFirstUserMessage(
       const message = record.message as { role?: unknown; content?: unknown } | undefined;
       if (!message || message.role !== 'user') continue;
       const text = claudeContentText(message.content);
-      if (text !== undefined && isGenuineUserText(text)) return text;
+      if (text !== undefined && isGenuineUserText(text)) {
+        const user = stripInjectedTail(text);
+        if (user !== undefined) return user;
+      }
       continue;
     }
 
     // copilot
     if (record.type !== 'user.message') continue;
     const content = (record.data as { content?: unknown } | undefined)?.content;
-    if (typeof content === 'string' && isGenuineUserText(content)) return content;
+    if (typeof content === 'string' && isGenuineUserText(content)) {
+      const user = stripInjectedTail(content);
+      if (user !== undefined) return user;
+    }
   }
 
   return undefined;
