@@ -461,6 +461,12 @@ export class ClaudeProvider implements CliProvider {
   buildSpawnArgs(opts: SpawnOptions): string[] {
     const args: string[] = [];
     if (opts.sessionId) args.push('--session-id', opts.sessionId);
+    // Verified (Claude Code 2.1.206+): `-n, --name <name>` sets "a display name
+    // for this session (shown in the prompt box, /resume picker, and terminal
+    // title)". This was previously dropped, so a Claude session's name lived
+    // only in AgentMatrix's own cache and was invisible outside the app —
+    // Copilot has passed `-n` through since it was added.
+    if (opts.name) args.push('--name', opts.name);
     if (opts.permissionMode === 'bypassPermissions') {
       args.push('--dangerously-skip-permissions');
     } else if (opts.permissionMode) {
@@ -469,6 +475,9 @@ export class ClaudeProvider implements CliProvider {
     if (opts.model) args.push('--model', opts.model);
     if (opts.effort) args.push('--effort', opts.effort);
     if (opts.allowedTools) args.push('--allowedTools', opts.allowedTools);
+    // Verified: `--add-dir <directories...>` — "Additional directories to allow
+    // tool access to". Variadic, so all paths follow a single flag.
+    if (opts.addDirs?.length) args.push('--add-dir', ...opts.addDirs);
     if (opts.systemPrompt) {
       // Collapse to a single line; shell-quoting happens uniformly at spawn.
       const oneLine = opts.systemPrompt.replace(/\n/g, ' ').replace(/\s+/g, ' ').trim();

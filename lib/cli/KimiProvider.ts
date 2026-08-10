@@ -273,6 +273,11 @@ export function buildKimiSpawnArgs(opts: SpawnOptions): string[] {
   const args: string[] = [];
   args.push(...permissionFlags(opts.permissionMode, true));
   if (opts.model) args.push('--model', opts.model);
+  // Documented: `--add-dir` adds EXTRA workspace directories beyond the process
+  // cwd. Repeated per directory rather than variadic — UNVERIFIED against a live
+  // binary (Kimi is not installed here), but repeating a flag is the form that
+  // degrades safely if it turns out to accept multiple values.
+  for (const dir of opts.addDirs ?? []) args.push('--add-dir', dir);
   return args;
 }
 

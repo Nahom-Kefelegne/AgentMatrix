@@ -18,6 +18,18 @@ export interface SpawnOptions {
   effort?: string;
   allowedTools?: string;
   systemPrompt?: string;
+  /**
+   * Extra directories the agent may read outside `cwd`.
+   *
+   * Used by context handoff: the receiving session's cwd is the target repo,
+   * but the previous agent's raw transcript lives under that CLI's own state
+   * directory (`~/.claude/projects`, `~/.copilot/session-state`, …). Without
+   * this the receiver cannot grep the prior session to cross-check the user's
+   * original ask against what was actually built.
+   *
+   * Providers that cannot scope path access ignore it — see CopilotProvider.
+   */
+  addDirs?: string[];
   // Copilot-specific
   copilotMode?: string;  // 'interactive' | 'plan' | 'autopilot'
 }

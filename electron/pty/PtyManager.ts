@@ -357,6 +357,8 @@ export class PtyManager {
     cwd: string; sessionUuid?: string; name?: string;
     permissionMode?: string; model?: string; effort?: string;
     allowedTools?: string; systemPrompt?: string;
+    /** Extra readable dirs (context handoff grants the prior transcript's dir). */
+    addDirs?: string[];
     cliType?: CliType; copilotMode?: string;
   }): PtySession {
     if (this.sessions.has(id)) throw new Error(`Session ${id} already exists`);
@@ -384,6 +386,7 @@ export class PtyManager {
       effort: opts.effort,
       allowedTools: opts.allowedTools,
       systemPrompt,
+      addDirs: opts.addDirs,
       copilotMode: opts.copilotMode,
     });
 
