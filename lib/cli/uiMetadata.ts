@@ -145,6 +145,51 @@ export function defaultPermissionModeForCli(cliType: CliType): string {
   return cliType === 'claude' ? 'bypassPermissions' : 'default';
 }
 
+/**
+ * Which launch controls a CLI actually honours. Rendering a control the CLI
+ * ignores is worse than hiding it: the user sets an effort level or a tool
+ * allow-list, the flag is never passed, and nothing signals that it was
+ * dropped. Kimi documents no `--effort`, no per-tool allow-list flag, and no
+ * `--append-system-prompt` (see KimiProvider's buildSpawnArgs notes).
+ */
+export interface CliUiCapabilities {
+  /** `--effort` / `--reasoning-effort`. */
+  effort: boolean;
+  /** A per-tool allow-list flag. */
+  allowedTools: boolean;
+  /** `--append-system-prompt` or equivalent. */
+  appendSystemPrompt: boolean;
+  /** Copilot's `--mode` (Interactive / Plan / Autopilot). */
+  agentMode: boolean;
+}
+
+const CLI_UI_CAPABILITIES: Record<CliType, CliUiCapabilities> = {
+  claude: { effort: true, allowedTools: true, appendSystemPrompt: true, agentMode: false },
+  copilot: { effort: true, allowedTools: true, appendSystemPrompt: false, agentMode: true },
+  kimi: { effort: false, allowedTools: false, appendSystemPrompt: false, agentMode: false },
+};
+
+export function uiCapabilitiesForCli(cliType: CliType): CliUiCapabilities {
+  return CLI_UI_CAPABILITIES[cliType] ?? CLI_UI_CAPABILITIES.claude;
+}
+
+/**
+ * The full set of CLI types, as runtime values. Kept next to the tables above
+ * so adding a provider means touching one list, not hunting down every
+ * hand-rolled `x === 'claude' || x === 'copilot'` narrowing check.
+ */
+export const CLI_TYPES: CliType[] = ['claude', 'copilot', 'kimi'];
+
+/**
+ * Narrow untrusted input (HTTP payloads, socket messages, persisted state) to a
+ * CliType. Use this instead of inlining an equality chain: the inlined version
+ * silently returns `undefined` for any provider added later, which callers then
+ * quietly turn back into 'claude'.
+ */
+export function isCliType(value: unknown): value is CliType {
+  return typeof value === 'string' && (CLI_TYPES as string[]).includes(value);
+}
+
 export function validOptionValue<T extends { value: string }>(
   options: T[],
   value: string | undefined,

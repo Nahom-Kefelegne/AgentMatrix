@@ -5,8 +5,10 @@ import { ArrowRightLeft } from 'lucide-react';
 import {
   COPILOT_MODES,
   EFFORT_LEVELS,
+  isCliType,
   modelsForCli,
   permissionModesForCli,
+  uiCapabilitiesForCli,
 } from '@/lib/cli/uiMetadata';
 import { useSocketContext } from './SocketProvider';
 import {
@@ -42,9 +44,7 @@ const STATUS_LABELS: Record<HandoffStatus, string> = {
 export default function HandoffModal({ isOpen, onClose, sourceSessionId, sourceCwd, onNewSession, onStatusChange }: HandoffModalProps) {
   const { sessions, socketRef } = useSocketContext();
   const rawSourceCliType = sessions.get(sourceSessionId)?.cliType;
-  const sourceCliType = rawSourceCliType === 'copilot' || rawSourceCliType === 'claude'
-    ? rawSourceCliType
-    : undefined;
+  const sourceCliType = isCliType(rawSourceCliType) ? rawSourceCliType : undefined;
   const formCliType = sourceCliType || 'claude';
   const [contextRequest, setContextRequest] = useState('');
   const [targetCwd, setTargetCwd] = useState(sourceCwd || '');
@@ -111,7 +111,7 @@ export default function HandoffModal({ isOpen, onClose, sourceSessionId, sourceC
       model: model || undefined,
       effort: effort || undefined,
       cliType: sourceCliType,
-      copilotMode: formCliType === 'copilot' ? copilotMode || undefined : undefined,
+      copilotMode: uiCapabilitiesForCli(formCliType).agentMode ? copilotMode || undefined : undefined,
     });
   }, [contextRequest, targetCwd, sourceCwd, sourceSessionId, socketRef, sessionName, permissionMode, model, effort, sourceCliType, formCliType, copilotMode]);
 
@@ -240,7 +240,7 @@ export default function HandoffModal({ isOpen, onClose, sourceSessionId, sourceC
                   disabled={isProcessing}
                 />
               </FormField>
-              {formCliType === 'copilot' ? (
+              {uiCapabilitiesForCli(formCliType).agentMode ? (
                 <FormField label="Agent mode">
                   <OptionGroup>
                     {COPILOT_MODES.map(mode => (

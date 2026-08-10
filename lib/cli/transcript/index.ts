@@ -43,9 +43,16 @@ function parseTranscript(transcriptPath: string, cliType: CliType): FileOp[] {
   const cached = parsedTranscriptCache.get(transcriptPath);
   if (cached?.mtimeMs === mtimeMs) return cached.ops;
 
-  const ops = cliType === 'copilot'
-    ? parseCopilotTranscript(transcriptPath)
-    : parseClaudeTranscript(transcriptPath);
+  // Kimi has no parser yet and its wire.jsonl is NOT Claude's schema. Falling
+  // through to parseClaudeTranscript would mine a foreign format for tool
+  // calls and surface whatever coincidentally matched as this session's edits.
+  // Report "no ops" until a real parseKimi lands — an empty changed-files list
+  // is honest; a fabricated one is not.
+  const ops = cliType === 'kimi'
+    ? []
+    : cliType === 'copilot'
+      ? parseCopilotTranscript(transcriptPath)
+      : parseClaudeTranscript(transcriptPath);
   parsedTranscriptCache.set(transcriptPath, { mtimeMs, ops });
   return ops;
 }

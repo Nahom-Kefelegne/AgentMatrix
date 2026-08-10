@@ -10,6 +10,7 @@ import {
   defaultPermissionModeForCli,
   modelsForCli,
   permissionModesForCli,
+  uiCapabilitiesForCli,
   validOptionValue,
 } from '@/lib/cli/uiMetadata';
 import CliIcon, { CLI_ICON_META } from './CliIcon';
@@ -61,6 +62,9 @@ export default function SpawnModal({ isOpen, onClose, onSessionSpawned }: SpawnM
   const [cwd, setCwd] = useState('');
   const [sessionName, setSessionName] = useState('');
   const [cliType, setCliType] = useState<CliType>('copilot');
+  // Which launch controls the selected CLI actually honours. Declared up here
+  // because handleLaunch closes over it.
+  const caps = uiCapabilitiesForCli(cliType);
   const [permissionMode, setPermissionMode] = useState('default');
   const [model, setModel] = useState('');
   const [effort, setEffort] = useState('');
@@ -218,14 +222,18 @@ export default function SpawnModal({ isOpen, onClose, onSessionSpawned }: SpawnM
       name,
       permissionMode,
       model: model || undefined,
-      effort: effort || undefined,
-      allowedTools: allowedTools.trim() || undefined,
-      systemPrompt: cliType === 'claude' ? systemPrompt.trim() || undefined : undefined,
+      // Gate on capability, not on a hardcoded CLI name: these fields are
+      // hidden for CLIs that ignore them, and sending stale state for one
+      // would push a flag the provider silently drops.
+      effort: caps.effort ? effort || undefined : undefined,
+      allowedTools: caps.allowedTools ? allowedTools.trim() || undefined : undefined,
+      systemPrompt: caps.appendSystemPrompt ? systemPrompt.trim() || undefined : undefined,
       cliType,
-      copilotMode: cliType === 'copilot' ? copilotMode : undefined,
+      copilotMode: caps.agentMode ? copilotMode : undefined,
     });
   }, [
     allowedTools,
+    caps,
     cliType,
     connected,
     copilotMode,
@@ -363,7 +371,7 @@ export default function SpawnModal({ isOpen, onClose, onSessionSpawned }: SpawnM
             <p>These settings are preserved when AgentMatrix restarts or resumes this session.</p>
           </div>
         </div>
-        {cliType === 'copilot' ? (
+        {caps.agentMode ? (
           <FormField label="Agent mode">
             <OptionGroup>
               {COPILOT_MODES.map(mode => (
@@ -410,29 +418,33 @@ export default function SpawnModal({ isOpen, onClose, onSessionSpawned }: SpawnM
           <FormField label="Model" description={`Model IDs are passed directly to ${CLI_ICON_META[cliType].name}.`}>
             <SelectInput name="launch-model" value={model} onChange={setModel} options={models} />
           </FormField>
-          <FormField label={cliType === 'copilot' ? 'Reasoning effort' : 'Effort level'}>
-            <OptionGroup>
-              {EFFORT_LEVELS.map(level => (
-                <OptionButton key={level.value} selected={effort === level.value} onClick={() => setEffort(level.value)}>
-                  {level.label}
-                </OptionButton>
-              ))}
-            </OptionGroup>
-          </FormField>
-          <FormField
-            label={cliType === 'copilot' ? 'Allowed tool patterns' : 'Allowed tools'}
-            optional
-            description={cliType === 'copilot' ? 'Comma-separated Copilot allow-tool patterns.' : 'Comma-separated Claude tool names.'}
-          >
-            <TextInput
-              name="allowed-tools"
-              autoComplete="off"
-              value={allowedTools}
-              onChange={setAllowedTools}
-              placeholder={cliType === 'copilot' ? 'shell(npm:*), write, url' : 'Bash, Read, Edit'}
-            />
-          </FormField>
-          {cliType === 'claude' ? (
+          {caps.effort ? (
+            <FormField label={cliType === 'copilot' ? 'Reasoning effort' : 'Effort level'}>
+              <OptionGroup>
+                {EFFORT_LEVELS.map(level => (
+                  <OptionButton key={level.value} selected={effort === level.value} onClick={() => setEffort(level.value)}>
+                    {level.label}
+                  </OptionButton>
+                ))}
+              </OptionGroup>
+            </FormField>
+          ) : null}
+          {caps.allowedTools ? (
+            <FormField
+              label={cliType === 'copilot' ? 'Allowed tool patterns' : 'Allowed tools'}
+              optional
+              description={cliType === 'copilot' ? 'Comma-separated Copilot allow-tool patterns.' : 'Comma-separated Claude tool names.'}
+            >
+              <TextInput
+                name="allowed-tools"
+                autoComplete="off"
+                value={allowedTools}
+                onChange={setAllowedTools}
+                placeholder={cliType === 'copilot' ? 'shell(npm:*), write, url' : 'Bash, Read, Edit'}
+              />
+            </FormField>
+          ) : null}
+          {caps.appendSystemPrompt ? (
             <FormField label="Append system prompt" optional>
               <TextArea
                 name="append-system-prompt"

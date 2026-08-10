@@ -27,6 +27,13 @@ const CLI_BADGE_META: Record<string, { svg: string; color: string; name: string 
     color: '#6E40C9',
     name: 'GitHub Copilot',
   },
+  // Generic crescent mark, NOT Moonshot's official Kimi brand logo. Without
+  // this entry CliBadge renders nothing at all for kimi sessions.
+  kimi: {
+    svg: `<svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor" xmlns="http://www.w3.org/2000/svg"><path d="M9.6 1.2a6.8 6.8 0 1 0 5.2 10.9 5.6 5.6 0 1 1-5.2-8.9 6.9 6.9 0 0 1 0-2Z"/><path d="M12.4 1.1l.62 1.67 1.68.62-1.68.62-.62 1.68-.62-1.68L10.1 3.4l1.68-.62.62-1.67Z"/></svg>`,
+    color: '#5B5BD6',
+    name: 'Kimi Code',
+  },
 };
 
 function CliBadge({ cliType }: { cliType?: CliType }) {
@@ -432,8 +439,9 @@ export default function SessionDialog({
   };
 
   const cliType = session.cliType || 'claude';
-  // Claude can resume by name; Copilot resumes by ID. Match provider behavior.
-  const resumeToken = cliType === 'copilot' ? session.id : session.name;
+  // Only Claude resolves a resume token by name; Copilot and Kimi both key off
+  // the session ID. Match provider behavior.
+  const resumeToken = cliType === 'claude' ? session.name : session.id;
   const cliCmd = `cd ${session.cwd || '~'} && ${buildResumeShellCommand({ cliType, resumeId: resumeToken })}`;
 
   return (
@@ -1089,11 +1097,13 @@ function SettingsTab({ session, socketRef }: {
     if (!newName || newName === session.name) return;
     setRenameStatus('saving');
     // Claude renames in-TUI via the `/rename` slash command, so inject it into
-    // the PTY. Copilot has no working rename slash command — it's renamed on
-    // disk by the API (workspace.yaml write), so we must NOT inject anything
-    // (it would just be typed as a stray chat message).
+    // the PTY. Every other CLI is renamed on disk by the API, and injecting
+    // there would just type a stray chat message: Copilot has no working rename
+    // command, and Kimi's is `/title` (whose inline-argument form is
+    // unverified), NOT `/rename`. Allow-list rather than exclude Copilot, so a
+    // new CLI defaults to "inject nothing" instead of a bogus command.
     const socket = socketRef.current;
-    if (socket && (session.cliType || 'claude') !== 'copilot') {
+    if (socket && (session.cliType || 'claude') === 'claude') {
       socket.emit('terminal:input' as any, {
         sessionId: session.id,
         data: `/rename ${newName}\r`,

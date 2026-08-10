@@ -11,8 +11,8 @@
  * availability probe.
  */
 
-/** The persisted setting value. Wider than `CliType`: it carries 'auto', plus
- *  providers that are planned but not yet registered (e.g. 'kimi'). */
+/** The persisted setting value. Wider than `CliType` only in that it carries
+ *  'auto'; every concrete member is a registered provider. */
 export type OrchestratorProviderSetting = 'claude' | 'copilot' | 'kimi' | 'auto';
 
 /** A concrete provider the orchestrator can actually run as. */
@@ -22,8 +22,8 @@ export type OrchestratorProvider = Exclude<OrchestratorProviderSetting, 'auto'>;
  * Preference order for `orchestratorProvider: 'auto'`, cheapest-capable first.
  *
  * The orchestrator issues many small, internal, mostly-mechanical queries, so
- * per-token cost matters more than peak capability. Kimi leads once a
- * KimiProvider exists; Claude is the cheap capable default today; Copilot is
+ * per-token cost matters more than peak capability. Kimi leads now that
+ * KimiProvider is registered; Claude is the cheap capable fallback; Copilot is
  * last because it's the heaviest.
  *
  * THIS IS THE ONE KNOB — change the order here, nowhere else.
@@ -44,8 +44,8 @@ export const ORCHESTRATOR_PROVIDER_PREFERENCE: OrchestratorProvider[] = [
  *   available entry.
  * - Returns null when nothing resolves.
  *
- * `isAvailable` must not throw for unregistered providers ('kimi' today) —
- * it should simply report false.
+ * `isAvailable` must not throw for a provider it cannot resolve — it should
+ * simply report false.
  */
 export function resolveOrchestratorProvider(
   setting: OrchestratorProviderSetting | undefined,

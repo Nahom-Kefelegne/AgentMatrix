@@ -9,10 +9,10 @@ import {
   Search,
   Square,
 } from 'lucide-react';
-import { buildResumeShellCommand } from '@/lib/cli/uiMetadata';
+import { buildResumeShellCommand, isCliType, CLI_TYPES } from '@/lib/cli/uiMetadata';
 import type { CliType, ResumeSessionRequest } from '@/lib/types';
 import { useOrchestrator } from '@/lib/hooks/useOrchestrator';
-import CliIcon from './CliIcon';
+import CliIcon, { cliDisplayName, cliShortName } from './CliIcon';
 import { FolderPicker } from './ui/FolderPicker';
 import { Modal, OptionButton, OptionGroup, TextInput } from './ui/Modal';
 
@@ -69,7 +69,7 @@ function SessionRow({
     <article className="cc-resume-session">
       <div className="cc-resume-session-provider">
         <CliIcon cliType={session.cliType} />
-        <span>{session.cliType === 'copilot' ? 'GitHub Copilot' : 'Claude Code'}</span>
+        <span>{cliDisplayName(session.cliType)}</span>
         <time>{formatTimeAgo(session.lastModified)}</time>
       </div>
       <div className="cc-resume-session-main">
@@ -161,7 +161,7 @@ export default function ResumeModal({ isOpen, onClose, onResumeInApp }: ResumeMo
         sessionId: id,
         name: typeof data.name === 'string' ? data.name : undefined,
         cwd: data.cwd,
-        cliType: data.cliType === 'copilot' || data.cliType === 'claude' ? data.cliType : undefined,
+        cliType: isCliType(data.cliType) ? data.cliType : undefined,
       };
     } catch {
       return null;
@@ -244,7 +244,7 @@ export default function ResumeModal({ isOpen, onClose, onResumeInApp }: ResumeMo
           projectDir: data.projectDir,
           lastModified: Date.now(),
           active: false,
-          cliType: data.cliType === 'copilot' || data.cliType === 'claude' ? data.cliType : undefined,
+          cliType: isCliType(data.cliType) ? data.cliType : undefined,
         };
       } catch {
         return null;
@@ -388,14 +388,14 @@ export default function ResumeModal({ isOpen, onClose, onResumeInApp }: ResumeMo
               />
             </label>
             <div className="cc-resume-cli-filter" aria-label="Filter by CLI">
-              {(['all', 'copilot', 'claude'] as const).map(filter => (
+              {(['all', ...CLI_TYPES] as const).map(filter => (
                 <button
                   key={filter}
                   type="button"
                   aria-pressed={cliFilter === filter}
                   onClick={() => setCliFilter(filter)}
                 >
-                  {filter === 'all' ? 'All' : filter === 'copilot' ? 'Copilot' : 'Claude'}
+                  {filter === 'all' ? 'All' : cliShortName(filter)}
                 </button>
               ))}
             </div>

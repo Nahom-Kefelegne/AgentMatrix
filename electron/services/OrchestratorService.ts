@@ -40,12 +40,12 @@ function writeCache(sessionId: string, cliType: CliType): void {
 }
 
 /**
- * Whether a provider can actually be spawned. Providers that aren't registered
- * yet (e.g. 'kimi') are reported unavailable rather than thrown on, because
- * `getProvider` rejects unknown CliTypes.
+ * Whether a provider can actually be spawned. Every OrchestratorProvider is now
+ * registered in `getProvider` (kimi included), so availability is decided purely
+ * by whether the binary is on disk. Any future unregistered provider still
+ * reports false rather than throwing, via the catch below.
  */
 function isProviderAvailable(provider: OrchestratorProvider): boolean {
-  if (provider !== 'claude' && provider !== 'copilot') return false;
   try {
     getProvider(provider).findBinary();
     return true;

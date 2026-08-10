@@ -85,11 +85,10 @@ const KIMI_SESSIONS_DIR = join(KIMI_HOME, 'sessions');
  * `default_model` from the config file" (verified: `--model` "when omitted, new
  * sessions use `default_model` from the config file").
  *
- * NOTE: this table lives here rather than in `uiMetadata.ts` (where
- * CLAUDE_MODELS / COPILOT_MODELS live) only because uiMetadata.ts was outside
- * the change scope for this task. It belongs there — uiMetadata.ts is the
- * browser-safe module, and client bundles cannot import this file (it pulls in
- * `child_process`/`fs` at the top level). Moving it is a follow-up.
+ * The table itself now lives in `uiMetadata.ts` alongside CLAUDE_MODELS /
+ * COPILOT_MODELS and is imported above: that module is browser-safe, whereas
+ * this file pulls in `child_process`/`fs` at the top level and so cannot be
+ * reached from client bundles.
  */
 
 /**
