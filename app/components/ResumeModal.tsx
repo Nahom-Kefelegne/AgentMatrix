@@ -1,17 +1,15 @@
 'use client';
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import {
   Check,
   Clipboard,
   FolderClock,
   RotateCcw,
   Search,
-  Square,
 } from 'lucide-react';
 import { buildResumeShellCommand } from '@/lib/cli/uiMetadata';
 import type { CliType, ResumeSessionRequest } from '@/lib/types';
-import { useOrchestrator } from '@/lib/hooks/useOrchestrator';
 import CliIcon from './CliIcon';
 import { FolderPicker } from './ui/FolderPicker';
 import { Modal, OptionButton, OptionGroup, TextInput } from './ui/Modal';
@@ -33,7 +31,7 @@ interface ResumeModalProps {
   onResumeInApp?: (session: ResumeSessionRequest) => void;
 }
 
-type SearchMode = 'project' | 'all' | 'deep';
+type SearchMode = 'project' | 'all';
 
 const relativeTime = new Intl.RelativeTimeFormat(undefined, { numeric: 'auto', style: 'narrow' });
 
@@ -115,12 +113,6 @@ export default function ResumeModal({ isOpen, onClose, onResumeInApp }: ResumeMo
   const [directId, setDirectId] = useState('');
   const [directIdError, setDirectIdError] = useState('');
   const [resolving, setResolving] = useState(false);
-  const { query: queryOrchestrator } = useOrchestrator();
-  const [deepQuery, setDeepQuery] = useState('');
-  const [deepSearching, setDeepSearching] = useState(false);
-  const [deepResults, setDeepResults] = useState<SessionInfo[]>([]);
-  const [deepError, setDeepError] = useState('');
-  const abortRef = useRef(false);
 
   useEffect(() => {
     if (!isOpen || cwd) return;
@@ -148,7 +140,7 @@ export default function ResumeModal({ isOpen, onClose, onResumeInApp }: ResumeMo
   }, []);
 
   useEffect(() => {
-    if (isOpen && mode !== 'deep') void loadSessions(cwd, mode === 'all');
+    if (isOpen) void loadSessions(cwd, mode === 'all');
   }, [cwd, isOpen, loadSessions, mode]);
 
   const resolveSession = async (id: string): Promise<ResumeSessionRequest | null> => {
@@ -199,59 +191,6 @@ export default function ResumeModal({ isOpen, onClose, onResumeInApp }: ResumeMo
       `cd ${session.cwd} && ${buildResumeShellCommand({ cliType: session.cliType || 'claude', resumeId: id })}`,
     );
   };
-
-  const handleDeepSearch = useCallback(async () => {
-    const query = deepQuery.trim();
-    if (!query) return;
-    setDeepSearching(true);
-    setDeepResults([]);
-    setDeepError('');
-    abortRef.current = false;
-    const instruction = [
-      'Execute immediately, no preamble, no questions.',
-      `Find coding sessions whose transcripts mention: "${query}".`,
-      `Run: grep -rli "${query.replace(/"/g, '')}" ~/.claude/projects/*/*.jsonl ~/.copilot/session-state/*/events.jsonl 2>/dev/null`,
-      'For each matching path, extract the session UUID: Claude uses the filename without .jsonl; Copilot uses the parent directory name.',
-      'Output ONLY UUIDs, one per line, max 10. If there are no matches, output exactly NO_MATCHES.',
-    ].join(' ');
-    const result = await queryOrchestrator(instruction, 120_000);
-    if (abortRef.current) return;
-    setDeepSearching(false);
-    if (!result.success || /NO_MATCHES/i.test(result.content)) {
-      setDeepError('No matching sessions found.');
-      return;
-    }
-    const ids = [
-      ...new Set(
-        (result.content.match(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi) || [])
-          .map(id => id.toLowerCase()),
-      ),
-    ].slice(0, 10);
-    if (ids.length === 0) {
-      setDeepError('No matching sessions found.');
-      return;
-    }
-    const resolved: Array<SessionInfo | null> = await Promise.all(ids.map(async (id): Promise<SessionInfo | null> => {
-      try {
-        const response = await fetch(`/api/sessions/resolve?id=${encodeURIComponent(id)}`);
-        if (!response.ok) return null;
-        const data = await response.json();
-        return {
-          id,
-          name: data.name || `Session-${id.slice(0, 8)}`,
-          cwd: data.cwd,
-          slug: '',
-          projectDir: data.projectDir,
-          lastModified: Date.now(),
-          active: false,
-          cliType: data.cliType === 'copilot' || data.cliType === 'claude' ? data.cliType : undefined,
-        };
-      } catch {
-        return null;
-      }
-    }));
-    setDeepResults(resolved.filter((session): session is SessionInfo => Boolean(session)));
-  }, [deepQuery, queryOrchestrator]);
 
   const filtered = sessions.filter(session => (
     !session.active
@@ -313,7 +252,6 @@ export default function ResumeModal({ isOpen, onClose, onResumeInApp }: ResumeMo
           {([
             ['all', 'All Sessions'],
             ['project', 'By Project'],
-            ['deep', 'Transcript Search'],
           ] as [SearchMode, string][]).map(([key, label]) => (
             <OptionButton key={key} selected={mode === key} onClick={() => setMode(key)}>
               {label}
@@ -323,57 +261,7 @@ export default function ResumeModal({ isOpen, onClose, onResumeInApp }: ResumeMo
         {mode === 'project' ? <FolderPicker value={cwd} onChange={setCwd} /> : null}
       </div>
 
-      {mode === 'deep' ? (
-        <section className="cc-resume-search">
-          <div className="cc-resume-search-form">
-            <TextInput
-              value={deepQuery}
-              name="transcript-search"
-              aria-label="Transcript search"
-              autoComplete="off"
-              onChange={setDeepQuery}
-              onKeyDown={event => {
-                if (event.key === 'Enter' && !deepSearching) void handleDeepSearch();
-              }}
-              placeholder="Describe the work you remember…"
-            />
-            {deepSearching ? (
-              <button
-                type="button"
-                className="btn-destructive"
-                onClick={() => {
-                  abortRef.current = true;
-                  setDeepSearching(false);
-                }}
-              >
-                <Square size={12} aria-hidden="true" />
-                Stop
-              </button>
-            ) : (
-              <button className="btn-primary" onClick={() => void handleDeepSearch()} disabled={!deepQuery.trim()}>
-                <Search size={13} aria-hidden="true" />
-                Search
-              </button>
-            )}
-          </div>
-          {deepSearching ? (
-            <div className="cc-modal-empty" role="status">Searching Claude and Copilot transcripts…</div>
-          ) : deepError ? (
-            <div className="cc-modal-empty">{deepError}</div>
-          ) : deepResults.length > 0 ? (
-            <div className="cc-resume-results">
-              {deepResults.map(session => (
-                <SessionRow key={session.id} session={session} showPath onResume={resumeSession} />
-              ))}
-            </div>
-          ) : (
-            <div className="cc-modal-empty">
-              Search by a feature, error, file, or decision from a previous conversation.
-            </div>
-          )}
-        </section>
-      ) : (
-        <section className="cc-resume-search">
+      <section className="cc-resume-search">
           <div className="cc-resume-filter-row">
             <label className="cc-resume-search-input">
               <Search size={14} aria-hidden="true" />
@@ -420,8 +308,7 @@ export default function ResumeModal({ isOpen, onClose, onResumeInApp }: ResumeMo
               ))}
             </div>
           )}
-        </section>
-      )}
+      </section>
     </Modal>
   );
 }

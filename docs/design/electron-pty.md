@@ -14,7 +14,7 @@ This document describes the Electron shell and PTY (pseudo-terminal) management 
 6. [Prompt Injector](#prompt-injector)
 7. [Terminal Bridge](#terminal-bridge)
 8. [Editor Terminals](#editor-terminals)
-9. [Orchestrator Service](#orchestrator-service)
+9. [Disabled Orchestrator Compatibility](#disabled-orchestrator-compatibility)
 10. [Summary Service](#summary-service)
 11. [Handoff Service](#handoff-service)
 12. [Session Persistence & Auto-Resume](#session-persistence--auto-resume)
@@ -27,7 +27,9 @@ This document describes the Electron shell and PTY (pseudo-terminal) management 
 
 ## Overview
 
-Agent Matrix is an Electron application that wraps a Next.js web app and manages multiple Copilot/Claude CLI sessions through `node-pty`. The architecture has three layers:
+Agent Matrix is an Electron application that wraps a Next.js web app and manages
+Copilot (direct or Agency-launched) and Claude CLI sessions through `node-pty`.
+The architecture has three layers:
 
 1. **Electron main process** (`electron/main.ts`) -- creates the window, tray, and HTTP server
 2. **PTY layer** (`electron/pty/`) -- spawns and manages provider-backed CLI processes
@@ -49,7 +51,6 @@ graph TB
     subgraph PTY Layer
         PTY1[node-pty: Session 1]
         PTY2[node-pty: Session 2]
-        PTYO[node-pty: Orchestrator]
     end
 
     subgraph Browser / Renderer
@@ -66,7 +67,6 @@ graph TB
     SIO -->|write/read| PM
     PM -->|manages| PTY1
     PM -->|manages| PTY2
-    PM -->|manages| PTYO
 ```
 
 ---
@@ -125,7 +125,6 @@ sequenceDiagram
     participant Srv as HTTP + Socket.io
     participant Next as Next.js
     participant PM as PtyManager
-    participant Orch as Orchestrator
     participant Cache as Active Sessions Cache
 
     App->>Win: createWindow()
@@ -145,7 +144,7 @@ sequenceDiagram
     Srv->>Srv: createServer(handler)
     Srv->>Srv: attach Socket.io
     Srv->>Srv: store io on globalThis
-    Srv->>Orch: spawnOrchestrator(ptyManager)
+    Srv->>Srv: disableOrchestrator(ptyManager)
     Srv->>Srv: httpServer.listen(3000)
 
     Note over Srv,Cache: After server is listening:
@@ -216,7 +215,9 @@ io = new SocketIOServer(httpServer, {
 
 The `io` instance is stored on `globalThis` so that Next.js API routes (which run in the same process) can access it for emitting events from webhook handlers.
 
-On new client connections, the server sends a `STATE_SNAPSHOT` with all visible sessions (excluding the orchestrator) and the orchestrator ID.
+On new client connections, the server sends a `STATE_SNAPSHOT` with all active
+sessions. Startup also runs `disableOrchestrator()` to remove the legacy cache
+and reap a surviving hidden process without spawning a replacement.
 
 ---
 
@@ -244,7 +245,12 @@ interface PtySession {
   onReady: (() => void) | null;
   onStateChange: ((info: StateInfo) => void) | null;
   onContextUpdate: ((usage: number) => void) | null;
-  pendingPrompt: string | null;           // queued prompt for when ready
+  pendingPrompt: {
+    prompt: string;
+    resolve: () => void;
+    reject: (error: Error) => void;
+    timeout: NodeJS.Timeout;
+  } | null;
 }
 ```
 
@@ -372,16 +378,26 @@ Each `PtySession` maintains an `outputBuffer` of the last 300-500 output chunks.
    (Copilot's `session-store.db`)
 5. State transitions are detected:
    - If `provider.detectPromptReady()` detects the prompt -> state becomes `ready`
-   - If a `pendingPrompt` is queued, it's sent immediately and state stays `busy`
+   - If a `pendingPrompt` is queued, it is written, its delivery promise
+     resolves, and state stays `busy`
    - If state was `ready` and new non-prompt output arrives -> state becomes `busy`
 
 ### Sending Prompts
 
 ```typescript
-sendPrompt(sessionId, prompt)
+sendPrompt(sessionId, prompt, timeoutMs = 30_000): Promise<void>
 ```
 
-If the session is `ready`, the prompt is written immediately (`pty.write(prompt + '\r')`). If the session is `busy`, the prompt is stored in `pendingPrompt` and will be sent automatically when the session becomes ready.
+If the session is `ready`, the prompt is written immediately
+(`pty.write(prompt + '\r')`) and the promise resolves. If the session is busy,
+one prompt is queued until provider prompt detection reports ready. Provider
+Stop hooks also call `markPromptReady()`, which is the authoritative fallback
+for alt-screen TUIs whose visible prompt is not reliably parseable. The promise
+resolves only after that actual write. Timeout, PTY exit, kill, a second queued
+prompt, or write failure rejects and removes the pending delivery.
+
+Decision Canvas uses this acknowledgement boundary. It never marks a decision
+resolved or clears session attention merely because a prompt was queued.
 
 ### Cleanup
 
@@ -432,7 +448,7 @@ CLI TUI output goes through ANSI codes, cursor movements, and screen redraws. Pa
 
 ```mermaid
 sequenceDiagram
-    participant Caller as Service (Summary/Handoff/Orchestrator)
+    participant Caller as Service (Summary/Handoff)
     participant PI as PromptInjector
     participant PTY as PtySession
     participant CLI as CLI
@@ -564,14 +580,13 @@ graph LR
 |-------|---------|-------------|
 | `terminal:new` | `{ cwd, name?, permissionMode?, model?, effort?, allowedTools?, systemPrompt?, cliType?, copilotMode? }` | Spawn a new CLI session |
 | `terminal:resume` | `{ sessionId }` | Resume/reconnect to an existing session |
+| `terminal:restart` | `{ sessionId }` | Gracefully replace the session PTY while preserving launch profile and dimensions |
 | `terminal:end` | `{ sessionId }` | End a session (fire animation + /exit + cleanup) |
 | `terminal:input` | `{ sessionId, data }` | Forward keystrokes to PTY |
 | `terminal:resize` | `{ sessionId, cols, rows }` | Resize PTY dimensions |
 | `session:summary` | `{ sessionId }` | Request work summary generation |
 | `session:handoff` | `{ sourceSessionId, contextRequest, targetCwd, handoffId, ... }` | Transfer context to new session |
-| `orchestrator:query` | `{ query, queryId }` | Query the orchestrator |
-| `orchestrator:reset` | (none) | Kill and respawn orchestrator |
-| `orchestrator:get-id` | (none) | Request orchestrator session ID |
+| `orchestrator:query` | `{ query, queryId }` | Legacy compatibility request; returns unavailable immediately |
 
 #### Server -> Client
 
@@ -579,6 +594,7 @@ graph LR
 |-------|---------|-------------|
 | `terminal:data` | `{ sessionId, data }` | Terminal output from PTY |
 | `terminal:spawned` | `{ sessionId, name }` | Confirmation of new session |
+| `terminal:restart-reset` | `{ sessionId }` | Reset the mounted xterm before replacement PTY output |
 | `STATE_SNAPSHOT` | `Session[]` | All active sessions on connect |
 | `SESSION_START` | Session data | New session created |
 | `SESSION_END` | `{ sessionId }` | Session removed |
@@ -588,8 +604,7 @@ graph LR
 | `session:fired` | `{ sessionId }` | Trigger fired animation |
 | `session:summary-result` | `{ sessionId, bullets }` | Work summary result |
 | `session:handoff-status` | `{ handoffId, status, ... }` | Handoff progress updates |
-| `orchestrator:id` | `{ sessionId }` | Orchestrator session ID |
-| `orchestrator:result` | `{ queryId, success, content, lines }` | Orchestrator query result |
+| `orchestrator:result` | `{ queryId, success: false, content, lines: [] }` | Immediate response for stale clients |
 | `app:ready` | (none) | App fully initialized |
 | `app:tasks-loaded` | `{ tasks }` | Pre-fetched app tasks |
 | `app:ado-tasks-loaded` | `{ tasks }` | Pre-fetched ADO tasks |
@@ -604,6 +619,30 @@ Ending a session is a multi-step animated process:
 4. After 8 seconds: `ptyManager.kill()`, `removeSession()`, emit `SESSION_END`
 
 The 8-second delay allows the walk-to-exit animation to complete (shocked: 1s + packing: 1.5s + walk: ~4s + buffer).
+
+### In-App Session Restart
+
+Restart is a replacement transaction, not a second resume:
+
+1. Capture the live PTY columns/rows and complete launch profile.
+2. Send the provider exit sequence and wait for process exit.
+3. Force-kill surviving processes for that exact session. Windows enumerates
+   command lines through PowerShell/CIM and uses `taskkill /PID /T /F`.
+4. Remove stale Copilot `inuse.<pid>.lock` files only when no Copilot process
+   for the session remains.
+5. Emit `terminal:restart-reset` so mounted xterms discard the old screen and
+   protocol state.
+6. Spawn the replacement PTY at the captured dimensions, avoiding an initial
+   80x24 frame painted into a large terminal.
+7. Detect the provider's first interactive screen. Copilot recognizes its
+   normal `/ commands ... tab next tab` footer; a residual "Session in use"
+   confirmation is accepted once as a defensive fallback.
+8. Report ready within 30 seconds normally or 60 seconds on Windows, where
+   ConPTY and MCP startup are slower.
+
+The session record and terminal component remain mounted throughout. A failed
+restart retains an explicit error; a successful restart clears it without
+leaving stale terminal borders or duplicated frames.
 
 ### Terminal Resume / Reconnect
 
@@ -670,35 +709,21 @@ Editor terminals are stored on `globalThis.__editorTerminals` (a `Map<string, { 
 
 ---
 
-## Orchestrator Service
+## Disabled Orchestrator Compatibility
 
 **File:** `electron/services/OrchestratorService.ts`
 
-The orchestrator is a hidden Copilot session used for app-internal tasks (e.g., deep session search). It is not visible in the main UI.
+The hidden Copilot orchestrator and Resume transcript search are disabled.
+`disableOrchestrator()` runs at startup, deletes
+`~/.agentmatrix/orchestrator.json`, and targets any surviving process associated
+with the cached session ID. It never resumes or creates a replacement.
 
-### Lifecycle
+The service retains only narrow compatibility exports while older renderer code
+ages out:
 
-1. On startup, checks `~/.agentmatrix/orchestrator.json` for a cached session ID
-2. If found, attempts `spawnResume()` with the cached ID
-3. If resume fails (or no cache/stale pre-Copilot cache), spawns a fresh Copilot session with bypass permissions and a system prompt
-4. Subscribes to PTY output for provider-owned trust prompt patterns and auto-accepts them (sends Enter after 300ms)
-5. Named `agentMatrixOrchestrator(doNotUseManually)` in the name cache
-
-### System Prompt
-
-> "You are AgentMatrix Orchestrator. Execute tasks immediately. Write output to the file path specified in the prompt using Bash. Output only what is asked. No preamble. No questions. Do not modify any file except the specified output file."
-
-### Querying
-
-```typescript
-queryOrchestrator(instruction, opts?) -> { success, content, lines }
-```
-
-Uses `captureQuery()` to send instructions and capture output (ACP for Copilot, injector fallback for Claude). If the orchestrator has died, the service automatically respawns it before querying.
-
-### Reset
-
-The Settings UI provides a reset button that kills the current orchestrator, clears the cached ID, and spawns a fresh one.
+- `queryOrchestrator()` returns an immediate unsuccessful result.
+- `getOrchestratorId()` returns `null`.
+- `resetOrchestrator()` and `killOrchestrator()` only clean up legacy state.
 
 ---
 
@@ -857,7 +882,7 @@ Session names are stored in `~/.agentmatrix/names.json`:
 {
   "uuid-1": "refactor-auth",
   "uuid-2": "fix-tests",
-  "uuid-3": "agentMatrixOrchestrator(doNotUseManually)"
+  "uuid-3": "update-documentation"
 }
 ```
 
@@ -912,7 +937,7 @@ electron-builder
 ### Distribution
 
 The built app is distributed as a zip with a `setup.sh` script that:
-1. Checks for Copilot/Claude CLI and `az` CLI prerequisites
+1. Accepts standalone Copilot, Claude, or Agency Copilot as the coding-agent prerequisite and checks the `az` CLI prerequisite
 2. Configures CLI hooks (Claude settings and Copilot `~/.copilot/hooks/agentmatrix.json` HTTP POST to Next.js API routes)
 3. Copies the app to `/Applications`
 
@@ -929,7 +954,7 @@ The built app is distributed as a zip with a `setup.sh` script that:
 | `electron/services/npmPolicy.ts` | Managed npm/npx PATH shims for Agency MCP subprocess policy |
 | `electron/pty/OutputParser.ts` | ANSI stripping and legacy Claude output parsing helpers |
 | `electron/pty/PromptInjector.ts` | Fallback inject-and-capture via file-based output |
-| `electron/services/OrchestratorService.ts` | Hidden Copilot session for app-internal queries |
+| `electron/services/OrchestratorService.ts` | Disabled-feature cleanup and stale-client compatibility |
 | `electron/services/SummaryService.ts` | Work summary generation via captureQuery |
 | `electron/services/HandoffService.ts` | Context transfer between sessions |
 | `lib/state/activeSessionsCache.ts` | Auto-resume session list (`~/.agentmatrix/active-sessions.json`) |
@@ -945,7 +970,7 @@ The built app is distributed as a zip with a `setup.sh` script that:
 |------|---------|
 | `active-sessions.json` | Sessions to auto-resume on restart |
 | `names.json` | Session ID -> display name mapping |
-| `orchestrator.json` | Cached orchestrator session ID |
+| `orchestrator.json` | Legacy cache deleted during startup cleanup when present |
 | `output/<sessionId>.txt` | Temp file for prompt injection output |
 | `handoffs/<id>.md` | Context transfer documents |
 | `settings.json` | User preferences |

@@ -5,7 +5,6 @@ import {
   RefreshCw,
   RotateCcw,
   Settings,
-  TerminalSquare,
 } from 'lucide-react';
 import type { AppSettings } from '@/lib/state/appSettings';
 import type { CliType } from '@/lib/types';
@@ -18,7 +17,6 @@ import {
   validOptionValue,
 } from '@/lib/cli/uiMetadata';
 import CliIcon, { CLI_ICON_META } from './CliIcon';
-import { useSocketContext } from './SocketProvider';
 import {
   FormField,
   Modal,
@@ -39,7 +37,6 @@ interface CliHealthInfo {
 interface AppSettingsModalProps {
   isOpen: boolean;
   onClose: () => void;
-  onViewOrchestrator?: (sessionId: string) => void;
   dashboardV2Enabled: boolean;
   dashboardV2Override: boolean | null;
   onDashboardV2Change: (enabled: boolean) => void;
@@ -58,19 +55,16 @@ const INITIAL_SETTINGS: AppSettings = {
 export default function AppSettingsModal({
   isOpen,
   onClose,
-  onViewOrchestrator,
   dashboardV2Enabled,
   dashboardV2Override,
   onDashboardV2Change,
   onReplayIntro,
 }: AppSettingsModalProps) {
-  const { connected, socketRef } = useSocketContext();
   const [settings, setSettings] = useState<AppSettings>(INITIAL_SETTINGS);
   const [loaded, setLoaded] = useState(false);
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [lastSaveSucceeded, setLastSaveSucceeded] = useState(false);
-  const [orchestratorId, setOrchestratorId] = useState<string | null>(null);
   const [cliHealth, setCliHealth] = useState<CliHealthInfo[]>([]);
   const [agencyHealth, setAgencyHealth] = useState<{ installed: boolean; version: string | null } | null>(null);
   const [healthLoading, setHealthLoading] = useState(false);
@@ -88,17 +82,6 @@ export default function AppSettingsModal({
       setHealthLoading(false);
     }
   }, []);
-
-  useEffect(() => {
-    const socket = socketRef.current;
-    if (!socket || !connected) return;
-    const handler = (data: { sessionId: string }) => setOrchestratorId(data.sessionId);
-    socket.on('orchestrator:id' as any, handler);
-    socket.emit('orchestrator:get-id' as any);
-    return () => {
-      socket.off('orchestrator:id' as any, handler);
-    };
-  }, [connected, socketRef]);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -418,43 +401,6 @@ export default function AppSettingsModal({
             </div>
           </section>
 
-          <section className="cc-settings-section cc-settings-section--diagnostics">
-            <div className="cc-settings-section-heading">
-              <span>Developer Diagnostics</span>
-              <strong>Deep Search helper</strong>
-              <p>The hidden Copilot orchestrator currently powers Resume transcript search.</p>
-            </div>
-            <div className="cc-settings-diagnostics">
-              <TerminalSquare size={16} aria-hidden="true" />
-              <div>
-                <strong>{orchestratorId ? 'Orchestrator connected' : 'Orchestrator unavailable'}</strong>
-                <code>{orchestratorId || 'No active orchestrator session'}</code>
-              </div>
-              <button
-                type="button"
-                className="btn-outline"
-                disabled={!orchestratorId}
-                onClick={() => {
-                  if (!orchestratorId || !onViewOrchestrator) return;
-                  onClose();
-                  onViewOrchestrator(orchestratorId);
-                }}
-              >
-                View
-              </button>
-              <button
-                type="button"
-                className="btn-destructive"
-                disabled={!orchestratorId}
-                onClick={() => {
-                  if (!confirm('Reset the Deep Search orchestrator? Its current context will be lost.')) return;
-                  socketRef.current?.emit('orchestrator:reset' as any);
-                }}
-              >
-                Reset
-              </button>
-            </div>
-          </section>
         </>
       )}
     </Modal>

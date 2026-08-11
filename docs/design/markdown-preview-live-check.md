@@ -4,7 +4,7 @@ AgentMatrix turns a managed Copilot or Claude session into a live Control Center
 workflow. The agent can report status, reveal repository context, and hand work
 back for review without taking control of the terminal.
 
-## The eight session tools
+## Core session tools
 
 | Tool | What it does | What you should see |
 | --- | --- | --- |
@@ -12,8 +12,7 @@ back for review without taking control of the terminal.
 | `work_complete` | Marks the requested work complete | Completion state and summary appear in the session list |
 | `open_file` | Opens an exact repository file | Code uses Monaco; Markdown uses this rendered document view |
 | `reveal_range` | Opens an exact line and column range | Canvas highlights the relevant source instead of the whole file |
-| `open_symbol` | Finds a named function, type, or class | Symbol results lead to the owning definition |
-| `show_search_results` | Streams repository matches | Multiple locations appear without blocking terminal input |
+| `present_locations` | Presents exact locations already verified by the session | Related callers, implementations, or references appear as a grouped artifact |
 | `open_diff` | Opens the session-attributed diff | Only changes attributed to this session are shown |
 | `open_review` | Opens the review workflow | Line comments can be returned to the owning session |
 
@@ -48,27 +47,12 @@ reveal_range({
 Repository paths are root-scoped and validated against traversal and symlink
 escapes. Agent-opened previews preserve terminal focus.
 
-## 3. Symbol and repository search
+## 3. Verified locations
 
-Use `open_symbol` when the exact code element is known:
-
-```ts
-open_symbol({
-  symbol: 'useContextCanvas',
-  symbolKind: 'function'
-});
-```
-
-Use `show_search_results` when several locations may matter:
-
-```ts
-show_search_results({
-  query: 'invalidateNavigationFileEvent',
-  mode: 'content'
-});
-```
-
-Search streams asynchronously so the CLI remains interactive.
+Repository and symbol search are disabled while the product direction is being
+reconsidered. Sessions investigate with their normal coding tools, then use
+`present_locations` only when exact verified results help the user compare
+callers, implementations, references, or candidates.
 
 ## 4. Rendered Markdown documents
 

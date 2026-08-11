@@ -14,7 +14,7 @@ import {
   getNextDeskIndex,
   isAppManaged,
 } from './sessionStore';
-import { resolveSessionName, checkForRename, isGeneratedSessionName } from './sessionName';
+import { resolveSessionName, checkForRename } from './sessionName';
 import { getCachedName, setCachedName } from './nameCache';
 import { setActiveSessionName } from './activeSessionsCache';
 import { allProviders } from '../cli';
@@ -143,16 +143,15 @@ export function scanActiveSessions(): {
       setCachedName(proc.sessionId, proc.resumeName);
       setActiveSessionName(proc.sessionId, proc.resumeName);
       updated.push({ sessionId: proc.sessionId, name: proc.resumeName });
-    } else if (proc.cliType === 'copilot' && isGeneratedSessionName(existing.name, proc.sessionId)) {
-      // Copilot's process list carries only the UUID on resume, while its real
-      // display name lives in workspace.yaml. Upgrade synthetic scanner names
-      // once metadata becomes available so already-running moved sessions heal.
-      const discovered = findDiscoveredSession(provider, proc.sessionId);
-      if (discovered?.name && discovered.name !== existing.name) {
-        updateSession(proc.sessionId, { name: discovered.name });
-        setCachedName(proc.sessionId, discovered.name);
-        setActiveSessionName(proc.sessionId, discovered.name);
-        updated.push({ sessionId: proc.sessionId, name: discovered.name });
+    } else if (proc.cliType === 'copilot') {
+      // Copilot's workspace.yaml is authoritative. Reconcile arbitrary stale
+      // app/cache names, not only synthetic Session-<id> fallbacks.
+      const providerName = provider.findSessionName(proc.sessionId);
+      if (providerName && providerName !== existing.name) {
+        updateSession(proc.sessionId, { name: providerName });
+        setCachedName(proc.sessionId, providerName);
+        setActiveSessionName(proc.sessionId, providerName);
+        updated.push({ sessionId: proc.sessionId, name: providerName });
       }
     }
 

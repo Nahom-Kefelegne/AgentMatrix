@@ -11,7 +11,6 @@ import {
   PanelRightClose,
   Pin,
   PinOff,
-  Search,
 } from 'lucide-react';
 import {
   artifactCreatedLabel,
@@ -22,16 +21,16 @@ import {
   artifactRenderer,
   navigationRequestForArtifact,
 } from './canvasArtifact';
+import type {
+  DecisionCanvasRequest,
+  LocationsCanvasRequest,
+} from '@/lib/canvas/types';
+import { isRepositorySearchAction } from '@/lib/navigation/types';
 import type { ContextCanvasController } from './useContextCanvas';
 
 const CodePreview = dynamic(() => import('./CodePreview'), {
   ssr: false,
   loading: () => <div className="cc-loading" role="status">Loading code preview…</div>,
-});
-
-const SearchResults = dynamic(() => import('./SearchResults'), {
-  ssr: false,
-  loading: () => <div className="cc-loading" role="status">Loading search…</div>,
 });
 
 const MarkdownPreview = dynamic(() => import('./MarkdownPreview'), {
@@ -42,6 +41,16 @@ const MarkdownPreview = dynamic(() => import('./MarkdownPreview'), {
 const DiffCanvas = dynamic(() => import('./DiffCanvas'), {
   ssr: false,
   loading: () => <div className="cc-loading" role="status">Loading session review…</div>,
+});
+
+const LocationsArtifact = dynamic(() => import('./LocationsArtifact'), {
+  ssr: false,
+  loading: () => <div className="cc-loading" role="status">Loading locations…</div>,
+});
+
+const DecisionArtifact = dynamic(() => import('./DecisionArtifact'), {
+  ssr: false,
+  loading: () => <div className="cc-loading" role="status">Loading decision…</div>,
 });
 
 interface ContextCanvasProps {
@@ -93,6 +102,17 @@ export default function ContextCanvas({ sessionId, sessionName, cwd, controller 
   const title = artifactTitle(artifact);
   const createdLabel = artifactCreatedLabel(artifact);
   const nextQueued = state.queuedArtifacts.find(artifactIsRenderable);
+  const locationsRequest: LocationsCanvasRequest | null =
+    artifact?.type === 'typed' && artifact.request.kind === 'locations'
+      ? artifact.request
+      : null;
+  const decisionRequest: DecisionCanvasRequest | null =
+    artifact?.type === 'typed' && artifact.request.kind === 'decision'
+      ? artifact.request
+      : null;
+  const disabledSearch =
+    artifact?.type === 'navigation'
+    && isRepositorySearchAction(artifact.request.action);
 
   const handleResizeStart = useCallback((event: React.PointerEvent<HTMLButtonElement>) => {
     const canvas = canvasRef.current;
@@ -230,12 +250,30 @@ export default function ContextCanvas({ sessionId, sessionName, cwd, controller 
             hasRenderableQueue={Boolean(nextQueued)}
           />
         ) : null}
+        {disabledSearch ? (
+          <div className="cc-empty">
+            <Code2 size={24} aria-hidden="true" />
+            <strong>Repository Search Disabled</strong>
+            <span>Ask the session to investigate, then present exact verified locations.</span>
+          </div>
+        ) : null}
         {request && renderer === 'code' ? <CodePreview request={request} /> : null}
         {request && renderer === 'document' ? (
           <MarkdownPreview request={request} controller={controller} />
         ) : null}
-        {request && renderer === 'search' ? (
-          <SearchResults request={request} onOpenFile={controller.openFile} />
+        {locationsRequest && renderer === 'locations' ? (
+          <LocationsArtifact
+            key={locationsRequest.requestRef}
+            request={locationsRequest}
+            onOpenLocation={controller.openCode}
+          />
+        ) : null}
+        {decisionRequest && renderer === 'decision' ? (
+          <DecisionArtifact
+            key={decisionRequest.requestRef}
+            request={decisionRequest}
+            onResolved={controller.resolveDecision}
+          />
         ) : null}
         {request && (renderer === 'diff' || renderer === 'review') ? (
           <DiffCanvas
@@ -251,9 +289,6 @@ export default function ContextCanvas({ sessionId, sessionName, cwd, controller 
 
       <footer className="cc-footer">
         <div className="cc-footer-group">
-          <button type="button" onClick={() => controller.openSearch('', false)}>
-            <Search size={13} aria-hidden="true" /> Search Repository
-          </button>
           <button type="button" onClick={controller.openSessionDiff}>
             <GitCompareArrows size={13} aria-hidden="true" /> Review Session
           </button>

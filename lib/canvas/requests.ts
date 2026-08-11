@@ -142,6 +142,12 @@ function locationFrom(value: unknown, index: number): CanvasLocation {
       `locations[${index}].endColumn requires endLine.`,
     );
   }
+  if (endLine === line && item.endColumn === undefined) {
+    throw new NavigationServiceError(
+      'INVALID_CANVAS_REQUEST',
+      `locations[${index}].endColumn is required when endLine equals line.`,
+    );
+  }
   if (endLine !== undefined && endLine < line) {
     throw new NavigationServiceError(
       'INVALID_CANVAS_REQUEST',
@@ -359,6 +365,16 @@ export async function createCanvasRequest(
     }
     if (args.endColumn !== undefined && endLine === undefined) {
       throw new NavigationServiceError('INVALID_CANVAS_REQUEST', 'endColumn requires endLine.');
+    }
+    if (
+      endLine !== undefined
+      && endLine === startLine
+      && args.endColumn === undefined
+    ) {
+      throw new NavigationServiceError(
+        'INVALID_CANVAS_REQUEST',
+        'endColumn is required when endLine equals startLine.',
+      );
     }
     const startColumn = positiveInteger(args.startColumn, 'startColumn', true);
     const endColumn = positiveInteger(args.endColumn, 'endColumn', true);

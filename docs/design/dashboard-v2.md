@@ -1,6 +1,6 @@
 # Dashboard V2 - Console-First Control Center
 
-Status: **Dashboard V2 and Context Canvas MVP implemented**
+Status: **Dashboard V2 with Code, Locations, Decision, and Changes Canvas components implemented**
 
 Implementation plan:
 [`../plans/dashboard-v2-context-canvas.md`](../plans/dashboard-v2-context-canvas.md)
@@ -35,9 +35,9 @@ reset, or intervention sort first and receive stronger semantic treatment.
 
 ### 2.3 Repository context belongs to the conversation
 
-The Context Canvas is scoped to one selected session. Code, searches, and diffs
-open because of a developer or session request and retain a link back to the
-originating conversation event.
+The Context Canvas is scoped to one selected session. Code, verified locations,
+decisions, and diffs open because of a developer or session request and retain
+a link back to the originating conversation event.
 
 ### 2.4 Structure carries meaning
 
@@ -156,6 +156,11 @@ The list is derived from `deriveDashboardModel().fleet` and ordered by urgency:
 5. Context warning.
 6. Possible stall.
 
+Normal working sessions enter possible-stall treatment after three minutes
+without activity. A session whose last known event is context compaction gets a
+ten-minute grace period because Copilot compacts silently and exposes no
+dedicated completion hook. A new user prompt clears the stale compaction label.
+
 Healthy working, idle, and completed sessions remain in the same list after the
 prioritized entries. Interaction-required sessions stay red until real CLI
 prompt/tool activity changes their status.
@@ -179,10 +184,35 @@ The terminal header contains only operational information:
 
 Actions:
 
+- Session Inspector.
 - Review Diff, when changes exist.
 - Request Summary.
 - Fullscreen Terminal.
-- Legacy Session Details.
+
+### Session Inspector
+
+The selected session opens a right-side `SessionInspector` drawer. The drawer
+is pinned to the session ID that opened it; selecting or auto-routing another
+session cannot retarget an already-open inspector, and session removal closes it.
+
+The MVP has three sections:
+
+- **Overview:** provider, status, context, subagents, changed-file count,
+  working directory, session ID, timestamps, restart profile, and rename.
+- **MCPs:** effective static and runtime-injected MCP configuration with source,
+  scope, transport, executable name, and environment-variable names. Values,
+  URLs, arguments, and credentials are never returned to the renderer.
+- **Tasks:** app tasks whose `assignedTo` equals the inspected session, with a
+  handoff to the full Task Board.
+
+The drawer is a lazy chunk and its consolidated
+`/api/sessions/inspector` request starts only when opened. It preserves the
+Control Center focus trap and does not remount or resize the live terminal.
+
+Copilot session names come from the provider's full `workspace.yaml` name.
+AgentMatrix reconciles stale cache/auto-resume names to that authority. Rename
+reports success only after Copilot metadata is written; Claude continues to use
+its native `/rename` command plus the app cache.
 
 ### Terminal
 
@@ -194,6 +224,10 @@ Actions:
 Fullscreen uses the existing `FullscreenTerminal` component. While fullscreen
 owns PTY dimensions, the embedded terminal receives `visible={false}`. When
 fullscreen closes, the embedded terminal refits and reclaims PTY sizing.
+
+Session restart preserves the launch profile and terminal dimensions. The
+existing xterm resets before replacement output, and Windows receives explicit
+process-tree/lock cleanup plus a longer startup-readiness window.
 
 ### Keyboard ownership
 
@@ -210,8 +244,8 @@ The Canvas is a conditional session-scoped companion to the terminal.
 - Open file at an exact line/range.
 - Render Markdown documents with a lazy Preview/Source toggle.
 - Auto-preview selected-session `docs/design/*.md` changes without stealing focus.
-- Resolve and reveal a symbol.
-- Display repository search results.
+- Present grouped, exact repository locations already verified by the session.
+- Present a blocking structured decision and deliver one answer to the owning session.
 - Open stack-trace and compiler-error locations.
 - Review This Turn, This Session, Working Tree, Branch/Worktree, and Checkpoint
   diffs.
@@ -252,13 +286,19 @@ Local AgentMatrix MCP tools:
 
 - `open_file`.
 - `reveal_range`.
-- `open_symbol`.
-- `show_search_results`.
+- `present_code`.
+- `present_locations`.
+- `request_decision`.
 - `open_diff`.
 - `open_review`.
 
 The tools navigate UI only. They cannot write files, execute commands, run Git,
-create terminals, or focus the OS window.
+or create terminals. Decision is the narrow exception: after explicit human
+submission, AgentMatrix writes one validated response into the originating
+session's existing PTY.
+
+Repository and symbol search are intentionally disabled. Sessions investigate
+with their normal coding tools and may present exact verified locations instead.
 
 ## 10. Focus Policy
 
@@ -340,15 +380,10 @@ Model-facing paths are repository-relative POSIX paths only.
 - Monaco loads only after the Canvas opens.
 - Full diff content loads only after selection.
 - Requests use cancellation and stale-response protection.
-- Repository search, indexing, Git operations, transcript parsing, and
-  canonical path checks never run synchronously in the renderer.
-- Search is handled by an async server/main-process service or worker with
-  bounded per-root indexes, in-flight deduplication, LRU/TTL result caches,
-  incremental refresh, cancellation, and streamed result batches.
-- Interactive search is debounced; stale queries cannot update the selected
-  Canvas artifact.
-- Index refresh runs from file-change events or idle scheduling rather than
-  full rescans after every agent tool call.
+- Git operations, transcript parsing, and canonical path checks never run
+  synchronously in the renderer.
+- Repository and symbol search perform no work while disabled; the retained
+  compatibility route and navigation actions return HTTP 410.
 - File size, result count, binary/generated folders, and traversal depth are
   capped before work starts.
 - Terminal input, output, and resize handling always take priority over Canvas
@@ -383,10 +418,12 @@ OfficeView
       SessionSidebar
       SessionWorkspaceController
         EmbeddedSessionConsole
+        SessionInspector (on demand)
         ContextCanvas
           CanvasToolbar
           CodePreview
-          SearchResults
+          LocationsArtifact
+          DecisionArtifact
           DiffWorkspace / DiffCore
           ReviewFeedbackComposer
     FullscreenTerminal (on demand)
@@ -450,7 +487,10 @@ Implemented:
 - V2-native command rail and full-viewport layout.
 - Context Canvas split, resize, pinning, queued opens and per-session history.
 - Lazy Monaco code/range preview.
-- Streamed asynchronous content/symbol search with cancellation and bounded caches.
+- Grouped verified locations with lightweight snippets and Monaco handoff.
+- Structured decisions with authenticated, idempotent PTY response delivery.
+- Session Inspector with runtime MCP provenance, assigned tasks, launch profile,
+  and provider-authoritative rename.
 - Shared embedded DiffCore and compatibility ChangesViewer.
 - Terminal file/stack/OSC-8/HTTP links.
 - Capability-bound MCP navigation tools and root-scoped NavigationService.

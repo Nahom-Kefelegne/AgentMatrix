@@ -21,7 +21,7 @@ const sessionId = process.env.AGENTMATRIX_SESSION_ID || process.env.CLAUDE_SESSI
 const capability = process.env.AGENTMATRIX_NAVIGATION_CAPABILITY || '';
 
 const server = new Server(
-  { name: 'agentmatrix', version: '1.2.0' },
+  { name: 'agentmatrix', version: '1.3.0' },
   {
     capabilities: { tools: {} },
     instructions: AGENTMATRIX_MCP_INSTRUCTIONS,
@@ -32,7 +32,7 @@ const rangeProperties = {
   startLine: { type: 'integer', minimum: 1, description: '1-based start line.' },
   startColumn: { type: 'integer', minimum: 1, description: '1-based start column.' },
   endLine: { type: 'integer', minimum: 1, description: '1-based exclusive end line.' },
-  endColumn: { type: 'integer', minimum: 1, description: '1-based end column.' },
+  endColumn: { type: 'integer', minimum: 1, description: '1-based exclusive end column. Required when endLine equals startLine.' },
 };
 
 const locationProperties = {
@@ -43,8 +43,8 @@ const locationProperties = {
   },
   line: { type: 'integer', minimum: 1, description: '1-based line.' },
   column: { type: 'integer', minimum: 1, description: 'Optional 1-based column.' },
-  endLine: { type: 'integer', minimum: 1, description: 'Optional 1-based end line.' },
-  endColumn: { type: 'integer', minimum: 1, description: 'Optional 1-based end column.' },
+  endLine: { type: 'integer', minimum: 1, description: 'Optional 1-based exclusive end line.' },
+  endColumn: { type: 'integer', minimum: 1, description: 'Optional 1-based exclusive end column. Required when endLine equals line; otherwise defaults to column 1.' },
   label: {
     type: 'string',
     maxLength: 300,
@@ -308,33 +308,6 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
       },
     },
     {
-      name: 'open_symbol',
-      description: 'Ask AgentMatrix Canvas to navigate to a symbol, optionally constrained to a repository-relative POSIX path.',
-      inputSchema: {
-        type: 'object',
-        properties: {
-          symbol: { type: 'string', maxLength: 512 },
-          path: { type: 'string', description: 'Optional repository-relative POSIX path.' },
-          symbolKind: { type: 'string', maxLength: 100 },
-        },
-        required: ['symbol'],
-        additionalProperties: false,
-      },
-    },
-    {
-      name: 'show_search_results',
-      description: 'Ask AgentMatrix Canvas to show search results for a query. Returns UI status only.',
-      inputSchema: {
-        type: 'object',
-        properties: {
-          query: { type: 'string', maxLength: 512 },
-          mode: { type: 'string', enum: ['content', 'symbol'] },
-        },
-        required: ['query'],
-        additionalProperties: false,
-      },
-    },
-    {
       name: 'open_diff',
       description: 'Ask AgentMatrix Canvas to open a diff view. Does not return diff content.',
       inputSchema: {
@@ -404,29 +377,20 @@ async function post(path, body) {
 }
 
 async function requestNavigation(action, args) {
-  const effectiveAction = action === 'show_search_results' && args.mode === 'symbol'
-    ? 'open_symbol'
-    : action;
   const target = args.path
-    ? { path: args.path, range: rangeFrom(args), symbol: args.symbol }
+    ? { path: args.path, range: rangeFrom(args) }
     : undefined;
   const diff = action === 'open_diff'
     ? { source: args.source, baseRef: args.baseRef, compareRef: args.compareRef }
     : undefined;
   const payload = await post('/api/navigation/request', {
-    action: effectiveAction,
+    action,
     target,
-    query: effectiveAction === 'open_symbol'
-      ? (args.symbol || args.query)
-      : effectiveAction === 'show_search_results'
-        ? args.query
-        : undefined,
-    symbolKind: args.symbolKind,
     diff,
     // The selected session may reveal context, but never take keyboard focus.
     // Pinned Canvas content is protected client-side and converts this to a queue.
     presentation: { disposition: 'preview', focus: 'preserve' },
-    summary: `Agent requested ${effectiveAction.replace(/_/g, ' ')}`,
+    summary: `Agent requested ${action.replace(/_/g, ' ')}`,
   });
   const requestRef = payload?.request?.requestRef;
   const status = payload?.result?.status || 'queued';
@@ -469,7 +433,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         ? 'AgentMatrix notified the user that this session needs attention.'
         : 'AgentMatrix recorded that this session is complete.');
     }
-    if (['open_file', 'reveal_range', 'open_symbol', 'show_search_results', 'open_diff', 'open_review'].includes(name)) {
+    if (['open_file', 'reveal_range', 'open_diff', 'open_review'].includes(name)) {
       return await requestNavigation(name, args);
     }
     const canvasTools = {

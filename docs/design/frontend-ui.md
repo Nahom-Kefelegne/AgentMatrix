@@ -3,12 +3,17 @@
 > **Dashboard note (2026-07-26):** Dashboard V2 is now the default console-first
 > workspace. The legacy card grid and SessionDialog sections below remain relevant
 > to Dashboard V1 and compatibility flows. See
-> [`dashboard-v2.md`](dashboard-v2.md) for the current Dashboard V2 architecture
-> and planned Context Canvas.
+> [`dashboard-v2.md`](dashboard-v2.md) for the current Dashboard V2 and Context
+> Canvas architecture.
 
 ## Overview
 
-Agent Matrix is a Next.js 16 + Electron desktop application that provides a real-time visual interface for managing multiple CLI coding-agent sessions (GitHub Copilot CLI and Claude Code). The frontend renders three distinct view modes -- a Dashboard card grid, a pixel-art Office canvas, and a Monaco-based Editor -- all connected to the backend via Socket.io for live updates.
+Agent Matrix is a Next.js 16 + Electron desktop application that provides a
+real-time visual interface for managing multiple CLI coding-agent sessions
+(GitHub Copilot CLI directly or through Agency, plus Claude Code). The frontend
+renders three distinct view modes -- a Dashboard card grid, a pixel-art Office
+canvas, and a Monaco-based Editor -- all connected to the backend via Socket.io
+for live updates.
 
 All React components are client-side (`'use client'`) and use inline styles (no CSS modules or Tailwind class-based styling). The design language is a dark theme with a `#08080f`/`#111118` background palette, `#4a9eff` blue accents, and `#51cf66` green for success states.
 
@@ -33,6 +38,7 @@ graph TD
     OV --> OfficeCanvas
     OV --> HoverCard
     OV --> DashboardView
+    OV --> DashboardV2Container
     OV --> EditorView["EditorView (lazy)"]
     OV --> SessionDialog
     OV --> SetupModal
@@ -40,7 +46,6 @@ graph TD
     OV --> ResumeModal
     OV --> SpawnModal
     OV --> AppSettingsModal
-    OV --> OrchestratorViewer["SessionDialog (readOnly)"]
 
     SessionDialog --> SessionConsole
     SessionConsole --> TerminalPanel
@@ -58,6 +63,17 @@ graph TD
     DashboardView --> AmbientOrbs
     SessionCard --> ContextBar
     SessionCard --> MatrixRain
+
+    DashboardV2Container --> DashboardV2
+    DashboardV2 --> SessionSidebar
+    DashboardV2 --> SessionConsole
+    DashboardV2 --> SessionInspector["SessionInspector (lazy drawer)"]
+    DashboardV2 --> ContextCanvas
+    ContextCanvas --> CodePreview
+    ContextCanvas --> MarkdownPreview
+    ContextCanvas --> LocationsArtifact
+    ContextCanvas --> DecisionArtifact
+    ContextCanvas --> DiffCanvas
 
     EditorView --> FileTree
     EditorView --> EditorTabs
@@ -78,6 +94,46 @@ graph TD
 3. **`SocketProvider`** -- React context providing `{ connected, sessions, onEvent, socketRef }` to the entire tree.
 4. **`SplashScreen`** -- Full-screen overlay that shows until the `app:ready` socket event fires (20s fallback timeout). Fades out with framer-motion.
 5. **`OfficeView`** -- The main application shell. Manages all view state, modal visibility, and session selection.
+
+### Dashboard V2 Context Canvas
+
+`DashboardV2Container` derives the attention model and owns the selected
+session. `DashboardV2` keeps that session's `SessionConsole` mounted while
+conditionally opening `ContextCanvas` beside it.
+
+The Canvas uses one per-session artifact state for legacy navigation and typed
+requests. Code, Markdown, Locations, Decision, and Changes share history,
+pinning, background queues, reconnect snapshots, and close watermarks.
+
+`DecisionArtifact` is the first interactive typed renderer:
+
+- native radio choices plus optional custom text
+- no autofocus on request arrival
+- trusted POST to `/api/canvas/decision`
+- disabled controls while delivery waits for the actual PTY write
+- read-only receipt after resolution
+- focused receipt after an explicit submit so keyboard focus is not lost
+- retryable pending state on timeout, disconnect, or delivery failure
+
+### Dashboard V2 Session Inspector
+
+`SessionInspector` is a lazy Control Center drawer opened from the selected
+session header. Its inspected session ID is independent from the current
+dashboard selection, preventing rename/task actions from silently switching to
+another session.
+
+One authenticated fetch loads the drawer manifest:
+
+- restart profile from `active-sessions.json`
+- effective MCP inventory from provider/user/project config plus live Copilot
+  `--additional-mcp-config` arguments
+- assigned app tasks
+
+Overview remains live from `SessionData`. Rename uses
+`/api/sessions/rename`; Copilot writes and verifies provider metadata before the
+UI/cache update, while Claude sends `/rename` to the PTY. The MCP view exposes
+environment key names only. Task rows hand off to the full Task Board rather
+than duplicating task mutation controls.
 
 ---
 
@@ -165,7 +221,6 @@ flowchart LR
 | Hook | File | Purpose |
 |------|------|---------|
 | `useSessionContext` | `lib/hooks/useSessionContext.ts` | Listens for `session:context` events to track context window usage per session (0-100%) |
-| `useOrchestrator` | `lib/hooks/useOrchestrator.ts` | Sends queries to the orchestrator session and awaits `orchestrator:result` responses |
 | `usePrompt` | `lib/hooks/usePrompt.ts` | Chat-style prompt interface for sending prompts and receiving responses (used by PromptPanel) |
 
 ### Local Component State
@@ -224,7 +279,7 @@ stateDiagram-v2
 | `sessions` | `Map<string, SessionData>` | Full session map for navigation |
 | `onClose` | `() => void` | Close callback |
 | `onPrev/onNext` | `() => void` | Session navigation arrows |
-| `readOnly` | `boolean` | Disables terminal input and hides action buttons (for orchestrator viewer) |
+| `readOnly` | `boolean` | Disables terminal input and hides action buttons |
 | `onSelectSession` | `(id) => void` | For handoff completion -- switch to new session |
 | `onOpenTask` | `(taskId) => void` | Opens TaskBoard to a specific task |
 
@@ -282,7 +337,7 @@ sequenceDiagram
     Note over UI,Socket: Socket terminal:input is the fallback
 
     Note over UI: Shift+Enter
-    UI->>PTY: Copilot/Claude-specific modified Enter sequence
+    UI->>PTY: Provider-specific modified Enter sequence
 
     Note over UI: Window resize
     UI->>XT: FitAddon.fit()
@@ -432,7 +487,6 @@ Three search modes for finding past sessions:
 
 1. **By Project**: `FolderPicker` + session list from `/api/sessions/list?cwd=<path>`
 2. **All Sessions**: Global search from `/api/sessions/list?global=true`
-3. **Deep Search**: Uses the orchestrator session to grep JSONL transcripts. Sends instruction via `useOrchestrator` hook, resolves session IDs in parallel.
 
 Also includes **Resume by Session ID** -- direct UUID input with validation and resolution.
 
@@ -468,7 +522,6 @@ Application-wide configuration:
 - Default permission mode
 - Default effort level
 - Append system prompt textarea (auto-saved on blur)
-- Orchestrator session viewer (read-only SessionDialog) and reset button
 
 ### SetupModal
 
@@ -521,8 +574,6 @@ sequenceDiagram
 | `session:context` | Context tracking | Update ContextBar percentage |
 | `session:handoff-status` | Handoff progress | Update HandoffModal status |
 | `app:ready` | Startup complete | Dismiss SplashScreen |
-| `orchestrator:id` | On request | Show in AppSettingsModal |
-| `orchestrator:result` | Query response | Return to useOrchestrator hook |
 | `terminal:spawned` | PTY created | SpawnModal close + select session |
 
 ---
@@ -725,7 +776,7 @@ Styling is a mix of React `style` props and shared CSS files imported from
 | Green | `#51cf66` | Success, working status |
 | Red | `#ff6b6b` | Error, destructive actions |
 | Yellow | `#ffd43b` | Warning, assigned status |
-| Purple | `#cc5de8` | Transfer context, orchestrator |
+| Purple | `#cc5de8` | Transfer context |
 
 ### Fonts
 

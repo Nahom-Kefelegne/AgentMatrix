@@ -12,7 +12,7 @@ export type CanvasRequestKind =
   | 'runtime_evidence'
   | 'browser_preview';
 
-export const CANVAS_RENDERED_KINDS = ['code', 'changes'] as const;
+export const CANVAS_RENDERED_KINDS = ['code', 'locations', 'changes', 'decision'] as const;
 export type CanvasRenderedKind = typeof CANVAS_RENDERED_KINDS[number];
 
 export function isCanvasRenderedKind(
@@ -25,6 +25,7 @@ export interface CanvasLocation {
   path: string;
   line: number;
   column?: number;
+  /** Exclusive range end. When endColumn is omitted, the endpoint is column 1. */
   endLine?: number;
   endColumn?: number;
   label?: string;
@@ -34,6 +35,13 @@ export interface CanvasDecisionOption {
   id: string;
   label: string;
   description?: string;
+}
+
+export interface CanvasDecisionResolution {
+  kind: 'option' | 'custom';
+  optionId?: string;
+  answer: string;
+  respondedAt: number;
 }
 
 export interface CanvasValidationFailure {
@@ -97,6 +105,8 @@ export interface DecisionCanvasRequest extends CanvasRequestBase {
     question: string;
     options: CanvasDecisionOption[];
     allowCustom: boolean;
+    /** Host-authored response. MCP inputs can never supply this field. */
+    resolution?: CanvasDecisionResolution;
   };
 }
 

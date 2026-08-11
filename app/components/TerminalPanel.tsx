@@ -266,9 +266,16 @@ export default function TerminalPanel({ sessionId, sessionName, cwd, visible, re
           setStatus('exited');
         }
       };
+      const handleRestartReset = (msg: { sessionId: string }) => {
+        if (msg.sessionId !== sessionId) return;
+        try { terminal.reset(); } catch {}
+        setStatus('connecting');
+        requestAnimationFrame(safeFit);
+      };
 
       socket.on('terminal:data' as any, handleData);
       socket.on('terminal:exit' as any, handleExit);
+      socket.on('terminal:restart-reset' as any, handleRestartReset);
 
       // ── Focus handling (named functions for proper cleanup) ──
 
@@ -327,6 +334,7 @@ export default function TerminalPanel({ sessionId, sessionName, cwd, visible, re
         document.removeEventListener('visibilitychange', onVisibilityChange);
         socket.off('terminal:data' as any, handleData);                      // 5. Remove socket listeners
         socket.off('terminal:exit' as any, handleExit);
+        socket.off('terminal:restart-reset' as any, handleRestartReset);
         try { onResizeDisposable.dispose(); } catch {}                       // 6. Dispose xterm event sub
         try { terminalLinksDisposable.dispose(); } catch {}
         terminalLinks.dispose();

@@ -220,6 +220,27 @@ export default function CopilotTerminalPanel({ sessionId, sessionName, cwd, visi
   });
 
   useEffect(() => {
+    const socket = socketRef.current;
+    if (!socket) return;
+    const handleRestartReset = (event: { sessionId: string }) => {
+      if (event.sessionId !== sessionId) return;
+      terminalProtocolRef.current = createTerminalProtocolState();
+      appSelectionTextRef.current = '';
+      const terminal = getTerminal();
+      try { terminal?.reset(); } catch {}
+      setStatus('connecting');
+      window.requestAnimationFrame(() => {
+        fit();
+        focus();
+      });
+    };
+    socket.on('terminal:restart-reset', handleRestartReset);
+    return () => {
+      socket.off('terminal:restart-reset', handleRestartReset);
+    };
+  }, [fit, focus, getTerminal, sessionId, socketRef]);
+
+  useEffect(() => {
     const container = containerRef.current;
     if (!container) return;
     const clearAppSelection = () => {

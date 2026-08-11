@@ -69,20 +69,21 @@ One explicit switch determines what can render now:
 | Artifact | Renderer |
 |---|---|
 | Legacy file/range | Existing Code or Document |
-| Legacy search | Existing Search |
 | Legacy diff/review | Existing Diff |
 | Typed Code | Existing Code or Document |
+| Typed Locations | Locations ledger |
 | Typed Changes | Existing Diff |
-| Other typed kinds | Queued until their component exists |
+| Typed Decision | Interactive decision/receipt |
+| Validation, Plan, Runtime Evidence, Browser Preview | Queued until their components exist |
 
 There is no plugin registry. `artifactRenderer()` is an exhaustive typed switch
-and the deliberate extension point. Adding Locations next means:
+and the deliberate extension point. Locations and Decision each required:
 
 1. Add `locations` to the shared `CANVAS_RENDERED_KINDS` capability list.
 2. Add one dynamic component import.
 3. Add one render branch.
 
-Unknown future kinds remain queued rather than rendering a broken placeholder.
+Unrendered kinds remain queued rather than rendering a broken placeholder.
 
 ## Delivery
 
@@ -90,6 +91,9 @@ New MCP tools emit `canvas:requested` only.
 
 - Typed Code and Changes are adapted to the existing component prop shape in
   the renderer.
+- Typed Locations and Decision render directly from their validated payloads.
+- Decision resolution emits `canvas:decision-resolved` and replaces every local
+  copy of that request in active content, history, and queue.
 - Legacy MCP tools and terminal links continue to emit `navigation:requested`.
 - `canvas:snapshot` hydrates requests received while the renderer was absent.
 
@@ -130,6 +134,10 @@ The existing seamlessness policy applies to both sides of the union:
     remains suppressed.
 19. When a session is selected, a newer queued renderable artifact replaces
     older agent-owned content, but never pinned or human-owned content.
+20. A resolved Decision snapshot upgrades an unresolved cached copy with the
+    same requestRef and never redelivers its answer.
+21. Cleanup removes only session IDs previously observed in the active-session
+    map; a Canvas request racing ahead of a new session snapshot is not pruned.
 
 ## Shared Header Contract
 
@@ -187,12 +195,14 @@ a protocol migration.
     shared by server delivery responses and client routing.
 16. Definitive session removal revokes its capability and retained Canvas state;
     routes revalidate both immediately before emission to close in-flight races.
+17. Decision is resolved only after its response is written to the owning PTY;
+    retries cannot create duplicate writes.
 
 ## Validation
 
 The implementation must prove:
 
-1. Existing Code, Document, Search, and Changes behavior remains intact.
+1. Existing Code, Document, and Changes behavior remains intact.
 2. Typed Code and Changes render without a duplicate navigation event.
 3. Unsupported typed requests queue and never show a broken placeholder.
 4. Background and pinned requests queue.
@@ -202,3 +212,4 @@ The implementation must prove:
 7. Closing Canvas remains respected after snapshot replay.
 8. A genuinely newer request received during disconnect is recovered.
 9. Terminal focus and mounting behavior are unchanged.
+10. Decision pending/resolved state survives history, remount, and snapshot replay.

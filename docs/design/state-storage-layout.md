@@ -28,7 +28,6 @@ The migration is opportunistic: on first launch after the upgrade, the app moves
 ├── tasks.json              # in-app task store
 ├── ado.json                # Azure DevOps org + project config
 ├── active-sessions.json    # auto-resume tracking
-├── orchestrator.json       # hidden orchestrator session ID
 ├── output/                 # PromptInjector inject-and-capture temp files
 │   └── <sessionId>.txt
 ├── tasks/                  # Task-assignment markdown handed to CLIs
@@ -47,7 +46,6 @@ graph TD
   Root --> T[tasks.json]
   Root --> A[ado.json]
   Root --> AS[active-sessions.json]
-  Root --> O[orchestrator.json]
   Root --> OD[output/]
   Root --> TD[tasks/]
   Root --> RD[reviews/]
@@ -58,6 +56,10 @@ graph TD
   HD --> HF["{handoffId}.md"]
   style Root fill:#dfd
 ```
+
+Older installs may still have `orchestrator.json`. The hidden orchestrator is
+disabled; startup uses `ORCHESTRATOR_PATH` only to delete that legacy cache and
+reap its associated process. The app does not recreate the file.
 
 ---
 

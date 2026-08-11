@@ -2,86 +2,22 @@
 
 ## Overview
 
-Agent Matrix's services layer orchestrates CLI sessions through three specialized services (Orchestrator, Summary, Handoff), provider-specific capture for programmatic CLI interaction, and a state management system that persists across Next.js hot reloads using `globalThis`. App-owned persistent data is stored as JSON files in `~/.agentmatrix/`; Claude and Copilot keep their own native state under their respective config directories.
+Agent Matrix's services layer uses Summary and Handoff services, provider-specific
+capture for programmatic CLI interaction, and a state management system that
+persists across Next.js hot reloads using `globalThis`. App-owned persistent
+data is stored as JSON files in `~/.agentmatrix/`; Claude and Copilot keep their
+own native state under their respective config directories.
 
 ---
 
-## 1. Orchestrator Service
+## 1. Orchestrator Status
 
 **File:** `electron/services/OrchestratorService.ts`
 
-The Orchestrator is a hidden Copilot session used exclusively for app-internal tasks (e.g., deep session search). It is never shown in the main UI session list.
-
-### Lifecycle
-
-```mermaid
-stateDiagram-v2
-    [*] --> CheckCache: spawnOrchestrator()
-    CheckCache --> Resume: cached ID exists
-    CheckCache --> SpawnFresh: no cached ID
-    Resume --> StartupMonitor: success
-    Resume --> SpawnFresh: resume failed
-    SpawnFresh --> StartupMonitor: spawned
-    StartupMonitor --> MonitorTrust: watch for trust prompt
-    MonitorTrust --> AutoAccept: trust prompt detected
-    MonitorTrust --> Ready: 60s timeout (no prompt)
-    AutoAccept --> Ready: Enter sent
-    Ready --> Query: queryOrchestrator()
-    Query --> Ready: result returned
-    Ready --> Reset: resetOrchestrator()
-    Reset --> SpawnFresh: cache cleared
-    Ready --> Kill: killOrchestrator()
-    Kill --> [*]
-```
-
-### System Prompt
-
-```
-You are AgentMatrix Orchestrator. Execute tasks immediately. Write output to the file
-path specified in the prompt using Bash. Output only what is asked. No preamble. No
-questions. Do not modify any file except the specified output file.
-```
-
-### Session ID Persistence
-
-- **Cache file:** `~/.agentmatrix/orchestrator.json`
-- **Schema:** `{ "sessionId": "<uuid>" }`
-- On startup, attempts to resume from cached Copilot ID if it exists on disk; spawns fresh on failure or stale pre-Copilot cache entries
-- Named `agentMatrixOrchestrator(doNotUseManually)` in the name cache to prevent accidental interaction
-
-### Trust Prompt Handling
-
-The `startupMonitor()` subscribes to PTY output for up to 60 seconds, looking for provider-owned trust prompt patterns plus fallback keywords (`"trust this folder"`, `"trust this project"`, `"Is this a project"`, `"Yes, I trust"`). When detected, it sends `\r` (Enter) after 300ms to auto-accept, then removes its subscriber after acceptance or timeout.
-
-### Query Interface
-
-```typescript
-queryOrchestrator(instruction: string, opts?: InjectOptions)
-  -> Promise<{ success: boolean; content: string; lines: string[] }>
-```
-
-Delegates to `captureQuery()` (ACP for Copilot, injector fallback for Claude). Before querying, the service checks if the session is still open and respawns if needed.
-
-### Socket Events
-
-| Event | Direction | Purpose |
-|---|---|---|
-| `orchestrator:id` | Server -> Client | Send orchestrator session ID |
-| `orchestrator:get-id` | Client -> Server | Request orchestrator ID |
-| `orchestrator:query` | Client -> Server | Send query to orchestrator |
-| `orchestrator:result` | Server -> Client | Return query result |
-| `orchestrator:reset` | Client -> Server | Kill + respawn orchestrator |
-
-### Key Exports
-
-| Function | Purpose |
-|---|---|
-| `spawnOrchestrator(ptyManager)` | Resume or spawn orchestrator |
-| `queryOrchestrator(instruction, opts?)` | Send prompt, get structured output |
-| `getOrchestratorId()` | Get current session ID |
-| `isOrchestrator(sessionId)` | Check if ID matches orchestrator |
-| `killOrchestrator()` | Kill the PTY process |
-| `resetOrchestrator()` | Kill, clear cache, respawn fresh |
+The hidden Copilot orchestrator and Resume transcript search are disabled. On
+startup, `disableOrchestrator()` removes the cached identity and kills any
+surviving process from older versions. Compatibility query calls return an
+immediate unavailable result and never spawn a hidden session.
 
 ---
 
@@ -282,9 +218,20 @@ interface PtySession {
   onReady: (() => void) | null;
   onStateChange: ((info: StateInfo) => void) | null;
   onContextUpdate: ((usage: number) => void) | null;
-  pendingPrompt: string | null; // Queued prompt for when ready
+  pendingPrompt: {
+    prompt: string;
+    resolve: () => void;
+    reject: (error: Error) => void;
+    timeout: NodeJS.Timeout;
+  } | null;                     // One acknowledged queued delivery
 }
 ```
+
+`sendPrompt()` returns a promise that resolves only after the PTY write. Decision
+responses use this to keep the retained artifact pending and the session in
+attention if the CLI exits, times out, or cannot accept input. Provider Stop
+hooks mark the internal PTY prompt ready so alt-screen rendering does not block
+queued response delivery.
 
 ### Session Data Model
 
@@ -433,7 +380,6 @@ flowchart TB
         Tasks["tasks.json<br/>AppTask[]"]
         Active["active-sessions.json<br/>CachedSession[]"]
         Settings["settings.json<br/>AppSettings"]
-        Orch["orchestrator.json<br/>{ sessionId }"]
         ADO["ado.json<br/>AdoConfig"]
     end
 
@@ -445,7 +391,6 @@ flowchart TB
 
     Sessions -.->|auto-resume| Active
     Sessions -.->|name lookup| Names
-    Orch -.->|resume/spawn| Sessions
 ```
 
 ### In-Memory State (sessionStore.ts)
@@ -480,7 +425,10 @@ flowchart TB
 **Disk:** `~/.agentmatrix/names.json`
 **Schema:** `Record<string, string>` (sessionId -> display name)
 
-The authoritative source for session names. Read/written on every access (no in-memory caching).
+Fallback/display cache for session names. Read/written on every access (no
+in-memory caching). Copilot's authoritative name is the full value in
+`workspace.yaml`; Claude's authoritative custom rename is recorded by its
+native `/rename` transcript event.
 
 ### Active Sessions Cache
 
@@ -674,18 +622,27 @@ Discovers CLI sessions running outside of Agent Matrix by asking each provider f
 
 1. Collect active processes from all providers
 2. For new processes: create SessionData, assign desk, resolve name
-3. For existing processes: check provider-specific rename metadata (Claude `/rename`), fill missing CWD
+3. For existing processes: reconcile Copilot `workspace.yaml` names and Claude
+   `/rename` transcript metadata; fill missing CWD
 4. For disappeared processes: remove (unless `isAppManaged`)
 
 ### Name Resolution Priority
 
 **File:** `lib/state/sessionName.ts`
 
+Copilot:
+
+1. Full `workspace.yaml` name
+2. Cached name
+3. CWD/session fallback
+
+Claude:
+
 1. `--resume` name from process args
-2. Cached name from `names.json`
-3. `/rename` command detected in last 500KB of transcript
-4. `slug` from transcript first 3KB
-5. Last segment of CWD path
+2. `/rename` command detected in the transcript
+3. Cached name
+4. Transcript slug
+5. Last segment of CWD
 6. `Session-<first 6 chars of ID>`
 
 ### App-Managed Protection
@@ -727,7 +684,7 @@ The central wiring layer that connects Socket.IO events to PTY operations and se
 - **Input forwarding:** `terminal:input` -> write directly to PTY
 - **Resize handling:** `terminal:resize` -> resize PTY
 - **Summary requests:** `session:summary` -> delegate to SummaryService
-- **Orchestrator ops:** `orchestrator:reset`, `orchestrator:get-id`, `orchestrator:query`
+- **Disabled-feature compatibility:** stale `orchestrator:query` requests return unavailable immediately
 - **Context handoff:** `session:handoff` -> full handoff flow (summarize, spawn, inject)
 - **Editor terminals:** Raw shell PTY management for the code editor (no coding-agent CLI)
 
@@ -741,7 +698,6 @@ sequenceDiagram
     participant Win as BrowserWindow
     participant Srv as Next.js Server
     participant IO as Socket.IO
-    participant Orch as Orchestrator
     participant Resume as Auto-Resume
     participant Tasks as Task Prefetch
 
@@ -751,9 +707,8 @@ sequenceDiagram
     Srv->>IO: Create Socket.IO server on /api/socketio
     IO->>IO: Store on globalThis.__socketIO
 
-    IO->>Orch: spawnOrchestrator(ptyManager)
-    Orch->>Orch: Resume from cache or spawn fresh
-    Orch->>Orch: startupMonitor (trust prompt)
+    IO->>IO: disableOrchestrator(ptyManager)
+    Note over IO: Delete legacy cache and reap a surviving process; never respawn
 
     Srv->>Srv: httpServer.listen(3000)
 
@@ -825,7 +780,7 @@ All payloads extend `HookPayload: { session_id, session_name?, cwd?, timestamp? 
 | `tasks.json` | `AppTask[]` | App task store | Every task operation |
 | `active-sessions.json` | `CachedSession[]` | Auto-resume tracking | Spawn/resume/end |
 | `settings.json` | `AppSettings` | User preferences | Settings read/save |
-| `orchestrator.json` | `{ sessionId }` | Orchestrator session persistence | Startup/reset |
+| `orchestrator.json` | Legacy `{ sessionId }` | Deleted during disabled-feature startup cleanup; never created | Startup cleanup only |
 | `ado.json` | `AdoConfig` | ADO org + project | Config read/save |
 | `output/<sessionId>.txt` | Plain text | Prompt injection output (temp) | Per injection |
 | `tasks/<sessionId>-<taskId>.md` | Markdown | Task assignment document (temp) | Per assignment |

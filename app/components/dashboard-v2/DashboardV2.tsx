@@ -12,6 +12,7 @@ import {
   Power,
   RotateCcw,
   ScrollText,
+  SlidersHorizontal,
   Terminal,
 } from 'lucide-react';
 import { memo, useCallback, useEffect, useRef, useState } from 'react';
@@ -429,6 +430,7 @@ function ConsoleWorkspace(props: DashboardV2ViewProps) {
     onReviewChanges,
     onRequestSummary,
     onFullscreenSession,
+    onInspectSession,
     sessionControlState,
     sessionControlsAvailable,
     onRestartSession,
@@ -474,7 +476,16 @@ function ConsoleWorkspace(props: DashboardV2ViewProps) {
             <button
               type="button"
               className="mc-icon-button"
-              onClick={() => canvas.openSearch('', false)}
+              onClick={onInspectSession}
+              aria-label="Open session inspector"
+              title="Session Inspector"
+            >
+              <SlidersHorizontal size={16} aria-hidden="true" />
+            </button>
+            <button
+              type="button"
+              className="mc-icon-button"
+              onClick={canvas.openCanvas}
               aria-label="Open Context Canvas"
               title="Open Context Canvas"
             >

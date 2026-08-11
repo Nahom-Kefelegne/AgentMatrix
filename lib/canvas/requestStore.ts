@@ -67,6 +67,16 @@ export function getCanvasRequestSnapshot(): CanvasRequest[] {
   return Array.from(requestsBySession.values()).flat();
 }
 
+export function getCanvasRequest(
+  sessionId: string,
+  requestRef: string,
+): CanvasRequest | undefined {
+  trimStore();
+  return requestsBySession
+    .get(sessionId)
+    ?.find(request => request.requestRef === requestRef);
+}
+
 export function clearCanvasRequests(sessionId: string): void {
   requestsBySession.delete(sessionId);
 }

@@ -108,6 +108,8 @@ export interface CliProvider {
 
   // ─── TUI parsing ─────────────────────────────────────────────────
   detectPromptReady(text: string): boolean;
+  /** Detect the first complete interactive screen after spawn or resume. */
+  detectStartupReady(text: string): boolean;
   /**
    * Parse context-window usage (% used, 0-100) from a chunk of TUI output.
    * Used for CLIs that print usage in their terminal (Claude). CLIs that don't
@@ -143,6 +145,8 @@ export interface CliProvider {
   discoverSessions(): DiscoveredSession[];
   /** Look up the original working directory for a given session ID. */
   findSessionCwd(sessionId: string): string | undefined;
+  /** Read the provider's authoritative persisted session name. */
+  findSessionName(sessionId: string): string | undefined;
 
   /**
    * Absolute path to the session's on-disk transcript / event log, or undefined

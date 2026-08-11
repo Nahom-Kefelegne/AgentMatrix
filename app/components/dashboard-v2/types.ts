@@ -50,6 +50,7 @@ export interface DashboardV2ViewProps {
   onReviewChanges: (sessionId: string) => void;
   onRequestSummary: (sessionId: string) => void;
   onFullscreenSession: (sessionId: string) => void;
+  onInspectSession: () => void;
   onContinueSession: (sessionId: string) => void;
   onRestartSession: (sessionId: string) => void;
   onEndSession: (sessionId: string) => void;

@@ -13,6 +13,7 @@ import type { DashboardV2Navigation, SessionControlState } from './types';
 import { useSessionChanges } from './useSessionChanges';
 
 const FullscreenTerminal = dynamic(() => import('../FullscreenTerminal'), { ssr: false });
+const SessionInspector = dynamic(() => import('./SessionInspector'), { ssr: false });
 type LifecycleTimerKind = 'ack' | 'completion' | 'ready';
 
 function lifecycleTimerKey(sessionId: string, kind: LifecycleTimerKind): string {
@@ -52,6 +53,7 @@ export default function DashboardV2Container({
   const [fullscreenSessionId, setFullscreenSessionId] = useState<string | null>(null);
   const [handoffSessionId, setHandoffSessionId] = useState<string | null>(null);
   const [handoffOpen, setHandoffOpen] = useState(false);
+  const [inspectorSessionId, setInspectorSessionId] = useState<string | null>(null);
   const [sessionControls, setSessionControls] = useState<Record<string, SessionControlState>>({});
   const lifecycleTimersRef = useRef<Map<string, number>>(new Map());
   const canvas = useContextCanvas(selectedSessionId, socketRef, connected, sessions);
@@ -176,6 +178,12 @@ export default function DashboardV2Container({
     }
   }, [pendingSelectionId, sessions]);
 
+  useEffect(() => {
+    if (inspectorSessionId && !sessions.has(inspectorSessionId)) {
+      setInspectorSessionId(null);
+    }
+  }, [inspectorSessionId, sessions]);
+
   const handleSelectSession = useCallback((sessionId: string) => {
     setPendingSelectionId(null);
     setSelectedSessionId(sessionId);
@@ -288,6 +296,7 @@ export default function DashboardV2Container({
         onReviewChanges={handleReviewChanges}
         onRequestSummary={handleRequestSummary}
         onFullscreenSession={setFullscreenSessionId}
+        onInspectSession={() => setInspectorSessionId(selectedSessionId)}
         onContinueSession={handleContinueSession}
         onRestartSession={handleRestartSession}
         onEndSession={handleEndSession}
@@ -310,6 +319,23 @@ export default function DashboardV2Container({
             setHandoffOpen(false);
             setHandoffSessionId(null);
             handleSelectSession(sessionId);
+          }}
+        />
+      ) : null}
+      {inspectorSessionId && sessions.has(inspectorSessionId) ? (
+        <SessionInspector
+          key={inspectorSessionId}
+          isOpen
+          onClose={() => setInspectorSessionId(null)}
+          session={sessions.get(inspectorSessionId)!}
+          contextUsage={
+            contextMap[inspectorSessionId]
+            ?? sessions.get(inspectorSessionId)?.contextUsage
+            ?? null
+          }
+          onOpenTaskBoard={() => {
+            setInspectorSessionId(null);
+            navigation.onTasks();
           }}
         />
       ) : null}

@@ -65,9 +65,9 @@ const TOUR_PAGES: ReadonlyArray<TourPage> = [
   },
   {
     eyebrow: '02 · Context Canvas',
-    title: 'Ask. Find. Open.',
+    title: 'Ask. Verify. Open.',
     accent: 'Stay in the conversation.',
-    body: 'A session can find repository code and reveal the exact file, symbol, range, or search results beside its live CLI.',
+    body: 'A session can investigate repository code and reveal exact files, ranges, or verified location groups beside its live CLI.',
     features: [
       {
         number: '01',
@@ -76,8 +76,8 @@ const TOUR_PAGES: ReadonlyArray<TourPage> = [
       },
       {
         number: '02',
-        title: 'Search without blocking',
-        body: 'Repository and symbol search stream results asynchronously while terminal input and output remain responsive.',
+        title: 'Compare verified locations',
+        body: 'Callers, implementations, and references appear as exact expandable snippets after the session verifies them.',
       },
       {
         number: '03',

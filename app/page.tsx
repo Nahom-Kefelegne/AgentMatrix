@@ -60,7 +60,6 @@ function OfficeView() {
   const [openTaskId, setOpenTaskId] = useState<string | null>(null);
   const [showResume, setShowResume] = useState(false);
   const [showSpawn, setShowSpawn] = useState(false);
-  const [orchestratorViewId, setOrchestratorViewId] = useState<string | null>(null);
   const [showSettings, setShowSettings] = useState(false);
   const [introLaunch, setIntroLaunch] = useState<IntroBriefingLaunch | null | undefined>(undefined);
   const [viewMode, setViewMode] = useState<'office' | 'dashboard' | 'editor'>('dashboard');
@@ -341,24 +340,11 @@ function OfficeView() {
       <AppSettingsModal
         isOpen={showSettings}
         onClose={() => setShowSettings(false)}
-        onViewOrchestrator={(id) => setOrchestratorViewId(id)}
         dashboardV2Enabled={storedDashboardV2Enabled}
         dashboardV2Override={dashboardV2Override}
         onDashboardV2Change={setStoredDashboardV2Enabled}
         onReplayIntro={handleReplayIntro}
       />
-
-      {orchestratorViewId && (() => {
-        const orchSessions = new Map(sessions);
-        if (!orchSessions.has(orchestratorViewId)) {
-          orchSessions.set(orchestratorViewId, {
-            id: orchestratorViewId, name: 'Orchestrator', color: '#cc5de8', status: 'idle',
-            deskIndex: -1, deskPosition: { x: 0, y: 0 }, spawnPosition: { x: 0, y: 0 },
-            recentActions: [], agents: [], cwd: undefined, createdAt: Date.now(),
-          });
-        }
-        return <SessionDialog sessionId={orchestratorViewId} sessions={orchSessions} onClose={() => setOrchestratorViewId(null)} readOnly />;
-      })()}
     </>
   );
 }

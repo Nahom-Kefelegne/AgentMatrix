@@ -4,6 +4,7 @@ import { SOCKET_EVENTS } from '@/lib/types';
 import { getSession, updateSession } from '@/lib/state/sessionStore';
 import { emitToClients } from '@/lib/state/socketEmitter';
 import { refreshSessionContextUsage } from '@/lib/state/contextUsage';
+import { notifySessionTurnEnded } from '@/lib/cli/turnState';
 
 export async function POST(request: Request) {
   try {
@@ -15,6 +16,7 @@ export async function POST(request: Request) {
     // would hide that the session needs the user. Attention clears when the
     // user acts (their next prompt flips the session back to 'working').
     const session = getSession(payload.session_id);
+    notifySessionTurnEnded(payload.session_id);
     void refreshSessionContextUsage(payload.session_id).catch(error => {
       console.warn(`[stop] Context refresh failed for ${payload.session_id.slice(0, 8)}:`, error);
     });

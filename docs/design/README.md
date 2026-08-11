@@ -2,7 +2,11 @@
 
 ## Overview
 
-Agent Matrix is a desktop application that turns CLI coding agents (GitHub Copilot CLI and Claude Code) into a visual, manageable multi-session powerhouse. It wraps CLI sessions in an Electron app with real-time monitoring, pixel RPG visualization, integrated terminals, task management, and inter-session context transfer.
+Agent Matrix is a desktop application that turns CLI coding agents (GitHub
+Copilot CLI directly or through Agency, plus Claude Code) into a visual,
+manageable multi-session powerhouse. It wraps CLI sessions in an Electron app
+with real-time monitoring, integrated terminals, task management, and
+inter-session context transfer.
 
 **No API keys needed** — every agent is a real CLI session with full terminal, file system, and git access.
 
@@ -19,7 +23,6 @@ graph TB
         PTY["PtyManager<br/>node-pty sessions"]
         CQ["captureQuery<br/>Copilot ACP / Claude file capture"]
         TB["TerminalBridge<br/>Socket ↔ PTY"]
-        Orch["OrchestratorService<br/>Hidden Copilot session"]
         Summary["SummaryService<br/>AI work summaries"]
         Handoff["HandoffService<br/>Context transfer"]
     end
@@ -38,7 +41,7 @@ graph TB
     end
 
     subgraph "External"
-        CLI["CLI agents<br/>Copilot / Claude hooks → HTTP POST"]
+        CLI["CLI agents<br/>Copilot, Agency Copilot, or Claude hooks → HTTP POST"]
         ADO["Azure DevOps<br/>az CLI proxy"]
     end
 
@@ -48,7 +51,6 @@ graph TB
     TB -->|bridges| PTY
     TB <-->|events| SIO
     CQ -->|ACP or stdin/file fallback| PTY
-    Orch -->|uses| CQ
     Summary -->|uses| CQ
     Handoff -->|uses| CQ
 
@@ -68,7 +70,7 @@ graph TB
 ```mermaid
 flowchart LR
     subgraph "CLI Session"
-        CLI["Copilot or Claude CLI"]
+        CLI["Copilot, Agency Copilot, or Claude CLI"]
         Hook["Hook fires<br/>(tool use, session start, etc.)"]
     end
 
@@ -105,17 +107,22 @@ flowchart LR
 | [Frontend/UI](frontend-ui.md) | React components, views, modals | Component hierarchy, 3 view modes (Dashboard/Office/Editor), session dialog, terminal panels, canvas engine, real-time socket handling, splash screen |
 | [Backend/Server](backend-server.md) | Server, APIs, Socket.io, hooks | Server startup, 30+ API endpoints, 22 socket events, CLI hook system, session lifecycle, ADO integration, state stores |
 | [Electron/PTY](electron-pty.md) | Electron main process, terminals | Window/tray lifecycle, PTY spawning, prompt injection system, terminal bridge, auto-resume, session naming, production build |
-| [Services/State](services-state.md) | Services layer, state management | Orchestrator service, summary generation, context handoff, task system, globalThis persistence, type definitions, cache files |
+| [Services/State](services-state.md) | Services layer, state management | Disabled orchestrator cleanup, summary generation, context handoff, task system, globalThis persistence, type definitions, cache files |
 
 ---
 
 ## Key Architectural Decisions
 
 ### 1. Real CLI Sessions (Not API Calls)
-Every agent is a real `copilot` or `claude` CLI process spawned via `node-pty`. This gives each session full terminal access, file system, git, and native CLI features (tools, hooks, subagents). The tradeoff is complexity in PTY management, but the capability is unmatched.
+Every agent is a real `copilot`, `agency copilot`, or `claude` CLI process
+spawned via `node-pty`. This gives each session full terminal access, file
+system, git, and native CLI features (tools, hooks, subagents). The tradeoff is
+complexity in PTY management, but the capability is unmatched.
 
 ### 2. Hooks as the Event System
-Claude Code and GitHub Copilot CLI hooks fire HTTP POST requests to the app's API routes. This is the primary way the app knows what's happening in each session.
+Claude Code and Copilot hooks fire HTTP POST requests to the app's API routes.
+Copilot may be launched directly or through Agency. These hooks are the primary
+way the app knows what's happening in each session.
 
 ### 3. Out-of-Band Capture for Structured Output
 The app's killer feature. To get structured data from a session:
@@ -123,7 +130,9 @@ The app's killer feature. To get structured data from a session:
 2. Fall back to writing a prompt to PTY stdin telling Claude to write output to a temp file
 3. Read, parse, and clean up
 
-This powers: work summaries, task assignment, context handoff, and deep search. It's simple, reliable, and avoids parsing the TUI.
+This powers work summaries, task assignment, and context handoff. It is simple,
+reliable, and avoids parsing the TUI. Resume transcript search is currently
+disabled.
 
 ### 4. globalThis for State Persistence
 All session state lives on `globalThis` to survive Next.js hot reloads in dev mode. This is unconventional but necessary — Next.js re-imports modules on every change, which would wipe in-memory state. File-backed caches under `~/.agentmatrix/` provide persistence across app restarts.
@@ -165,7 +174,7 @@ AgentMatrix/
 │   │   ├── PtyManager.ts           # CLI session spawning
 │   │   └── PromptInjector.ts       # Claude stdin injection + file fallback
 │   └── services/
-│       ├── OrchestratorService.ts   # Hidden Copilot session
+│       ├── OrchestratorService.ts   # Legacy cleanup and stale-client compatibility
 │       ├── SummaryService.ts        # AI work summaries
 │       └── HandoffService.ts        # Context transfer
 ├── lib/
@@ -187,7 +196,7 @@ AgentMatrix/
 ├── tasks.json                          # App task board state
 ├── active-sessions.json                # Sessions to auto-resume
 ├── settings.json                       # User preferences
-├── orchestrator.json                   # Orchestrator session ID
+├── orchestrator.json                   # Legacy cache deleted on startup if present
 ├── ado.json                            # ADO org + project config
 ├── output/<sessionId>.txt              # Temp: Claude prompt-injection fallback
 ├── tasks/<sid>-<tid>.md                # Temp: task assignment file

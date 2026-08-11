@@ -1,13 +1,14 @@
 import { randomUUID } from 'crypto';
 import { emitToClients } from '@/lib/state/socketEmitter';
-import type {
-  NavigationAction,
-  DiffRequest,
-  NavigationPresentation,
-  NavigationRequest,
-  NavigationResult,
-  NavigationSource,
-  SourceRange,
+import {
+  isRepositorySearchAction,
+  type NavigationAction,
+  type DiffRequest,
+  type NavigationPresentation,
+  type NavigationRequest,
+  type NavigationResult,
+  type NavigationSource,
+  type SourceRange,
 } from './types';
 import { getNavigationService, isNavigationAction, NavigationServiceError } from './NavigationService';
 
@@ -102,6 +103,13 @@ export async function createNavigationRequest(
     throw new NavigationServiceError('INVALID_ACTION', 'Unsupported navigation action.');
   }
   const action: NavigationAction = options.action;
+  if (isRepositorySearchAction(action)) {
+    throw new NavigationServiceError(
+      'REPOSITORY_SEARCH_DISABLED',
+      'Repository and symbol search are temporarily disabled.',
+      410,
+    );
+  }
   const source = options.forceSource
     ?? (VALID_SOURCES.has(options.source as NavigationSource) ? options.source as NavigationSource : 'developer');
   const service = getNavigationService();
@@ -114,13 +122,7 @@ export async function createNavigationRequest(
   if ((action === 'open_file' || action === 'reveal_range') && !target) {
     throw new NavigationServiceError('TARGET_REQUIRED', `${action} requires a target path.`);
   }
-  if (action === 'open_symbol' && !target?.symbol && typeof options.query !== 'string') {
-    throw new NavigationServiceError('SYMBOL_REQUIRED', 'open_symbol requires a target symbol or query.');
-  }
   const query = options.query === undefined ? undefined : limitedString(options.query, 'query', 512);
-  if (action === 'show_search_results' && !query) {
-    throw new NavigationServiceError('QUERY_REQUIRED', 'show_search_results requires a query.');
-  }
   if (options.symbolKind !== undefined && (typeof options.symbolKind !== 'string' || options.symbolKind.length > 100)) {
     throw new NavigationServiceError('INVALID_SYMBOL_KIND', 'symbolKind must be a string of 100 characters or fewer.');
   }

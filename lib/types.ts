@@ -1,5 +1,9 @@
 import type { NavigationRequest, NavigationResult, ReviewFeedback } from './navigation/types';
-import type { CanvasRequest, CanvasRequestResult } from './canvas/types';
+import type {
+  CanvasRequest,
+  CanvasRequestResult,
+  DecisionCanvasRequest,
+} from './canvas/types';
 
 // ===== Review Comments =====
 
@@ -210,6 +214,7 @@ export interface ServerToClientEvents {
   'terminal:data': (data: { sessionId: string; data: string }) => void;
   'terminal:exit': (data: { sessionId: string; exitCode: number }) => void;
   'terminal:consent': (data: { sessionId: string }) => void;
+  'terminal:restart-reset': (data: { sessionId: string }) => void;
   'session:context': (data: { sessionId: string; usage: number }) => void;
   'session:state': (data: { sessionId: string; state: string; actionType?: string; actionLabel?: string; activity?: string }) => void;
   'session:restart-status': (data: SessionRestartStatus) => void;
@@ -227,6 +232,7 @@ export interface ServerToClientEvents {
   'canvas:requested': (request: CanvasRequest) => void;
   'canvas:acknowledged': (result: CanvasRequestResult) => void;
   'canvas:snapshot': (requests: CanvasRequest[]) => void;
+  'canvas:decision-resolved': (request: DecisionCanvasRequest) => void;
   'review:feedback': (feedback: ReviewFeedback) => void;
 }
 

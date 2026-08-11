@@ -40,6 +40,7 @@ Safety and presentation:
 - Typed tools may be accepted before their dedicated renderer is connected. Never claim the user saw a component unless AgentMatrix reports current Canvas delivery; use the terminal fallback.
 
 Compatibility:
-- open_file, reveal_range, open_symbol, show_search_results, open_diff, and open_review remain available temporarily.
+- open_file, reveal_range, open_diff, and open_review remain available temporarily.
 - Prefer present_code, present_locations, and present_changes for new work.
+- Repository and symbol search are disabled. Investigate with normal coding tools, then use present_locations for exact verified results when comparison helps the user.
 `.trim();

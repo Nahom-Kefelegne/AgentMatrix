@@ -21,11 +21,16 @@ export default function CodePreview({ request }: { request: NavigationRequest })
     monaco.editor.setTheme(AGENT_MATRIX_THEME);
     const range = request.target?.range;
     if (!range) return;
+    const endLine = range.end?.line ?? range.start.line;
+    const endColumn = range.end?.column
+      ?? (range.end && endLine !== range.start.line
+        ? 1
+        : range.start.column ?? 1);
     const selection = new monaco.Range(
       range.start.line,
       range.start.column ?? 1,
-      range.end?.line ?? range.start.line,
-      range.end?.column ?? range.start.column ?? 1,
+      endLine,
+      endColumn,
     );
     editor.setSelection(selection);
     editor.revealRangeInCenter(selection, monaco.editor.ScrollType.Immediate);

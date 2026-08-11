@@ -12,6 +12,8 @@ export interface SessionRestartProfile {
   effort?: string;
   allowedTools?: string;
   copilotMode?: string;
+  cols?: number;
+  rows?: number;
 }
 
 interface RestartSessionOptions {
@@ -58,6 +60,8 @@ export async function restartPtySession(
     effort: profile.effort,
     allowedTools: profile.allowedTools,
     copilotMode: profile.copilotMode,
+    cols: profile.cols,
+    rows: profile.rows,
   });
   await options.onSpawned?.(session);
   return session;

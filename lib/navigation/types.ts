@@ -3,10 +3,17 @@ export const NAVIGATION_PROTOCOL_VERSION = 'agentmatrix.navigation/v1' as const;
 export type NavigationAction =
   | 'open_file'
   | 'reveal_range'
+  // Retained only so stale clients receive an explicit disabled response.
   | 'open_symbol'
   | 'show_search_results'
   | 'open_diff'
   | 'open_review';
+
+export function isRepositorySearchAction(
+  action: unknown,
+): action is 'open_symbol' | 'show_search_results' {
+  return action === 'open_symbol' || action === 'show_search_results';
+}
 
 export type NavigationSource = 'developer' | 'terminal_link' | 'mcp' | 'session_event';
 export type NavigationDisposition = 'queue' | 'preview' | 'pinned';
@@ -152,7 +159,7 @@ export interface NavigationHistoryEntry {
   createdAt: number;
 }
 
-export type CanvasMode = 'closed' | 'code' | 'document' | 'search' | 'diff' | 'review';
+export type CanvasMode = 'closed' | 'code' | 'document' | 'diff' | 'review';
 
 export interface CanvasState {
   mode: CanvasMode;

@@ -1,208 +1,74 @@
-import { PtyManager, type PtySession } from '../pty/PtyManager';
-import { type InjectOptions } from '../pty/PromptInjector';
-import { captureQuery } from '../../lib/cli/acp/captureQuery';
-import { OutputParser } from '../pty/OutputParser';
-import { readFileSync, writeFileSync } from 'fs';
-import { randomUUID } from 'crypto';
-import { ORCHESTRATOR_PATH as CACHE_PATH, ensureDir, AGENTMATRIX_DIR } from '../../lib/state/paths';
+import { readFileSync, unlinkSync } from 'fs';
+import type { PtyManager } from '../pty/PtyManager';
+import { ORCHESTRATOR_PATH as CACHE_PATH } from '../../lib/state/paths';
+import {
+  logReapResult,
+  reapOrphansForSessions,
+} from './OrphanReaper';
 
-const SYSTEM_PROMPT = 'You are AgentMatrix Orchestrator. Execute tasks immediately. Write output to the file path specified in the prompt using Bash. Output only what is asked. No preamble. No questions. Do not modify any file except the specified output file.';
+export const ORCHESTRATOR_ENABLED = false;
+
+let ptyManagerRef: PtyManager | null = null;
 
 function readCachedId(): string | null {
   try {
-    const data = JSON.parse(readFileSync(CACHE_PATH, 'utf-8'));
-    return data.sessionId || null;
-  } catch { return null; }
-}
-
-function writeCachedId(sessionId: string): void {
-  try {
-    ensureDir(AGENTMATRIX_DIR);
-    writeFileSync(CACHE_PATH, JSON.stringify({ sessionId }));
-  } catch {}
-}
-
-let orchestratorId: string | null = null;
-let orchestratorSession: PtySession | null = null;
-let ptyManagerRef: PtyManager | null = null;
-let isSpawning = false;
-
-/** Spawn fresh orchestrator */
-function spawnFresh(ptyManager: PtyManager): boolean {
-  const id = randomUUID();
-  try {
-    const cwd = process.cwd();
-    ptyManager.spawnNew(id, {
-      cwd,
-      sessionUuid: id,
-      name: 'agentMatrixOrchestrator(doNotUseManually)',
-      permissionMode: 'bypassPermissions',
-      systemPrompt: SYSTEM_PROMPT,
-      cliType: 'copilot',
-    });
-    orchestratorId = id;
-    orchestratorSession = ptyManager.getSession(id) || null;
-    writeCachedId(id);
-    // Name the session so it's identifiable
-    const { setCachedName } = require('../../lib/state/nameCache');
-    setCachedName(id, 'agentMatrixOrchestrator(doNotUseManually)');
-    console.log(`[orchestrator] spawned new id=${id.slice(0, 12)}`);
-    return true;
-  } catch (err) {
-    console.error('[orchestrator] spawn failed:', err);
-    return false;
+    const data = JSON.parse(readFileSync(CACHE_PATH, 'utf8'));
+    return typeof data.sessionId === 'string' ? data.sessionId : null;
+  } catch {
+    return null;
   }
+}
+
+function clearCache(): void {
+  try { unlinkSync(CACHE_PATH); } catch { /* already absent */ }
 }
 
 /**
- * Monitor orchestrator PTY output on startup.
- * Watches for trust prompt and auto-accepts it.
+ * The hidden orchestrator is disabled for now. Remove its cached identity and
+ * stop any surviving process from an older AgentMatrix run so startup cannot
+ * silently recreate or retain it.
  */
-function startupMonitor(session: PtySession): void {
-  let buffer = '';
-  let done = false;
-
-  // Trust-prompt phrasing is provider-owned. Fall back to a small default set
-  // if the provider exposes none.
-  const { getProvider } = require('../../lib/cli');
-  let trustPatterns: string[] = [];
-  try {
-    trustPatterns = getProvider(session.cliType || 'copilot').getTrustPromptPatterns();
-  } catch { /* use fallback */ }
-  const fallback = ['trust this folder', 'trust this project', 'Is this a project', 'Yes, I trust', 'Do you trust'];
-  const patterns = trustPatterns.length > 0 ? [...trustPatterns, ...fallback] : fallback;
-
-  const monitor = (data: string) => {
-    if (done) return;
-
-    buffer += data;
-    const clean = OutputParser.stripAnsi(buffer);
-
-    // Check for trust prompt keywords
-    if (patterns.some(p => clean.includes(p))) {
-      console.log('[orchestrator] detected trust prompt, auto-accepting...');
-      // Send Enter to accept pre-selected "Yes, I trust"
-      setTimeout(() => session.pty.write('\r'), 300);
-      // Stop monitoring after acceptance
-      setTimeout(() => { done = true; session.subscribers.delete(monitor); }, 2000);
-      return;
-    }
-
-    // Keep buffer manageable
-    if (buffer.length > 10000) buffer = buffer.slice(-5000);
-  };
-
-  session.subscribers.add(monitor);
-
-  // Stop monitoring after 60s — trust prompt shows in first few seconds if at all
-  setTimeout(() => {
-    if (!done) {
-      done = true;
-      session.subscribers.delete(monitor);
-      console.log('[orchestrator] startup monitor done, no trust prompt detected');
-    }
-  }, 60000);
-}
-
-/** Spawn or resume the orchestrator session */
-export function spawnOrchestrator(ptyManager: PtyManager): void {
-  if (orchestratorSession || isSpawning) return;
-  isSpawning = true;
+export function disableOrchestrator(ptyManager: PtyManager): void {
   ptyManagerRef = ptyManager;
-
-  try {
-    const cachedId = readCachedId();
-
-    // Only resume the cached orchestrator if it actually exists as a Copilot
-    // session on disk. A cached id from before the Claude→Copilot migration
-    // points at a Claude session with no Copilot session-state dir, so
-    // `copilot --resume` would just exit; spawn a fresh Copilot orchestrator
-    // instead of leaving a dead PTY to be reaped later.
-    const cachedCwd = cachedId ? ptyManager.findSessionCwd(cachedId, 'copilot') : undefined;
-
-    if (cachedId && cachedCwd) {
-      try {
-        ptyManager.spawnResume(cachedId, { cwd: cachedCwd, resumeId: cachedId, cliType: 'copilot' });
-        orchestratorId = cachedId;
-        orchestratorSession = ptyManager.getSession(cachedId) || null;
-        console.log(`[orchestrator] resumed id=${cachedId.slice(0, 12)}`);
-      } catch {
-        console.log(`[orchestrator] resume failed, spawning fresh`);
-        spawnFresh(ptyManager);
-      }
-    } else {
-      if (cachedId) console.log(`[orchestrator] cached id is not a Copilot session, spawning fresh`);
-      spawnFresh(ptyManager);
+  const cachedId = readCachedId();
+  if (cachedId) {
+    if (ptyManager.hasPty(cachedId)) {
+      try { ptyManager.kill(cachedId); } catch {}
     }
-
-    // Name and monitor on every startup
-    if (orchestratorSession && orchestratorId) {
-      const { setCachedName } = require('../../lib/state/nameCache');
-      setCachedName(orchestratorId, 'agentMatrixOrchestrator(doNotUseManually)');
-      startupMonitor(orchestratorSession);
-    }
-  } catch (err) {
-    console.error('[orchestrator] failed:', err);
-    orchestratorSession = null;
-  } finally {
-    isSpawning = false;
+    const reaped = reapOrphansForSessions([cachedId]);
+    if (reaped.killed > 0) logReapResult('disabled orchestrator', reaped);
   }
+  clearCache();
+  console.log('[orchestrator] disabled');
 }
 
-/** Check if orchestrator is alive, respawn if needed */
-function ensureAlive(): PtySession | null {
-  if (orchestratorSession && orchestratorSession.status !== 'closed') {
-    return orchestratorSession;
-  }
-
-  orchestratorSession = null;
-  if (ptyManagerRef) {
-    if (orchestratorId) {
-      try { ptyManagerRef.kill(orchestratorId); } catch {}
-    }
-    spawnOrchestrator(ptyManagerRef);
-  }
-
-  return orchestratorSession;
+/** Compatibility response for stale clients loaded before orchestrator removal. */
+export async function queryOrchestrator(_instruction?: string): Promise<{
+  success: boolean;
+  content: string;
+  lines: string[];
+}> {
+  return {
+    success: false,
+    content: 'AgentMatrix transcript search is temporarily disabled.',
+    lines: [],
+  };
 }
 
-/** Send a query to the orchestrator and get structured output */
-export async function queryOrchestrator(
-  instruction: string,
-  opts?: InjectOptions,
-): Promise<{ success: boolean; content: string; lines: string[] }> {
-  const session = ensureAlive();
-  if (!session || !ptyManagerRef) {
-    return { success: false, content: '', lines: [] };
-  }
-
-  return captureQuery(ptyManagerRef, session, instruction, opts ?? {});
+/** No hidden orchestrator session exists while the feature is disabled. */
+export function getOrchestratorId(): null {
+  return null;
 }
 
-/** Get the orchestrator session ID (for excluding from UI) */
-export function getOrchestratorId(): string | null {
-  return orchestratorId;
-}
-
-/** Check if a session ID is the orchestrator */
-export function isOrchestrator(sessionId: string): boolean {
-  return !!orchestratorId && sessionId === orchestratorId;
-}
-
-/** Kill the orchestrator */
 export function killOrchestrator(): void {
-  if (ptyManagerRef && orchestratorId) {
-    try { ptyManagerRef.kill(orchestratorId); } catch {}
+  const cachedId = readCachedId();
+  if (cachedId && ptyManagerRef?.hasPty(cachedId)) {
+    try { ptyManagerRef.kill(cachedId); } catch {}
   }
-  orchestratorSession = null;
+  clearCache();
 }
 
-/** Reset orchestrator — kill current, clear cache, spawn fresh */
+/** Reset is intentionally a no-op and must never respawn a hidden session. */
 export function resetOrchestrator(): void {
   killOrchestrator();
-  orchestratorId = null;
-  try { require('fs').unlinkSync(CACHE_PATH); } catch {}
-  if (ptyManagerRef) {
-    spawnOrchestrator(ptyManagerRef);
-  }
 }

@@ -34,6 +34,6 @@ export const MCP_SYSTEM_PROMPT = `CRITICAL — Agent Matrix Status Reporting (yo
    Prefer one primary Canvas presentation per turn. Always include a concise text fallback.
    Do NOT present routine internal exploration, every edited file, speculative evidence, duplicate automatic docs/design previews, or content AgentMatrix already accepted/queued.
 
-   Compatibility tools (open_file, reveal_range, open_symbol, show_search_results, open_diff, open_review) remain available, but prefer the new presentation tools.
+   Compatibility tools (open_file, reveal_range, open_diff, open_review) remain available, but prefer the new presentation tools. Repository and symbol search are disabled; investigate normally and use present_locations only for exact verified results.
 
 Never skip the mandatory request_attention/request_decision and work_complete status calls. Canvas presentation calls remain selective and must follow the anti-spam rules above.`;

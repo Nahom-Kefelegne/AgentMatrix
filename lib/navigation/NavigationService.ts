@@ -428,74 +428,15 @@ export class NavigationService {
   }
 
   async search(
-    sessionId: string,
-    query: string,
-    options: SearchOptions,
+    _sessionId: string,
+    _query: string,
+    _options: SearchOptions,
   ): Promise<NavigationSearchResponse> {
-    if (typeof query !== 'string' || !query.trim()) {
-      throw new NavigationServiceError('INVALID_QUERY', 'A non-empty search query is required.');
-    }
-    if (query.length > 512) {
-      throw new NavigationServiceError('QUERY_TOO_LONG', 'Search query must be 512 characters or fewer.');
-    }
-    const root = await this.resolveRoot(sessionId, options.signal);
-    let scope: string | undefined;
-    if (options.scope) {
-      const resolvedScope = await this.resolveModelPath(root, options.scope, options.signal);
-      const scopeStat = await stat(resolvedScope.absolutePath).catch(() => undefined);
-      if (!scopeStat?.isDirectory()) {
-        throw new NavigationServiceError('INVALID_SCOPE', 'Search scope must name an existing directory.');
-      }
-      scope = resolvedScope.relativePath;
-    }
-    const indexVersion = await gitIndexVersion(root.absolutePath);
-    const key = [root.absolutePath, indexVersion, options.mode, scope ?? '', query].join('\u0000');
-    const cached = this.searchCache.get(key);
-    if (cached && cached.expiresAt > Date.now()) {
-      this.searchCache.delete(key);
-      this.searchCache.set(key, cached);
-      options.onBatch?.(cached.value.matches);
-      return cached.value;
-    }
-    if (cached) this.searchCache.delete(key);
-
-    // Streaming callers get progressive batches from their own cancellable
-    // process. Sharing an in-flight promise would hide intermediate results.
-    if (options.onBatch) {
-      const value = await this.performSearch(
-        root,
-        query,
-        options.mode,
-        scope,
-        indexVersion,
-        options.signal ?? new AbortController().signal,
-        options.onBatch,
-      );
-      this.storeSearchCache(key, value);
-      return value;
-    }
-
-    let inFlight = this.inFlightSearches.get(key);
-    if (!inFlight) {
-      const controller = new AbortController();
-      inFlight = {
-        controller,
-        consumers: 0,
-        settled: false,
-        promise: this.performSearch(root, query, options.mode, scope, indexVersion, controller.signal)
-          .then(value => {
-            this.storeSearchCache(key, value);
-            return value;
-          })
-          .finally(() => {
-            const current = this.inFlightSearches.get(key);
-            if (current) current.settled = true;
-            this.inFlightSearches.delete(key);
-          }),
-      };
-      this.inFlightSearches.set(key, inFlight);
-    }
-    return this.consumeSearch(inFlight, options.signal);
+    throw new NavigationServiceError(
+      'REPOSITORY_SEARCH_DISABLED',
+      'Repository and symbol search are temporarily disabled.',
+      410,
+    );
   }
 
   async resolveDeveloperLink(sessionId: string, raw: string, signal?: AbortSignal): Promise<{

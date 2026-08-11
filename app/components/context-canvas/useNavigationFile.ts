@@ -17,6 +17,10 @@ export interface NavigationFileState {
   retry: () => void;
 }
 
+interface UseNavigationFileOptions {
+  invalidateOnRequestChange?: boolean;
+}
+
 export interface NavigationFilesChangedPayload {
   sessionId: string;
   changes?: Array<{ path?: string }>;
@@ -89,8 +93,12 @@ function fileUrl(request: NavigationRequest): string {
   return `/api/navigation/file?${params.toString()}`;
 }
 
-export function useNavigationFile(request: NavigationRequest): NavigationFileState {
+export function useNavigationFile(
+  request: NavigationRequest,
+  options: UseNavigationFileOptions = {},
+): NavigationFileState {
   const { socketRef } = useSocketContext();
+  const { invalidateOnRequestChange = true } = options;
   const [file, setFile] = useState<NavigationFile | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -123,7 +131,11 @@ export function useNavigationFile(request: NavigationRequest): NavigationFileSta
     const url = fileUrl(request);
     const cacheKey = fileCacheKey(request);
     const previousRequestRef = lastRequestRefByKey.get(cacheKey);
-    if (previousRequestRef && previousRequestRef !== request.requestRef) {
+    if (
+      invalidateOnRequestChange
+      && previousRequestRef
+      && previousRequestRef !== request.requestRef
+    ) {
       invalidateFile(cacheKey);
     }
     lastRequestRefByKey.set(cacheKey, request.requestRef);
@@ -160,7 +172,7 @@ export function useNavigationFile(request: NavigationRequest): NavigationFileSta
         setError(reason instanceof Error ? reason.message : 'Could not open this file.');
       });
     return () => controller.abort();
-  }, [request, revision]);
+  }, [invalidateOnRequestChange, request, revision]);
 
   return {
     file,

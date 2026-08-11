@@ -1,6 +1,8 @@
 # Agent Matrix
 
-A desktop app that turns CLI coding agents (GitHub Copilot CLI and Claude Code) into a visual, manageable multi-session powerhouse.
+A desktop app that turns CLI coding agents (GitHub Copilot CLI directly or
+through Agency, plus Claude Code) into a visual, manageable multi-session
+powerhouse.
 
 <p align="center">
   <img src="docs/assets/readme/control-center.png" width="49%" alt="Control Center routing attention across multiple coding-agent sessions">
@@ -22,12 +24,14 @@ A desktop app that turns CLI coding agents (GitHub Copilot CLI and Claude Code) 
 ### Prerequisites
 
 Make sure the following are installed and available on your PATH. **At least one
-CLI agent** (GitHub Copilot CLI or Claude Code CLI) is required — Copilot is the
-primary, recommended agent.
+CLI launch path** is required: standalone GitHub Copilot CLI, Claude Code CLI,
+or Agency with `agency copilot` support. Copilot is the primary, recommended
+agent.
 
 | Tool | Required | How to check |
 |------|----------|-------------|
 | **Node.js 18+** | Yes | `node -v` |
+| **Agency** | Supported Copilot launch path | `agency copilot --help` |
 | **GitHub Copilot CLI** | Recommended primary (or Claude) | `copilot --version` |
 | **Claude Code CLI** | Optional (or Copilot) | `claude --version` |
 | **Git** | Yes | `git --version` |
@@ -48,8 +52,8 @@ curl -sO https://raw.githubusercontent.com/Nahom-Kefelegne/AgentMatrix/main/setu
 ```
 
 The setup script will:
-1. Verify prerequisites (Node, git, and at least one of Copilot/Claude)
-2. Configure Claude Code hooks in `~/.claude/settings.json` and Copilot hooks in `~/.copilot/hooks/agentmatrix.json` when Copilot is detected
+1. Verify prerequisites (Node, git, and at least one supported CLI launch path)
+2. Configure Claude Code hooks in `~/.claude/settings.json`; Agent Matrix configures Copilot hooks in `~/.copilot/hooks/agentmatrix.json` at startup
 3. Clone this repo into an `AgentMatrix` folder
 4. Install dependencies through the checked-in Microsoft package proxy policy; lockfile tarballs are pinned to `packagefeedproxy.microsoft.io/npm/`, and npm update/audit/fund background requests are disabled
 5. Set up native modules (node-pty) — it verifies the shipped N-API prebuilt binary works under Electron and **skips the network-dependent `electron-rebuild`** unless the prebuilt genuinely can't spawn (in which case it tries a time-bounded rebuild)
@@ -97,6 +101,8 @@ Agency strips npm configuration from MCP subprocesses, so the shim restores the
 same policy at the actual child boundary. Cached `@teams-eng-mcp/launcher`
 processes resolve offline and run with the launcher's supported `--no-update`
 mode; a Microsoft Azure Artifacts bootstrap occurs only when no cache exists.
+Managed Copilot launches also disable Copilot's in-process auto-updater, which
+does not pass through the npm shim.
 
 ### Update
 
@@ -168,10 +174,12 @@ lines. Everything is off by default — this only runs when `AM_PERF=1` is set.
 - **Embedded live CLI** — selecting any session switches the central workspace directly to that session's Copilot or Claude terminal
 - **Full-viewport workspace** — an integrated command rail replaces the floating dashboard menu so the selected CLI receives the maximum available space
 - **Fullscreen terminal** — expand the selected CLI into the existing multi-pane terminal workspace
-- **Context Canvas** — reveal code, rendered Markdown design docs, streamed search results, exact source ranges, and session-attributed Monaco diffs beside the live CLI without stealing terminal focus
+- **Context Canvas** — reveal code, rendered Markdown design docs, verified location groups, exact source ranges, and session-attributed Monaco diffs beside the live CLI without stealing terminal focus
+- **Structured decisions** — sessions can present 2–6 concrete choices; one trusted response is delivered back to the originating CLI and retained as a receipt
+- **Session Inspector** — inspect launch settings, effective static/runtime MCPs, assigned tasks, provider-authoritative name, paths, IDs, and activity without hiding the CLI
 - **Automatic design previews** — successful `docs/design/*.md` edits debounce into a rendered Preview/Source Canvas artifact; pinned, background, and developer-opened content is protected and queues instead
 - **Clickable terminal locations** — file paths, stack traces, OSC-8 links, and safe HTTP(S) links become actionable
-- **Agent-driven navigation** — managed Claude/Copilot sessions receive capability-bound `open_file`, `open_symbol`, `show_search_results`, `open_diff`, and `open_review` MCP tools
+- **Agent-driven navigation** — managed Claude/Copilot sessions receive capability-bound code, location, diff, and review presentation tools
 - **Tools are known by default** — every managed new/resumed session receives the AgentMatrix status and Context Canvas usage contract in its model context
 - **Unified session list** keeps every session in one place; sessions needing interaction stay visible with red treatment until the user actually responds
 - **Inline review actions** open transcript-native diffs without making the legacy session modal the primary workflow
@@ -182,7 +190,7 @@ lines. Everything is off by default — this only runs when `AM_PERF=1` is set.
 ### Interactive Terminal (Electron)
 - **Built-in xterm.js terminal** for every session — no external terminal needed
 - **Spawn new sessions** with name, working directory, permission mode, model, and effort level
-- **Resume past sessions** by project, global search, session ID, or AI-powered deep search
+- **Resume past sessions** by project, global search, or session ID
 - **Auto-resume** — sessions persist across app restarts
 - **System tray** — runs in background
 
@@ -192,13 +200,6 @@ lines. Everything is off by default — this only runs when `AM_PERF=1` is set.
 - **New session reads and internalizes** the handoff document
 - **Full session config** — pick model, permission mode, effort, and working directory for the new session
 - **Progress tracking** — live status updates (Summarizing → Spawning → Injecting → Done)
-
-### Orchestrator
-- **Hidden Copilot orchestrator session** that powers app-internal features
-- **Deep Session Search** — describe what you worked on, the orchestrator searches all transcripts using grep and subagents in parallel
-- **Persists across restarts** — same session, accumulated context
-- **View-only terminal** in Settings — see what the orchestrator is doing
-- **Auto-accepts trust prompts** on first run
 
 ### Task Management
 - **App-level task board** — create tasks, assign them to sessions
@@ -221,12 +222,6 @@ lines. Everything is off by default — this only runs when `AM_PERF=1` is set.
 - **Click agent → opens parent session** dialog
 - **Real-time tool activity** shown via chat bubbles
 
-### Deep Session Search
-- **AI-powered search** across all session transcripts
-- **Orchestrator uses grep + parallel subagents** for fast searching
-- **Results show as resumable sessions** with Resume in App or Copy Command
-- **Search by work description** — "find sessions where I worked on auth"
-
 ## Architecture
 
 ```
@@ -234,21 +229,18 @@ Electron Main Process
 ├── Next.js Server (API routes + static)
 ├── Socket.io Server (real-time events)
 ├── PTY Manager (terminal sessions via node-pty)
-│   ├── User sessions (interactive terminals)
-│   └── Orchestrator (hidden, app-internal)
+│   └── User sessions (interactive terminals)
 ├── ACP / Prompt Capture (Copilot ACP, Claude stdin → file fallback)
 │   ├── Summary generation
 │   ├── Task assignment
-│   ├── Context handoff
-│   └── Deep search queries
+│   └── Context handoff
 ├── Services
 │   ├── SummaryService (AI work summaries)
-│   ├── OrchestratorService (hidden Copilot session)
 │   └── HandoffService (context transfer)
 ├── Session Store (globalThis persistence)
 └── System Tray (background mode)
 
-CLI Agents (GitHub Copilot CLI / Claude Code)
+CLI Agents (GitHub Copilot CLI / Agency Copilot / Claude Code)
 ├── Hooks → HTTP POST → API Routes → Socket.io → Browser
 └── PTY stdin/stdout ↔ xterm.js in browser
 ```
@@ -262,7 +254,7 @@ The app's killer feature is its **standardized prompt injection pipeline**:
 3. App reads the captured output and cleans up any temporary file
 4. Clean, structured output — no TUI parsing needed
 
-This powers: work summaries, task assignment, context handoff, and deep search.
+This powers work summaries, task assignment, and context handoff.
 
 ## App Cache Files
 
@@ -274,14 +266,13 @@ All Agent Matrix-owned state is stored in `~/.agentmatrix/`:
 | `tasks.json` | App task store |
 | `active-sessions.json` | Auto-resume tracking |
 | `settings.json` | User preferences |
-| `orchestrator.json` | Orchestrator session ID |
 | `output/<id>.txt` | Temp files for Claude prompt-injection fallback |
 | `handoffs/<id>.md` | Context transfer documents |
 
 ## Requirements
 
 - Node.js 18+
-- GitHub Copilot CLI installed and authenticated (primary), with Claude Code CLI still supported
+- GitHub Copilot CLI or Agency Copilot authenticated (primary), with Claude Code CLI still supported
 - Windows, macOS, or Linux
 
 ## Credits

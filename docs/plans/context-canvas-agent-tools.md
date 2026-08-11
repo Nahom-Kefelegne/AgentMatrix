@@ -2,6 +2,11 @@
 
 Status: **Implemented**
 
+Current decision (2026-08-03): repository and symbol search are disabled.
+`open_symbol` and `show_search_results` are no longer advertised, and stale
+calls return HTTP 410. The sections below retain the original implementation
+record for context.
+
 ## 1. Goal
 
 Add the new AgentMatrix MCP presentation tools now, without waiting for every
@@ -11,8 +16,8 @@ The first release standardizes the agent-facing API, validation, event transport
 and model instructions. Components will subscribe to the typed requests as they
 are built.
 
-Existing MCP tools remain available for compatibility and can be deprecated
-later.
+The remaining MCP navigation tools stay available for compatibility and can be
+deprecated later.
 
 ## 2. Tools
 
@@ -59,21 +64,23 @@ type CanvasRequest =
   | BrowserPreviewCanvasRequest;
 ```
 
-Lifecycle operations, patch semantics, streaming updates, and generic artifact
-metadata are deliberately deferred until a component needs them.
+Patch semantics, streaming updates, and generic artifact metadata remain
+deferred. Decision adds one narrow host-authored resolution lifecycle.
 
 ## 4. Compatibility Delivery
 
 ### Existing renderers
 
 - `present_code` is adapted client-side to the existing Code/Document renderer.
+- `present_locations` renders the verified-location ledger and can hand off to Code.
 - `present_changes` is adapted client-side to the existing session review renderer.
+- `request_decision` renders a blocking choice and a retained response receipt.
 
 These tools should open the current Context Canvas immediately.
 
 ### Components not built yet
 
-The remaining tools emit:
+Validation, Plan, Runtime Evidence, and Browser Preview still emit:
 
 - `canvas:requested`
 - `canvas:acknowledged`
@@ -93,10 +100,11 @@ ignored, while a genuinely newer request that arrived during disconnect is
 applied through the normal preview/queue/pin policy. It never reopens an already
 dismissed request or replaces newer local history.
 
-`request_decision` also marks the session as requiring attention and replaces
-any older pending decision for that session. Until its
-component is connected, the agent asks the same question once in the terminal
-and then waits.
+`request_decision` marks the session as requiring attention and replaces any
+older retained decision for that session. A trusted renderer response is
+validated against the retained options, delivered once through the originating
+PTY, and recorded only after the write succeeds. Resolution clears attention
+to working and is replayed through snapshots.
 
 `update_plan` replaces the previously retained plan for that session. The first
 version survives Canvas/view remounts and renderer reconnects within the running
@@ -153,17 +161,15 @@ Global rules:
 
 ## 7. Compatibility Policy
 
-The existing tools remain listed:
+The remaining compatibility tools are:
 
 - `open_file`
 - `reveal_range`
-- `open_symbol`
-- `show_search_results`
 - `open_diff`
 - `open_review`
 
-Instructions tell new sessions to prefer the new tools. No compatibility tool is
-removed in this change.
+Instructions tell new sessions to prefer the typed tools. Repository and symbol
+search compatibility tools are disabled.
 
 ## 8. Validation
 
@@ -173,8 +179,8 @@ Before shipping:
 2. Exercise every schema with accepted and rejected payloads.
 3. Confirm session identity cannot be supplied in tool arguments.
 4. Confirm Code and Changes reach the current Canvas renderers.
-5. Confirm other requests emit the typed socket events.
-6. Confirm Decision marks the session as attention.
+5. Confirm remaining unrendered requests emit the typed socket events.
+6. Confirm Decision marks attention, delivers once, and retains its resolution.
 7. Confirm browser preview rejects non-loopback URLs.
 8. Run TypeScript and production build.
 9. Review prompts for contradictory or spam-inducing guidance.

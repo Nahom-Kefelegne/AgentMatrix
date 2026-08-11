@@ -14,7 +14,13 @@ export async function POST(request: Request) {
     const sessionId = payload.session_id || payload.sessionId;
     if (!sessionId || !getSession(sessionId)) return NextResponse.json({ ok: true });
 
-    const changes = { status: 'working' as const, lastActivity: Date.now() };
+    const changes = {
+      status: 'working' as const,
+      statusReason: undefined,
+      currentTool: undefined,
+      lastToolSummary: undefined,
+      lastActivity: Date.now(),
+    };
     updateSession(sessionId, changes);
     emitToClients(SOCKET_EVENTS.SESSION_UPDATE, { sessionId, changes });
 

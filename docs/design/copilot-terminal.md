@@ -231,6 +231,28 @@ The resumed Copilot process emits its startup terminal modes again. The new
 `PtyManager` captures them normally, so no persisted on-disk terminal mode state
 is required.
 
+### 6.2.1 In-app PTY replacement
+
+Dashboard Restart keeps the existing xterm mounted but replaces its Copilot
+process. Before spawning, AgentMatrix:
+
+1. records the owning xterm's current columns and rows
+2. closes and reaps the old Copilot/Agency process tree
+3. removes stale Copilot lock files when no process remains
+4. sends `terminal:restart-reset` so xterm clears the old frame and protocol state
+5. starts the new PTY at the recorded dimensions
+
+Startup readiness is distinct from turn readiness. Copilot's first interactive
+screen is recognized from its normal command/footer chrome, while the existing
+prompt/Stop-hook logic continues to own later turns. This prevents a correctly
+rendered alt-screen TUI from being reported as failed merely because it does not
+end in a shell-style prompt character.
+
+Windows uses process-tree cleanup and a 60-second startup window. If Copilot
+still emits its defensive "Session in use" screen, AgentMatrix selects the
+preselected Resume option once; this is a fallback, not the primary cleanup
+mechanism.
+
 ### 6.3 Warm attach to an existing PTY
 
 A warm attach happens when the Copilot process is still alive but a new xterm is

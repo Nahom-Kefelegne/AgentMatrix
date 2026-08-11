@@ -370,6 +370,12 @@ export class CopilotProvider implements CliProvider {
     return /[$❯›>]\s*$/.test(clean);
   }
 
+  detectStartupReady(text: string): boolean {
+    const clean = stripAnsi(text);
+    return this.detectPromptReady(clean)
+      || (/\/\s*commands\b/i.test(clean) && /\btab\b.*\bnext tab\b/i.test(clean));
+  }
+
   parseContextUsage(_text: string): number | null {
     // Copilot doesn't print context usage in its TUI text stream — usage is
     // tracked on disk instead. See getContextUsage().
@@ -494,6 +500,17 @@ export class CopilotProvider implements CliProvider {
     }
   }
 
+  findSessionName(sessionId: string): string | undefined {
+    if (!UUID_RE.test(sessionId)) return undefined;
+    const workspaceFile = join(COPILOT_SESSION_STATE_DIR, sessionId, 'workspace.yaml');
+    if (!existsSync(workspaceFile)) return undefined;
+    try {
+      return parseFlatYaml(readFirstBytes(workspaceFile, 4000)).name || undefined;
+    } catch {
+      return undefined;
+    }
+  }
+
   /** Copilot stores each session's event log at session-state/<id>/events.jsonl. */
   getTranscriptPath(sessionId: string): string | undefined {
     if (!UUID_RE.test(sessionId)) return undefined;
@@ -551,6 +568,7 @@ export class CopilotProvider implements CliProvider {
         else out.push('user_named: true');
       }
       writeFileSync(workspaceFile, out.join('\n'));
+      discoverCache = null;
       return true;
     } catch {
       return false;

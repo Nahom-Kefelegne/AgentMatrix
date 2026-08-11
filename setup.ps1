@@ -38,15 +38,35 @@ try {
     $missing = 1
 }
 
-# Check GitHub Copilot CLI (primary) and Claude CLI — at least one is required.
+# Check provider launch paths. A standalone CLI is optional when Agency can
+# launch Copilot on the user's behalf.
 $haveCli = $false
+$haveAgencyCopilot = $false
+try {
+    $null = Get-Command agency -ErrorAction Stop
+    & agency copilot --help *> $null
+    if ($LASTEXITCODE -ne 0) { throw "Agency Copilot command failed" }
+    $agencyVersion = (& agency --version 2>$null | Select-Object -First 1)
+    Write-Host "  [OK] Agency Copilot available$(if ($agencyVersion) { " ($agencyVersion)" })" -ForegroundColor Green
+    $haveCli = $true
+    $haveAgencyCopilot = $true
+} catch {
+    if (Get-Command agency -ErrorAction SilentlyContinue) {
+        Write-Host "  [!] Agency found, but its Copilot command is unavailable" -ForegroundColor Yellow
+    }
+}
+
 try {
     $null = Get-Command copilot -ErrorAction Stop
     Write-Host "  [OK] GitHub Copilot CLI found (primary)" -ForegroundColor Green
     $haveCli = $true
 } catch {
-    Write-Host "  [!] GitHub Copilot CLI not found (recommended primary)" -ForegroundColor Yellow
-    Write-Host "      Install from: https://github.com/github/copilot-cli"
+    if ($haveAgencyCopilot) {
+        Write-Host "  [OK] Standalone Copilot CLI not required - Agency provides Copilot" -ForegroundColor Green
+    } else {
+        Write-Host "  [!] GitHub Copilot CLI not found (recommended primary)" -ForegroundColor Yellow
+        Write-Host "      Install Copilot CLI or Agency with Copilot support."
+    }
 }
 
 try {
@@ -59,7 +79,8 @@ try {
 }
 
 if (-not $haveCli) {
-    Write-Host "  [X] Neither GitHub Copilot CLI nor Claude CLI found — install at least one." -ForegroundColor Red
+    Write-Host "  [X] No supported CLI launch path found." -ForegroundColor Red
+    Write-Host "      Install Copilot CLI, Claude Code CLI, or Agency with Copilot support." -ForegroundColor Yellow
     $missing = 1
 }
 

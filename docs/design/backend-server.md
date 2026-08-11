@@ -126,7 +126,9 @@ Background process that discovers external Claude and Copilot sessions through t
 5. For disappeared processes: removes session (unless `appManaged`)
 6. Runs every 10 seconds after initial scan
 
-**Name resolution priority:** `--resume` flag > name cache > transcript rename > transcript slug > cwd last segment > `Session-{id.slice(0,6)}`
+**Name authority:** Copilot uses the complete `workspace.yaml` name and
+reconciles stale AgentMatrix cache/auto-resume records. Claude uses `/rename`
+transcript metadata, then cache/slug/CWD fallbacks.
 
 ### 2.4 Session Name (`lib/state/sessionName.ts`)
 
@@ -323,6 +325,10 @@ graph LR
 | `editor:terminal:data` | `{ id, data }` | server.ts editor PTY |
 | `editor:terminal:exit` | `{ id, exitCode }` | server.ts editor PTY |
 | `editor:terminal:ready` | `{ id }` | server.ts editor PTY spawn |
+| `canvas:requested` | `CanvasRequest` | Accepted typed Canvas artifact |
+| `canvas:acknowledged` | `CanvasRequestResult` | Request retention/delivery acknowledgement |
+| `canvas:snapshot` | `CanvasRequest[]` | Reconnect hydration |
+| `canvas:decision-resolved` | `DecisionCanvasRequest` | Host-authored decision receipt after PTY delivery |
 
 ### Client -> Server Events
 
@@ -337,6 +343,7 @@ graph LR
 | `editor:terminal:resize` | `{ id, cols, rows }` | server.ts |
 | `editor:terminal:kill` | `{ id }` | server.ts |
 | `editor:terminal:attach` | `{ id }` | server.ts (replays buffer) |
+| `canvas:get-snapshot` | (none) | Replay retained Canvas requests |
 
 ---
 
@@ -414,6 +421,7 @@ See [Section 3: Hook System](#3-hook-system) for full details.
 | `/sessions/active` | GET | List currently tracked sessions | -- | `{ sessions: [{ id, name, status, cwd }] }` |
 | `/sessions/list` | GET | List transcript files from disk | `?cwd=...&global=true` | `{ sessions: [{ id, name, slug, projectDir, lastModified, active }] }` |
 | `/sessions/info` | GET | Get single session info | `?id=...` | `{ id, name, cwd, status, deskIndex }` |
+| `/sessions/inspector` | GET | Consolidated restart profile, effective MCP inventory, and assigned tasks | `?sessionId=...` | `SessionInspectorData` |
 | `/sessions/history` | GET | Read conversation history from transcript | `?sessionId=...&count=6` | `{ messages: [{ role, text, timestamp }] }` |
 | `/sessions/resolve` | GET | Resolve session ID to CWD via providers | `?id=...&cliType=...` | `{ id, cwd, name, cliType }` |
 | `/sessions/resume-cmd` | GET | Get CLI command to resume session | `?id=...` | `{ command, cwd, name }` |
@@ -429,11 +437,46 @@ See [Section 3: Hook System](#3-hook-system) for full details.
 
 **Session List** (`/sessions/list`): Delegates to all CLI providers (or `cliType` filter) to discover on-disk sessions. When `global=true`, searches all provider session stores. Active-state detection also comes from providers.
 
+**Session Inspector** (`/sessions/inspector`): Requires the
+Electron-injected renderer token. It returns restart-profile fields, tasks
+assigned to that session, and a sanitized MCP inventory. Static provider/user
+and repository configs are merged by precedence. Live Copilot process arguments
+are inspected for `--additional-mcp-config` (including Agency temporary files)
+on macOS/Linux via `ps`, and on Windows via WMIC with PowerShell/CIM fallback.
+Only server names, scope/source, transport, executable basename, and environment
+key names leave the server.
+
+**Session Rename** (`/sessions/rename`): Requires the renderer token and rejects
+unknown fields/control characters. Copilot must successfully update
+`workspace.yaml` before cache/store emission; failure returns conflict instead
+of a success-shaped app-only rename. Claude's provider has no metadata file, so
+the renderer sends native `/rename` and the route persists the display cache.
+
 **Session Kill** (`/sessions/kill`): Emits `session:fired` socket event FIRST, then waits 3 seconds (for the "shocked + packing" animation), then kills matching processes via `ps aux | grep` + `kill`.
 
 **Session Resolve** (`/sessions/resolve`): Delegates to providers. Claude can use transcript metadata and the greedy directory-name decoder; Copilot uses session-state metadata.
 
 **Session History** (`/sessions/history`): Reads last 200KB of the JSONL transcript file and parses backwards to extract the most recent user/assistant text messages. Returns truncated text (user: 500 chars, assistant: 1000 chars).
+
+#### Context Canvas (`/api/canvas/`)
+
+| Route | Method | Purpose | Trust boundary |
+|-------|--------|---------|----------------|
+| `/canvas/request` | POST | Validate, retain, and emit a typed agent artifact | Managed session ID + capability headers |
+| `/canvas/decision` | POST | Deliver one option/custom response and retain its receipt | Electron-injected renderer token |
+
+Decision submission accepts `sessionId`, `requestRef`, and exactly one of
+`optionId` or `customAnswer`. The server resolves the retained request,
+validates the choice, prevents concurrent/different double submission, and
+waits for the originating PTY to write the response. Only then does it store
+the resolution, clear session attention to working, and emit
+`canvas:decision-resolved`. PTY timeout, exit, or write failure leaves the
+decision pending and retryable.
+
+The `/hooks/stop` route notifies the Electron PTY manager that the provider turn
+has ended before applying dashboard status rules. This flushes a queued
+Decision response even when an alt-screen prompt cannot be recognized from raw
+terminal output; attention itself remains sticky until the write succeeds.
 
 #### Editor (`/api/editor/`)
 
@@ -501,7 +544,9 @@ App tasks are stored in `~/.agentmatrix/tasks.json`. Task assignment writes a ma
 
 #### Orchestrator (`/api/orchestrator`)
 
-Placeholder route. Returns `{ error: 'Use socket event "orchestrator:query" instead' }`. The actual orchestrator runs in Electron's main process; queries go through socket events directly.
+Returns HTTP 410 while the hidden orchestrator and Resume transcript search are
+disabled. Stale socket clients receive an immediate unsuccessful compatibility
+response and cannot spawn a hidden session.
 
 ---
 
@@ -704,7 +749,6 @@ graph TD
         B[tasks.json<br/>App task store]
         C[active-sessions.json<br/>Auto-resume list]
         D[settings.json<br/>App preferences]
-        E[orchestrator.json<br/>Orchestrator session ID]
         F[ado.json<br/>ADO org + project]
     end
 

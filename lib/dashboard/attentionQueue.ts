@@ -26,6 +26,8 @@ export interface AttentionThresholds {
   contextWarning: number;
   /** ms of no activity while `working` after which a session is "possibly stuck". */
   stuckAfterMs: number;
+  /** Compaction is expected to be quiet; use a longer no-activity threshold. */
+  compactionStuckAfterMs: number;
   /** Sparkline: number of time buckets. */
   sparklineBuckets: number;
   /** Sparkline: total window covered by the buckets, in ms. */
@@ -36,6 +38,7 @@ export const DEFAULT_THRESHOLDS: AttentionThresholds = {
   contextCritical: 90,
   contextWarning: 80,
   stuckAfterMs: 3 * 60_000,
+  compactionStuckAfterMs: 10 * 60_000,
   sparklineBuckets: 8,
   sparklineWindowMs: 5 * 60_000,
 };
@@ -167,6 +170,10 @@ function lastActivityOf(s: SessionData): number {
   return s.lastActivity ?? s.createdAt ?? 0;
 }
 
+function isCompactingContext(s: SessionData): boolean {
+  return s.lastToolSummary?.startsWith('Compacting context') === true;
+}
+
 /**
  * Determine the single most-urgent attention reason for a session, or null if it
  * does not currently need the human. One reason per session keeps the queue a
@@ -184,7 +191,12 @@ function deriveKind(
   if (ctx !== null && ctx >= t.contextCritical) return 'context-critical';
   if (s.status === 'done') return 'ready-to-review';
   if (ctx !== null && ctx >= t.contextWarning) return 'context-warning';
-  if (s.status === 'working' && now - lastActivityOf(s) >= t.stuckAfterMs) return 'possibly-stuck';
+  const stuckAfterMs = isCompactingContext(s)
+    ? t.compactionStuckAfterMs
+    : t.stuckAfterMs;
+  if (s.status === 'working' && now - lastActivityOf(s) >= stuckAfterMs) {
+    return 'possibly-stuck';
+  }
   return null;
 }
 

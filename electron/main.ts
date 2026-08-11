@@ -6,13 +6,13 @@ import { Server as SocketIOServer } from 'socket.io';
 import { SOCKET_EVENTS } from '../lib/types';
 import { SOCKET_PATH } from '../lib/constants';
 import { getAllSessions, addSession, updateSession } from '../lib/state/sessionStore';
-import { getCachedName } from '../lib/state/nameCache';
+import { getCachedName, setCachedName } from '../lib/state/nameCache';
 import { getSettings } from '../lib/state/appSettings';
 import { getActiveSessions, saveActiveSessions } from '../lib/state/activeSessionsCache';
 import { PtyManager } from './pty/PtyManager';
 import { OutputParser } from './pty/OutputParser';
 import { setupTerminalBridge, requestSummary } from './terminalBridge';
-import { spawnOrchestrator, killOrchestrator, isOrchestrator } from './services/OrchestratorService';
+import { disableOrchestrator, killOrchestrator } from './services/OrchestratorService';
 import { reapOrphansOnStartup, logReapResult } from './services/OrphanReaper';
 import { migrateStateStorage } from '../lib/state/migrateStateStorage';
 import { ensureCopilotHooksConfig } from './services/copilotHooksConfig';
@@ -20,6 +20,7 @@ import { ensureAgentMatrixMcpConfig } from './services/mcpConfig';
 import { getProvider } from '../lib/cli';
 import { setRendererApiToken } from '../lib/navigation/rendererAuth';
 import { getCanvasRequestSnapshot } from '../lib/canvas/requestStore';
+import { getCopilotSessionName } from '../lib/state/providerSessionName';
 
 // Dev vs prod is determined by whether Electron is running from a packaged
 // app bundle — NOT by NODE_ENV, which is unset when a packaged app is
@@ -209,20 +210,15 @@ async function startServer(): Promise<void> {
       (globalThis as Record<string, unknown>).__socketIO = io;
 
       io.on('connection', (socket) => {
-        // Exclude orchestrator from client-visible sessions
-        const visible = getAllSessions().filter(s => !isOrchestrator(s.id));
-        socket.emit(SOCKET_EVENTS.STATE_SNAPSHOT, visible);
-        // Send orchestrator ID so client can access it
-        const { getOrchestratorId } = require('./services/OrchestratorService');
-        const orchId = getOrchestratorId();
-        if (orchId) socket.emit('orchestrator:id', { sessionId: orchId });
+        socket.emit(SOCKET_EVENTS.STATE_SNAPSHOT, getAllSessions());
         socket.emit('canvas:snapshot', getCanvasRequestSnapshot());
       });
 
       setupTerminalBridge(io!, ptyManager);
 
-      // Spawn orchestrator session (hidden, app-only)
-      if (!SMOKE_TEST) spawnOrchestrator(ptyManager);
+      // The hidden orchestrator is intentionally disabled. Clean up any cached
+      // session/process from earlier releases instead of spawning a replacement.
+      if (!SMOKE_TEST) disableOrchestrator(ptyManager);
 
       httpServer.listen(port, LOOPBACK_HOST, () => {
         console.log(`> Server ready on http://${LOOPBACK_HOST}:${port}`);
@@ -250,20 +246,30 @@ async function startServer(): Promise<void> {
         if (settings.autoResume && !SMOKE_TEST) {
           const cached = getActiveSessions();
           if (cached.length > 0) {
-            let migratedPermissions = false;
+            let migratedSessionMetadata = false;
             for (const session of cached) {
               if (!session.permissionMode) {
                 session.permissionMode = settings.defaultPermissionMode;
-                migratedPermissions = true;
+                migratedSessionMetadata = true;
+              }
+              if (session.cliType === 'copilot') {
+                const providerName = getCopilotSessionName(session.id);
+                if (providerName && providerName !== session.name) {
+                  session.name = providerName;
+                  setCachedName(session.id, providerName);
+                  migratedSessionMetadata = true;
+                }
               }
             }
-            if (migratedPermissions) saveActiveSessions(cached);
+            if (migratedSessionMetadata) saveActiveSessions(cached);
 
             console.log(`[auto-resume] Resuming ${cached.length} session(s)...`);
             const resumeStaggerMs = settings.useAgency ? 1500 : 0;
             const resumeOne = (s: typeof cached[number]) => {
               try {
-                const name = getCachedName(s.id) || s.name;
+                const name = s.cliType === 'copilot'
+                  ? s.name
+                  : getCachedName(s.id) || s.name;
                 const { DESK_POSITIONS: DP, OVERFLOW_POSITIONS: OP, ENTRANCE_POINT: EP, CHARACTER_COLORS: CC } = require('../lib/constants');
                 const all = getAllSessions();
                 const used = new Set(all.map((x: any) => x.deskIndex));

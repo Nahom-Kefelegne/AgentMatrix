@@ -229,6 +229,10 @@ export class ClaudeProvider implements CliProvider {
     return /[>❯]\s*$/.test(clean);
   }
 
+  detectStartupReady(text: string): boolean {
+    return this.detectPromptReady(text);
+  }
+
   parseContextUsage(text: string): number | null {
     const c = stripAnsi(text);
     const remainMatch = c.match(/(\d+)%\s*remaining/i);
@@ -358,6 +362,14 @@ export class ClaudeProvider implements CliProvider {
 
     const decoded = decodeClaudeProjectDirName(projectDirName.replace(/^-/, ''));
     return decoded || undefined;
+  }
+
+  findSessionName(sessionId: string): string | undefined {
+    try {
+      return this.discoverSessions().find(session => session.id === sessionId)?.name;
+    } catch {
+      return undefined;
+    }
   }
 
   /**

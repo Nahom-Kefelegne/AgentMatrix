@@ -65,7 +65,12 @@ export interface PtySession {
   onReady: (() => void) | null;
   onStateChange: ((info: StateInfo) => void) | null;
   onContextUpdate: ((usage: number) => void) | null;
-  pendingPrompt: string | null;
+  pendingPrompt: {
+    prompt: string;
+    resolve: () => void;
+    reject: (error: Error) => void;
+    timeout: NodeJS.Timeout;
+  } | null;
 }
 
 export class PtyManager {
@@ -118,6 +123,28 @@ export class PtyManager {
     return this.defaultProvider;
   }
 
+  private flushPendingPrompt(session: PtySession): boolean {
+    const pending = session.pendingPrompt;
+    if (!pending) return false;
+    session.pendingPrompt = null;
+    clearTimeout(pending.timeout);
+    try {
+      session.currentState = 'busy';
+      session.status = 'busy';
+      session.pty.write(pending.prompt + '\r');
+      pending.resolve();
+    } catch (error) {
+      session.currentState = 'ready';
+      session.status = 'ready';
+      pending.reject(
+        error instanceof Error
+          ? error
+          : new Error('The session rejected the queued prompt.'),
+      );
+    }
+    return true;
+  }
+
   /**
    * Resolve the original working directory for a session ID. Delegates
    * to the right provider's `findSessionCwd` since each CLI has its own
@@ -143,14 +170,19 @@ export class PtyManager {
     return undefined;
   }
 
-  private createPtySession(id: string, ptyProcess: IPty, cliType: CliType): PtySession {
+  private createPtySession(
+    id: string,
+    ptyProcess: IPty,
+    cliType: CliType,
+    initialSize: { cols: number; rows: number } = { cols: 80, rows: 24 },
+  ): PtySession {
     const provider = this.getProviderForType(cliType);
     const session: PtySession = {
       id, pty: ptyProcess, cliType, status: 'starting',
       currentState: 'busy', contextUsage: null,
       outputBuffer: [],
       terminalProtocolState: createTerminalProtocolState(),
-      cols: 80, rows: 24,
+      cols: initialSize.cols, rows: initialSize.rows,
       subscribers: new Set(), onReady: null, onStateChange: null, onContextUpdate: null,
       pendingPrompt: null,
     };
@@ -190,14 +222,7 @@ export class PtyManager {
         if (prev !== 'ready') {
           session.currentState = 'ready';
           session.status = 'ready';
-          if (session.pendingPrompt) {
-            const p = session.pendingPrompt;
-            session.pendingPrompt = null;
-            session.currentState = 'busy';
-            session.status = 'busy';
-            session.pty.write(p + '\r');
-            return;
-          }
+          if (this.flushPendingPrompt(session)) return;
           if (session.onReady) session.onReady();
           if (session.onStateChange) session.onStateChange({ state: 'ready' });
 
@@ -230,6 +255,13 @@ export class PtyManager {
     ptyProcess.onExit(({ exitCode }: { exitCode: number }) => {
       console.log(`[pty:exit] id=${id.slice(0, 12)} code=${exitCode}`);
       session.status = 'closed';
+      if (session.pendingPrompt) {
+        clearTimeout(session.pendingPrompt.timeout);
+        session.pendingPrompt.reject(
+          new Error(`The session exited before the queued prompt was delivered (code ${exitCode}).`),
+        );
+        session.pendingPrompt = null;
+      }
       // A restart can replace this PTY under the same session ID before the
       // old process delivers its delayed exit callback. Never let the old
       // callback delete the replacement session or its navigation capability.
@@ -248,6 +280,7 @@ export class PtyManager {
     cliArgs: string[],
     cliType?: CliType,
     navigationIdentity?: NavigationCapability,
+    initialSize: { cols: number; rows: number } = { cols: 80, rows: 24 },
   ): IPty {
     const pty = require('node-pty');
     const provider = this.getProviderForType(cliType);
@@ -267,8 +300,12 @@ export class PtyManager {
       env.COPILOT_HOOK_ALLOW_LOCALHOST = '1';
       const parsedPort = Number.parseInt(process.env.PORT || '3000', 10);
       const mcpPort = Number.isFinite(parsedPort) ? parsedPort : 3000;
+      // Copilot's in-process updater bypasses the managed npm/npx PATH shims.
+      const managedCliArgs = cliArgs.includes('--no-auto-update')
+        ? cliArgs
+        : [...cliArgs, '--no-auto-update'];
       effectiveCliArgs = [
-        ...cliArgs,
+        ...managedCliArgs,
         '--additional-mcp-config',
         buildAgentMatrixCopilotMcpConfig(mcpPort),
       ];
@@ -320,7 +357,12 @@ export class PtyManager {
     // was copied between machines or wasn't rebuilt for Electron.
     const spawnWithHint = (file: string, args: string[]): IPty => {
       try {
-        return pty.spawn(file, args, { cwd: safeCwd, cols: 80, rows: 24, env });
+        return pty.spawn(file, args, {
+          cwd: safeCwd,
+          cols: initialSize.cols,
+          rows: initialSize.rows,
+          env,
+        });
       } catch (err: unknown) {
         const msg = err instanceof Error ? err.message : String(err);
         if (/posix_spawnp|spawn.?helper|ENOENT|dlopen|invalid ELF|not.*executable/i.test(msg)) {
@@ -338,8 +380,9 @@ export class PtyManager {
       }
     };
 
-    // Use 80 cols default — CLI TUI renders welcome screen at spawn time.
-    // The terminal panel will resize the PTY to match when it opens.
+    // New sessions use 80x24. Restarted sessions pass their live xterm
+    // dimensions so the replacement TUI never paints an initial 80x24 frame
+    // into a much larger renderer.
     if (process.platform === 'win32') {
       return spawnWithHint(spawnBinary, spawnArgs);
     }
@@ -390,7 +433,11 @@ export class PtyManager {
     console.log(`[spawnNew] id=${id.slice(0, 8)} requestedCli=${opts.cliType} actualProvider=${provider.type} args=${args.join(' ')}`);
     const navigationIdentity = issueNavigationCapability(id, opts.cwd);
     try {
-      return this.createPtySession(id, this.spawnPty(opts.cwd, args, cliType, navigationIdentity), cliType);
+      return this.createPtySession(
+        id,
+        this.spawnPty(opts.cwd, args, cliType, navigationIdentity),
+        cliType,
+      );
     } catch (error) {
       clearNavigationCapability(id);
       throw error;
@@ -400,7 +447,7 @@ export class PtyManager {
   spawnResume(id: string, opts: {
     cwd?: string; resumeId: string; fork?: boolean; systemPrompt?: string;
     cliType?: CliType; permissionMode?: string; model?: string; effort?: string;
-    allowedTools?: string; copilotMode?: string;
+    allowedTools?: string; copilotMode?: string; cols?: number; rows?: number;
   }): PtySession {
     if (this.sessions.has(id)) throw new Error(`Session ${id} already exists`);
 
@@ -439,25 +486,79 @@ export class PtyManager {
     }
 
     const navigationIdentity = issueNavigationCapability(id, cwd);
+    const initialSize = {
+      cols: Math.max(2, opts.cols ?? 80),
+      rows: Math.max(2, opts.rows ?? 24),
+    };
     try {
-      return this.createPtySession(id, this.spawnPty(cwd, args, cliType, navigationIdentity), cliType);
+      return this.createPtySession(
+        id,
+        this.spawnPty(cwd, args, cliType, navigationIdentity, initialSize),
+        cliType,
+        initialSize,
+      );
     } catch (error) {
       clearNavigationCapability(id);
       throw error;
     }
   }
 
-  sendPrompt(sessionId: string, prompt: string): void {
+  sendPrompt(
+    sessionId: string,
+    prompt: string,
+    timeoutMs = 30_000,
+  ): Promise<void> {
     const session = this.sessions.get(sessionId);
-    if (!session) throw new Error(`Session ${sessionId} not found`);
-    if (session.status === 'closed') throw new Error(`Session ${sessionId} closed`);
+    if (!session) return Promise.reject(new Error('The session terminal is not connected.'));
+    if (session.status === 'closed') return Promise.reject(new Error('The session terminal is closed.'));
     if (session.status === 'ready') {
-      session.status = 'busy';
-      session.currentState = 'busy';
-      session.pty.write(prompt + '\r');
-    } else {
-      session.pendingPrompt = prompt;
+      try {
+        session.status = 'busy';
+        session.currentState = 'busy';
+        session.pty.write(prompt + '\r');
+        return Promise.resolve();
+      } catch (error) {
+        session.status = 'ready';
+        session.currentState = 'ready';
+        return Promise.reject(
+          error instanceof Error
+            ? error
+            : new Error('The session rejected the prompt.'),
+        );
+      }
     }
+
+    if (session.pendingPrompt) {
+      return Promise.reject(
+        new Error('The session already has a prompt waiting for delivery.'),
+      );
+    }
+
+    return new Promise<void>((resolve, reject) => {
+      const pending = {
+        prompt,
+        resolve,
+        reject,
+        timeout: setTimeout(() => {
+          if (session.pendingPrompt !== pending) return;
+          session.pendingPrompt = null;
+          reject(new Error('The session did not become ready to receive the decision.'));
+        }, timeoutMs),
+      };
+      session.pendingPrompt = pending;
+    });
+  }
+
+  /**
+   * Provider Stop hooks are authoritative turn-completion signals. They cover
+   * alt-screen prompts that cannot always be recognized from terminal output.
+   */
+  markPromptReady(sessionId: string): void {
+    const session = this.sessions.get(sessionId);
+    if (!session || session.status === 'closed') return;
+    session.status = 'ready';
+    session.currentState = 'ready';
+    this.flushPendingPrompt(session);
   }
 
   onOutput(sessionId: string, callback: (data: string) => void): () => void {
@@ -478,6 +579,13 @@ export class PtyManager {
   kill(sessionId: string): void {
     const session = this.sessions.get(sessionId);
     if (!session) return;
+    if (session.pendingPrompt) {
+      clearTimeout(session.pendingPrompt.timeout);
+      session.pendingPrompt.reject(
+        new Error('The session closed before the queued prompt was delivered.'),
+      );
+      session.pendingPrompt = null;
+    }
     try { session.pty.kill(); } catch {}
     session.status = 'closed';
     this.sessions.delete(sessionId);

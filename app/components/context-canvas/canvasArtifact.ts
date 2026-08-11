@@ -20,7 +20,11 @@ export type CanvasArtifact =
   | { type: 'navigation'; request: NavigationRequest }
   | { type: 'typed'; request: CanvasRequest };
 
-export type CanvasRendererKind = Exclude<CanvasMode, 'closed'> | 'unsupported';
+export type CanvasRendererKind =
+  | Exclude<CanvasMode, 'closed'>
+  | 'locations'
+  | 'decision'
+  | 'unsupported';
 
 function assertNever(value: never): never {
   throw new Error(`Unsupported Canvas artifact: ${JSON.stringify(value)}`);
@@ -62,8 +66,12 @@ export function artifactRenderer(artifact: CanvasArtifact): CanvasRendererKind {
     switch (request.kind) {
       case 'code':
         return isMarkdownPath(request.payload.target.path) ? 'document' : 'code';
+      case 'locations':
+        return 'locations';
       case 'changes':
         return 'review';
+      case 'decision':
+        return 'decision';
       default:
         return assertNever(request);
     }
@@ -71,9 +79,11 @@ export function artifactRenderer(artifact: CanvasArtifact): CanvasRendererKind {
 
   const request = artifact.request;
   switch (request.action) {
+    case 'reveal_range':
+      return 'code';
     case 'show_search_results':
     case 'open_symbol':
-      return 'search';
+      return 'unsupported';
     case 'open_diff':
       return 'diff';
     case 'open_review':
@@ -92,8 +102,9 @@ export function artifactTitle(artifact: CanvasArtifact | null): string {
   if (artifact.type === 'typed') return artifact.request.title;
   const request = artifact.request;
   if (request.action === 'open_review' || request.action === 'open_diff') return 'Session Review';
-  if (request.action === 'open_symbol') return request.query ? `Symbol: ${request.query}` : 'Symbol Search';
-  if (request.action === 'show_search_results') return request.query ? `Search: ${request.query}` : 'Repository Search';
+  if (request.action === 'open_symbol' || request.action === 'show_search_results') {
+    return 'Repository Search (Disabled)';
+  }
   return request.target?.path ?? 'Code Preview';
 }
 

@@ -24,9 +24,11 @@ import {
   DESK_POSITIONS, OVERFLOW_POSITIONS, ENTRANCE_POINT, CHARACTER_COLORS,
 } from '../lib/constants';
 import { requestSummary } from './services/SummaryService';
-import { queryOrchestrator, getOrchestratorId, isOrchestrator, resetOrchestrator } from './services/OrchestratorService';
+import { queryOrchestrator } from './services/OrchestratorService';
 import { generateHandoffSummary, injectHandoffIntoSession } from './services/HandoffService';
 import { restartPtySession } from './services/SessionLifecycleService';
+import { setCanvasDecisionDeliveryHandler } from '../lib/canvas/decisionResponses';
+import { setSessionTurnEndedHandler } from '../lib/cli/turnState';
 import { OutputParser } from './pty/OutputParser';
 import { reapOrphansForSessions, logReapResult } from './services/OrphanReaper';
 import type { PtySession } from './pty/PtyManager';
@@ -112,12 +114,7 @@ function createSessionEntry(id: string, name: string, cwd: string, cliType?: Cli
 function discoveredSessionName(cliType: CliType | undefined, sessionId: string): string | undefined {
   if (!cliType) return undefined;
   try {
-    let latest: { name?: string; lastModified?: number } | undefined;
-    for (const session of getProvider(cliType).discoverSessions()) {
-      if (session.id !== sessionId) continue;
-      if (!latest || (session.lastModified ?? 0) > (latest.lastModified ?? 0)) latest = session;
-    }
-    return latest?.name;
+    return getProvider(cliType).findSessionName(sessionId);
   } catch {
     return undefined;
   }
@@ -128,6 +125,12 @@ function validCliType(value: unknown): CliType | undefined {
 }
 
 export function setupTerminalBridge(io: SocketIOServer, ptyManager: PtyManager): void {
+  setCanvasDecisionDeliveryHandler((sessionId, prompt) =>
+    ptyManager.sendPrompt(sessionId, prompt));
+  setSessionTurnEndedHandler(sessionId => {
+    ptyManager.markPromptReady(sessionId);
+  });
+
   // Sessions currently mid-teardown (terminal:end fired, animation + kill
   // pending). Shared across sockets. While a session is here, terminal:resume
   // is refused so an accidental click during the ~8s close animation can't
@@ -375,13 +378,6 @@ export function setupTerminalBridge(io: SocketIOServer, ptyManager: PtyManager):
           return;
         }
 
-        // Orchestrator — just attach output, don't create session/sprite/auto-resume
-        if (isOrchestrator(sessionId)) {
-          if (!ptyManager.hasPty(sessionId)) return;
-          subscribeOutput(sessionId);
-          return;
-        }
-
         const existing = getSession(sessionId);
         const cachedProfile = getActiveSession(sessionId);
         const defaultPermissionMode = require('../lib/state/appSettings').getSettings().defaultPermissionMode as string;
@@ -496,6 +492,9 @@ export function setupTerminalBridge(io: SocketIOServer, ptyManager: PtyManager):
         const cliType = session.cliType || cachedProfile?.cliType || 'claude';
         const cwd = session.cwd || cachedProfile?.cwd || ptyManager.findSessionCwd(sessionId, cliType) || homedir();
         const permissionMode = cachedProfile?.permissionMode || defaultPermissionMode;
+        const currentPty = ptyManager.getSession(sessionId);
+        const restartCols = currentPty?.cols;
+        const restartRows = currentPty?.rows;
 
         const active = getActiveSessions().filter(item => item.id !== sessionId);
         active.push({
@@ -531,27 +530,43 @@ export function setupTerminalBridge(io: SocketIOServer, ptyManager: PtyManager):
             effort: cachedProfile?.effort,
             allowedTools: cachedProfile?.allowedTools,
             copilotMode: cachedProfile?.copilotMode,
+            cols: restartCols,
+            rows: restartRows,
           }, {
-            onPhase: phase => socket.emit('session:restart-status', { sessionId, phase }),
+            onPhase: phase => {
+              socket.emit('session:restart-status', { sessionId, phase });
+              if (phase === 'starting') {
+                io.emit('terminal:restart-reset', { sessionId });
+              }
+            },
             beforeResume: () => {
               const reaped = reapOrphansForSessions([sessionId]);
               if (reaped.killed > 0) logReapResult(`restart ${session.name}`, reaped);
             },
             onSpawned: restartedPty => new Promise<void>((resolve, reject) => {
               subscribeOutput(sessionId);
+              const provider = getProvider(cliType);
               let settled = false;
+              let handledSessionConflict = false;
+              let startupBuffer = '';
               let exitSubscription: { dispose: () => void } | null = null;
+              let startupSubscription: (() => void) | null = null;
+              const readinessTimeoutMs = process.platform === 'win32' ? 60_000 : 30_000;
               const readinessTimeout = setTimeout(() => {
                 if (settled) return;
                 settled = true;
                 exitSubscription?.dispose();
-                reject(new Error('The CLI did not become ready within 20 seconds.'));
-              }, 20_000);
+                startupSubscription?.();
+                reject(new Error(
+                  `The CLI did not become ready within ${readinessTimeoutMs / 1000} seconds.`,
+                ));
+              }, readinessTimeoutMs);
               const finishReady = () => {
                 if (settled) return;
                 settled = true;
                 clearTimeout(readinessTimeout);
                 exitSubscription?.dispose();
+                startupSubscription?.();
                 socket.emit('session:restart-status', { sessionId, phase: 'ready' });
                 resolve();
               };
@@ -559,8 +574,33 @@ export function setupTerminalBridge(io: SocketIOServer, ptyManager: PtyManager):
                 if (settled) return;
                 settled = true;
                 clearTimeout(readinessTimeout);
+                startupSubscription?.();
                 reject(new Error(`The CLI exited during restart (code ${exitCode}).`));
               });
+              const inspectStartup = () => {
+                const clean = OutputParser.stripAnsi(startupBuffer);
+                if (
+                  cliType === 'copilot'
+                  && !handledSessionConflict
+                  && /Session in use/i.test(clean)
+                  && /Resume anyway/i.test(clean)
+                ) {
+                  handledSessionConflict = true;
+                  startupBuffer = '';
+                  setTimeout(() => {
+                    const live = ptyManager.getSession(sessionId);
+                    if (live && live.status !== 'closed') live.pty.write('\r');
+                  }, 200);
+                  return;
+                }
+                if (provider.detectStartupReady(startupBuffer)) finishReady();
+              };
+              startupSubscription = ptyManager.onOutput(sessionId, data => {
+                startupBuffer = `${startupBuffer}${data}`.slice(-100_000);
+                inspectStartup();
+              });
+              startupBuffer = restartedPty.outputBuffer.join('').slice(-100_000);
+              inspectStartup();
               restartedPty.onStateChange = info => {
                 io.emit('session:state', { sessionId, ...info });
                 if (info.state === 'ready') finishReady();
@@ -574,6 +614,7 @@ export function setupTerminalBridge(io: SocketIOServer, ptyManager: PtyManager):
                 settled = true;
                 clearTimeout(readinessTimeout);
                 exitSubscription?.dispose();
+                startupSubscription?.();
                 reject(new Error('The CLI exited before restart completed.'));
               }
             }),
@@ -664,20 +705,6 @@ export function setupTerminalBridge(io: SocketIOServer, ptyManager: PtyManager):
     socket.on('session:summary', async ({ sessionId }: { sessionId: string }) => {
       const bullets = await requestSummary(io, ptyManager, sessionId);
       socket.emit('session:summary-result', { sessionId, bullets });
-    });
-
-    // Reset orchestrator
-    socket.on('orchestrator:reset', () => {
-      resetOrchestrator();
-      const id = getOrchestratorId();
-      if (id) socket.emit('orchestrator:id', { sessionId: id });
-      console.log('[orchestrator] reset, new id:', id?.slice(0, 12));
-    });
-
-    // Send orchestrator ID on request
-    socket.on('orchestrator:get-id', () => {
-      const id = getOrchestratorId();
-      if (id) socket.emit('orchestrator:id', { sessionId: id });
     });
 
     // Context handoff — generate summary from source, spawn new session, inject handoff
@@ -785,7 +812,8 @@ export function setupTerminalBridge(io: SocketIOServer, ptyManager: PtyManager):
       socket.emit('terminal:spawned', { sessionId: sessionUuid, name });
     });
 
-    // Query the orchestrator
+    // Compatibility response for stale clients. This returns immediately and
+    // never spawns a hidden session while the orchestrator is disabled.
     socket.on('orchestrator:query', async ({ query, queryId }: { query: string; queryId: string }) => {
       const result = await queryOrchestrator(query);
       socket.emit('orchestrator:result', { queryId, ...result });

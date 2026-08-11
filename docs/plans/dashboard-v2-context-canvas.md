@@ -4,6 +4,11 @@ Status: **Context Canvas MVP implemented; parallel-coordination phases planned**
 
 Related design: [`../design/dashboard-v2.md`](../design/dashboard-v2.md)
 
+Current decision (2026-08-03): repository and symbol search are disabled.
+Search controls and MCP tools were removed; stale API/navigation requests return
+HTTP 410. The original search implementation details below remain as historical
+context.
+
 ## 1. Objective
 
 Turn Dashboard V2 into the primary developer workspace for supervising multiple
@@ -11,7 +16,7 @@ CLI coding agents:
 
 1. The selected Copilot or Claude CLI owns the majority of the viewport.
 2. One session list contains every session and prioritizes those needing human judgment.
-4. A session-scoped Context Canvas reveals code, search results, and diffs
+4. A session-scoped Context Canvas reveals code, verified locations, and diffs
    without replacing the CLI or turning AgentMatrix into a generic IDE.
 5. The selected session can safely ask AgentMatrix to reveal repository context.
 

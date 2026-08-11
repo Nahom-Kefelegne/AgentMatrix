@@ -2,8 +2,12 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { Socket } from 'socket.io-client';
-import type { CanvasRequest } from '@/lib/canvas/types';
+import type {
+  CanvasRequest,
+  DecisionCanvasRequest,
+} from '@/lib/canvas/types';
 import {
+  isRepositorySearchAction,
   NAVIGATION_PROTOCOL_VERSION,
   type NavigationDisposition,
   type NavigationRequest,
@@ -43,8 +47,10 @@ export interface ContextCanvasController {
   openRequest: (request: NavigationRequest) => void;
   openCanvasRequest: (request: CanvasRequest) => void;
   openFile: (target: NavigationTarget, summary?: string) => void;
-  openSearch: (query: string, symbol?: boolean) => void;
+  openCode: (target: NavigationTarget, summary?: string) => void;
+  openCanvas: () => void;
   openSessionDiff: () => void;
+  resolveDecision: (request: DecisionCanvasRequest) => void;
   close: () => void;
   togglePin: () => void;
   back: () => void;
@@ -81,6 +87,37 @@ function containsArtifact(state: SessionCanvasState, requestRef: string): boolea
   return state.activeArtifact?.request.requestRef === requestRef
     || state.history.some(artifact => artifactId(artifact) === requestRef)
     || state.queuedArtifacts.some(artifact => artifactId(artifact) === requestRef);
+}
+
+function replaceDecisionArtifact(
+  artifact: CanvasArtifact,
+  request: DecisionCanvasRequest,
+): CanvasArtifact {
+  return artifact.type === 'typed'
+    && artifact.request.kind === 'decision'
+    && artifact.request.requestRef === request.requestRef
+    ? { type: 'typed', request }
+    : artifact;
+}
+
+export function applyCanvasDecisionResolution(
+  state: SessionCanvasState,
+  request: DecisionCanvasRequest,
+): SessionCanvasState {
+  let changed = false;
+  const replace = (artifact: CanvasArtifact): CanvasArtifact => {
+    const next = replaceDecisionArtifact(artifact, request);
+    if (next !== artifact) changed = true;
+    return next;
+  };
+  const activeArtifact = state.activeArtifact
+    ? replace(state.activeArtifact)
+    : null;
+  const history = state.history.map(replace);
+  const queuedArtifacts = state.queuedArtifacts.map(replace);
+  return changed
+    ? { ...state, activeArtifact, history, queuedArtifacts }
+    : state;
 }
 
 function latestStateTimestamp(state: SessionCanvasState): number {
@@ -310,7 +347,16 @@ export function hydrateCanvasSnapshot(
     const current = source.get(request.sessionId)
       ?? fallbackStates.get(request.sessionId)
       ?? EMPTY_STATE;
-    if (containsArtifact(current, request.requestRef)) continue;
+    if (containsArtifact(current, request.requestRef)) {
+      if (request.kind === 'decision' && request.payload.resolution) {
+        const resolved = applyCanvasDecisionResolution(current, request);
+        if (resolved !== current) {
+          next ??= new Map(states);
+          next.set(request.sessionId, resolved);
+        }
+      }
+      continue;
+    }
     const artifact: CanvasArtifact = { type: 'typed', request };
     const predatesLocalState = request.createdAt <= latestStateTimestamp(current);
     if (
@@ -348,6 +394,9 @@ export function useContextCanvas(
   const selectedRef = useRef(selectedSessionId);
   selectedRef.current = selectedSessionId;
   const autoPreviewTimersRef = useRef<Map<string, number>>(new Map());
+  const seenActiveSessionIdsRef = useRef<Set<string>>(
+    new Set(activeSessions.keys()),
+  );
 
   const updateSession = useCallback((
     sessionId: string,
@@ -381,6 +430,10 @@ export function useContextCanvas(
   }, [updateSession]);
 
   const openRequest = useCallback((request: NavigationRequest) => {
+    if (isRepositorySearchAction(request.action)) {
+      console.warn(`[context-canvas] Ignored disabled ${request.action} request ${request.requestRef}.`);
+      return;
+    }
     openArtifact({ type: 'navigation', request });
   }, [openArtifact]);
 
@@ -388,18 +441,28 @@ export function useContextCanvas(
     openArtifact({ type: 'typed', request });
   }, [openArtifact]);
 
+  const resolveDecision = useCallback((request: DecisionCanvasRequest) => {
+    updateSession(
+      request.sessionId,
+      previous => applyCanvasDecisionResolution(previous, request),
+    );
+  }, [updateSession]);
+
   useEffect(() => {
     const socket = socketRef.current;
     if (!socket || !connected) return;
     const handleNavigation = (request: NavigationRequest) => openRequest(request);
     const handleCanvas = (request: CanvasRequest) => openCanvasRequest(request);
+    const handleDecisionResolved = (request: DecisionCanvasRequest) => resolveDecision(request);
     socket.on('navigation:requested', handleNavigation);
     socket.on('canvas:requested', handleCanvas);
+    socket.on('canvas:decision-resolved', handleDecisionResolved);
     return () => {
       socket.off('navigation:requested', handleNavigation);
       socket.off('canvas:requested', handleCanvas);
+      socket.off('canvas:decision-resolved', handleDecisionResolved);
     };
-  }, [connected, openCanvasRequest, openRequest, socketRef]);
+  }, [connected, openCanvasRequest, openRequest, resolveDecision, socketRef]);
 
   useEffect(() => {
     const socket = socketRef.current;
@@ -423,6 +486,7 @@ export function useContextCanvas(
     const socket = socketRef.current;
     if (!socket || !connected) return;
     const handleSessionEnd = ({ sessionId }: { sessionId: string }) => {
+      seenActiveSessionIdsRef.current.delete(sessionId);
       canvasStateCache.delete(sessionId);
       const timer = autoPreviewTimersRef.current.get(sessionId);
       if (timer !== undefined) {
@@ -444,18 +508,24 @@ export function useContextCanvas(
 
   useEffect(() => {
     const activeIds = new Set(activeSessions.keys());
-    for (const sessionId of canvasStateCache.keys()) {
-      if (!activeIds.has(sessionId)) canvasStateCache.delete(sessionId);
-    }
-    for (const [sessionId, timer] of autoPreviewTimersRef.current) {
-      if (activeIds.has(sessionId)) continue;
+    const seenActiveIds = seenActiveSessionIdsRef.current;
+    const removedIds = new Set(
+      Array.from(seenActiveIds).filter(sessionId => !activeIds.has(sessionId)),
+    );
+    for (const sessionId of activeIds) seenActiveIds.add(sessionId);
+    for (const sessionId of removedIds) {
+      seenActiveIds.delete(sessionId);
+      canvasStateCache.delete(sessionId);
+      const timer = autoPreviewTimersRef.current.get(sessionId);
+      if (timer === undefined) continue;
       window.clearTimeout(timer);
       autoPreviewTimersRef.current.delete(sessionId);
     }
+    if (removedIds.size === 0) return;
     setStates(previous => {
       let next: Map<string, SessionCanvasState> | null = null;
-      for (const sessionId of previous.keys()) {
-        if (activeIds.has(sessionId)) continue;
+      for (const sessionId of removedIds) {
+        if (!previous.has(sessionId)) continue;
         next ??= new Map(previous);
         next.delete(sessionId);
       }
@@ -573,14 +643,20 @@ export function useContextCanvas(
     if (request) openRequest(request);
   }, [createRequest, openRequest]);
 
-  const openSearch = useCallback((query: string, symbol = false) => {
-    const request = createRequest(
-      symbol ? 'open_symbol' : 'show_search_results',
-      { query },
-      symbol ? `Find symbol ${query}` : `Search for ${query}`,
-    );
+  const openCode = useCallback((target: NavigationTarget, summary = 'Open code') => {
+    const request = createRequest('reveal_range', { target }, summary);
     if (request) openRequest(request);
   }, [createRequest, openRequest]);
+
+  const openCanvas = useCallback(() => {
+    const sessionId = selectedRef.current;
+    if (!sessionId) return;
+    updateSession(sessionId, previous => ({
+      ...previous,
+      visible: true,
+      closedAt: 0,
+    }));
+  }, [updateSession]);
 
   const openSessionDiff = useCallback(() => {
     const request = createRequest(
@@ -648,8 +724,10 @@ export function useContextCanvas(
     openRequest,
     openCanvasRequest,
     openFile,
-    openSearch,
+    openCode,
+    openCanvas,
     openSessionDiff,
+    resolveDecision,
     close,
     togglePin,
     back: () => moveHistory(-1),
