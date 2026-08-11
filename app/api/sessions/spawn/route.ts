@@ -18,7 +18,12 @@ import type { CliType } from '@/lib/types';
 export async function POST(request: Request) {
   try {
     const { task, cwd, name, cliType: rawCli } = await request.json();
-    const cliType: CliType = rawCli === 'copilot' ? 'copilot' : 'claude';
+    // Preserve the caller's CLI rather than folding unknown values onto
+    // 'claude'. Coercing here would let a `cliType: 'kimi'` request slip past
+    // the not-supported guard below and silently launch Claude with
+    // Claude-only flags.
+    const cliType: CliType =
+      rawCli === 'copilot' || rawCli === 'kimi' || rawCli === 'claude' ? rawCli : 'claude';
 
     if (!task || !cwd) {
       return NextResponse.json({ error: 'Missing task or cwd' }, { status: 400 });

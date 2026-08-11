@@ -13,6 +13,7 @@ import type {
   PermissionMode,
 } from './CliProvider';
 import { COPILOT_MODELS, COPILOT_PERMISSION_MODES } from './uiMetadata';
+import { pickSpawnableBinary } from './binaryPath';
 
 /**
  * Strip ANSI escape codes from terminal output.
@@ -226,10 +227,11 @@ export class CopilotProvider implements CliProvider {
   findBinary(): string {
     try {
       const cmd = process.platform === 'win32' ? 'where copilot' : 'which copilot';
-      const result = execSync(cmd, {
+      const output = execSync(cmd, {
         encoding: 'utf-8',
         stdio: ['pipe', 'pipe', 'pipe'],
-      }).trim().split(/\r?\n/)[0].trim();
+      });
+      const result = pickSpawnableBinary(output.trim().split(/\r?\n/));
       if (result) return result;
     } catch { /* ignore */ }
 
@@ -326,6 +328,14 @@ export class CopilotProvider implements CliProvider {
     // console previously only paged. CopilotTerminalPanel detects the mouse
     // DECSET and defers the wheel to xterm's native forwarding.
     args.push('--mouse');
+    // `opts.addDirs` is deliberately NOT translated. The only path flag this
+    // provider has verified is `--allow-all-paths` (folded into `--allow-all`),
+    // which grants the whole filesystem rather than the specific directories
+    // asked for — silently over-granting to satisfy a scoped request would be
+    // worse than ignoring it. Copilot CLI was not installed on the machine this
+    // was written on, so a scoped equivalent could not be checked. If one
+    // exists, wire it here; until then a Copilot handoff receiver can only read
+    // a prior transcript when the session already runs with --allow-all.
     if (opts.allowedTools) {
       for (const tool of opts.allowedTools.split(',').map(t => t.trim()).filter(Boolean)) {
         args.push(`--allow-tool=${tool}`);

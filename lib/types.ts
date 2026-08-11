@@ -42,7 +42,12 @@ export interface SessionEndStatus {
 
 // ===== CLI Types =====
 
-export type CliType = 'claude' | 'copilot';
+// Re-exported rather than redeclared. This was previously a second, independent
+// copy of the union, so adding a provider in CliProvider.ts silently desynced
+// the two and broke every assignment between them. CliProvider.ts is types-only
+// (no runtime imports), so this stays safe for client bundles.
+import type { CliType } from './cli/CliProvider';
+export type { CliType };
 
 // ===== Core Data Types =====
 

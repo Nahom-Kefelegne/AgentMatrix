@@ -15,6 +15,7 @@ import {
   defaultPermissionModeForCli,
   modelsForCli,
   permissionModesForCli,
+  uiCapabilitiesForCli,
   validOptionValue,
 } from '@/lib/cli/uiMetadata';
 import CliIcon, { CLI_ICON_META } from './CliIcon';
@@ -165,6 +166,9 @@ export default function AppSettingsModal({
       : 'claude';
   const modelOptions = modelsForCli(effectiveDefaultCli);
   const permissionOptions = permissionModesForCli(effectiveDefaultCli);
+  // Hide defaults the selected CLI would ignore (Kimi takes no --effort and no
+  // --append-system-prompt), so the settings pane can't persist a dead value.
+  const defaultCliCaps = uiCapabilitiesForCli(effectiveDefaultCli);
   const selectedModel = validOptionValue(modelOptions, settings.defaultModel);
   const selectedPermission = validOptionValue(
     permissionOptions,
@@ -286,7 +290,7 @@ export default function AppSettingsModal({
                 options={modelOptions}
               />
             </FormField>
-            {effectiveDefaultCli === 'copilot' ? (
+            {defaultCliCaps.agentMode ? (
               <FormField label="Agent mode">
                 <OptionGroup>
                   {COPILOT_MODES.map(mode => (
@@ -322,23 +326,25 @@ export default function AppSettingsModal({
                 ))}
               </OptionGroup>
             </FormField>
-            <FormField label={effectiveDefaultCli === 'copilot' ? 'Reasoning effort' : 'Effort level'}>
-              <OptionGroup>
-                {EFFORT_LEVELS.map(level => (
-                  <OptionButton
-                    key={level.value}
-                    selected={selectedEffort === level.value}
-                    onClick={() => void save({
-                      defaultCli: effectiveDefaultCli,
-                      defaultEffort: level.value,
-                    })}
-                  >
-                    {level.label}
-                  </OptionButton>
-                ))}
-              </OptionGroup>
-            </FormField>
-            {effectiveDefaultCli === 'claude' ? (
+            {defaultCliCaps.effort ? (
+              <FormField label={effectiveDefaultCli === 'copilot' ? 'Reasoning effort' : 'Effort level'}>
+                <OptionGroup>
+                  {EFFORT_LEVELS.map(level => (
+                    <OptionButton
+                      key={level.value}
+                      selected={selectedEffort === level.value}
+                      onClick={() => void save({
+                        defaultCli: effectiveDefaultCli,
+                        defaultEffort: level.value,
+                      })}
+                    >
+                      {level.label}
+                    </OptionButton>
+                  ))}
+                </OptionGroup>
+              </FormField>
+            ) : null}
+            {defaultCliCaps.appendSystemPrompt ? (
               <FormField
                 label="Append system prompt"
                 optional

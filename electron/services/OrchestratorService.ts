@@ -5,21 +5,68 @@ import { OutputParser } from '../pty/OutputParser';
 import { readFileSync, writeFileSync } from 'fs';
 import { randomUUID } from 'crypto';
 import { ORCHESTRATOR_PATH as CACHE_PATH, ensureDir, AGENTMATRIX_DIR } from '../../lib/state/paths';
+import { getSettings } from '../../lib/state/appSettings';
+import {
+  resolveOrchestratorProvider,
+  type OrchestratorProvider,
+} from '../../lib/state/orchestratorProvider';
+import { getProvider } from '../../lib/cli';
+import type { CliType } from '../../lib/cli/CliProvider';
 
 const SYSTEM_PROMPT = 'You are AgentMatrix Orchestrator. Execute tasks immediately. Write output to the file path specified in the prompt using Bash. Output only what is asked. No preamble. No questions. Do not modify any file except the specified output file.';
 
-function readCachedId(): string | null {
+/** Provider used when nothing resolves, preserving the pre-existing behavior. */
+const FALLBACK_PROVIDER: CliType = 'copilot';
+
+/** Cached orchestrator identity. `cliType` was added so a provider change
+ *  invalidates the cache instead of resuming under the wrong CLI. */
+interface OrchestratorCache {
+  sessionId: string;
+  cliType?: CliType;
+}
+
+function readCache(): OrchestratorCache | null {
   try {
     const data = JSON.parse(readFileSync(CACHE_PATH, 'utf-8'));
-    return data.sessionId || null;
+    return data.sessionId ? { sessionId: data.sessionId, cliType: data.cliType } : null;
   } catch { return null; }
 }
 
-function writeCachedId(sessionId: string): void {
+function writeCache(sessionId: string, cliType: CliType): void {
   try {
     ensureDir(AGENTMATRIX_DIR);
-    writeFileSync(CACHE_PATH, JSON.stringify({ sessionId }));
+    writeFileSync(CACHE_PATH, JSON.stringify({ sessionId, cliType }));
   } catch {}
+}
+
+/**
+ * Whether a provider can actually be spawned. Every OrchestratorProvider is now
+ * registered in `getProvider` (kimi included), so availability is decided purely
+ * by whether the binary is on disk. Any future unregistered provider still
+ * reports false rather than throwing, via the catch below.
+ */
+function isProviderAvailable(provider: OrchestratorProvider): boolean {
+  try {
+    getProvider(provider).findBinary();
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** Resolve the configured orchestrator provider, falling back audibly. */
+function resolveProvider(): CliType {
+  const setting = getSettings().orchestratorProvider;
+  const resolved = resolveOrchestratorProvider(setting, isProviderAvailable);
+  if (!resolved) {
+    console.warn(
+      `[orchestrator] no provider available for setting '${setting ?? 'auto'}', ` +
+      `falling back to '${FALLBACK_PROVIDER}'`,
+    );
+    return FALLBACK_PROVIDER;
+  }
+  // Narrowing: isProviderAvailable only returns true for registered CliTypes.
+  return resolved as CliType;
 }
 
 let orchestratorId: string | null = null;
@@ -27,8 +74,8 @@ let orchestratorSession: PtySession | null = null;
 let ptyManagerRef: PtyManager | null = null;
 let isSpawning = false;
 
-/** Spawn fresh orchestrator */
-function spawnFresh(ptyManager: PtyManager): boolean {
+/** Spawn fresh orchestrator under `cliType` */
+function spawnFresh(ptyManager: PtyManager, cliType: CliType): boolean {
   const id = randomUUID();
   try {
     const cwd = process.cwd();
@@ -38,11 +85,11 @@ function spawnFresh(ptyManager: PtyManager): boolean {
       name: 'agentMatrixOrchestrator(doNotUseManually)',
       permissionMode: 'bypassPermissions',
       systemPrompt: SYSTEM_PROMPT,
-      cliType: 'copilot',
+      cliType,
     });
     orchestratorId = id;
     orchestratorSession = ptyManager.getSession(id) || null;
-    writeCachedId(id);
+    writeCache(id, cliType);
     // Name the session so it's identifiable
     const { setCachedName } = require('../../lib/state/nameCache');
     setCachedName(id, 'agentMatrixOrchestrator(doNotUseManually)');
@@ -62,12 +109,12 @@ function startupMonitor(session: PtySession): void {
   let buffer = '';
   let done = false;
 
-  // Trust-prompt phrasing is provider-owned. Fall back to a small default set
-  // if the provider exposes none.
-  const { getProvider } = require('../../lib/cli');
+  // Trust-prompt phrasing is provider-owned; the session carries its own
+  // cliType, so this works unchanged for any provider. Fall back to a small
+  // default set if the provider exposes none (or isn't registered).
   let trustPatterns: string[] = [];
   try {
-    trustPatterns = getProvider(session.cliType || 'copilot').getTrustPromptPatterns();
+    trustPatterns = getProvider(session.cliType || FALLBACK_PROVIDER).getTrustPromptPatterns();
   } catch { /* use fallback */ }
   const fallback = ['trust this folder', 'trust this project', 'Is this a project', 'Yes, I trust', 'Do you trust'];
   const patterns = trustPatterns.length > 0 ? [...trustPatterns, ...fallback] : fallback;
@@ -111,28 +158,40 @@ export function spawnOrchestrator(ptyManager: PtyManager): void {
   ptyManagerRef = ptyManager;
 
   try {
-    const cachedId = readCachedId();
+    const cliType = resolveProvider();
+    const cached = readCache();
 
-    // Only resume the cached orchestrator if it actually exists as a Copilot
-    // session on disk. A cached id from before the Claude→Copilot migration
-    // points at a Claude session with no Copilot session-state dir, so
-    // `copilot --resume` would just exit; spawn a fresh Copilot orchestrator
-    // instead of leaving a dead PTY to be reaped later.
-    const cachedCwd = cachedId ? ptyManager.findSessionCwd(cachedId, 'copilot') : undefined;
+    // Only resume a cached orchestrator that belongs to the provider we're
+    // about to run as, and that still exists on disk. A cache written under a
+    // different CLI points at a session the current provider can't resume (it
+    // would just exit), so spawn fresh rather than leave a dead PTY to be
+    // reaped later. This generalises the old Claude→Copilot migration case.
+    const providerChanged = !!cached?.cliType && cached.cliType !== cliType;
+    const cachedCwd = cached && !providerChanged
+      ? ptyManager.findSessionCwd(cached.sessionId, cliType)
+      : undefined;
 
-    if (cachedId && cachedCwd) {
+    if (cached && cachedCwd) {
       try {
-        ptyManager.spawnResume(cachedId, { cwd: cachedCwd, resumeId: cachedId, cliType: 'copilot' });
-        orchestratorId = cachedId;
-        orchestratorSession = ptyManager.getSession(cachedId) || null;
-        console.log(`[orchestrator] resumed id=${cachedId.slice(0, 12)}`);
+        ptyManager.spawnResume(cached.sessionId, {
+          cwd: cachedCwd, resumeId: cached.sessionId, cliType,
+        });
+        orchestratorId = cached.sessionId;
+        orchestratorSession = ptyManager.getSession(cached.sessionId) || null;
+        console.log(`[orchestrator] resumed id=${cached.sessionId.slice(0, 12)} cli=${cliType}`);
       } catch {
         console.log(`[orchestrator] resume failed, spawning fresh`);
-        spawnFresh(ptyManager);
+        spawnFresh(ptyManager, cliType);
       }
     } else {
-      if (cachedId) console.log(`[orchestrator] cached id is not a Copilot session, spawning fresh`);
-      spawnFresh(ptyManager);
+      if (cached && providerChanged) {
+        console.log(
+          `[orchestrator] cached session is ${cached.cliType}, resolved provider is ${cliType} — spawning fresh`,
+        );
+      } else if (cached) {
+        console.log(`[orchestrator] cached id is not a ${cliType} session, spawning fresh`);
+      }
+      spawnFresh(ptyManager, cliType);
     }
 
     // Name and monitor on every startup

@@ -28,11 +28,12 @@ export async function GET(request: Request) {
     const name = session.name;
     const provider = getProvider(session.cliType || 'claude');
 
-    // Claude can resume by name (the latest session with that name);
-    // Copilot resumes by session ID. The provider's resume args take
-    // either since both encode it as `--resume <token>`. Pass the most
-    // useful token per CLI.
-    const resumeToken = session.cliType === 'copilot' ? session.id : name;
+    // Claude is the only CLI that resolves a resume token by NAME (it picks the
+    // latest session with that name). Copilot (`--resume <id>`) and Kimi
+    // (`--session <id>`) both key off the session ID, so anything that isn't
+    // Claude must get the ID — handing Kimi a name yields a command that
+    // resolves to no session at all.
+    const resumeToken = (session.cliType || 'claude') === 'claude' ? name : session.id;
     let cliCommand = provider.buildResumeShellCommand({ cwd, resumeId: resumeToken });
 
     // Optionally wrap in Agency when the user has it enabled.

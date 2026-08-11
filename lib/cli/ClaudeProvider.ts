@@ -1,5 +1,6 @@
 import { execSync, execFile, execFileSync } from 'child_process';
-import { existsSync, readdirSync, statSync, openSync, readSync, closeSync } from 'fs';
+import { existsSync, readdirSync, statSync, openSync, readSync, closeSync, appendFileSync } from 'fs';
+import { open } from 'fs/promises';
 import { join, sep } from 'path';
 import { homedir } from 'os';
 import type {
@@ -13,6 +14,7 @@ import type {
   PermissionMode,
 } from './CliProvider';
 import { CLAUDE_MODELS, CLAUDE_PERMISSION_MODES } from './uiMetadata';
+import { pickSpawnableBinary } from './binaryPath';
 
 /**
  * Strip ANSI escape codes from terminal output.
@@ -51,6 +53,280 @@ const CONTEXT_PROMPT_PATTERNS = [
   'compact',
   'summarize the conversation',
 ];
+
+// ─── Context-window accounting ───────────────────────────────────────
+//
+// Claude records per-turn token accounting in its own transcript, which is a
+// far more stable source than scraping the TUI status line (see
+// parseContextUsage). Everything below is pure and exported so the arithmetic
+// can be unit-tested without touching the filesystem.
+
+/**
+ * Context-window size (tokens) per model. APPROXIMATE — Anthropic doesn't
+ * publish these in a machine-readable form the CLI exposes, so these are the
+ * documented/observed sizes and must be revisited as models ship.
+ *
+ * 200k is the long-standing default for the Claude line. LONG_CONTEXT is for
+ * the models that clearly exceed it: the values in CLAUDE_LONG_CONTEXT_MODELS
+ * were each observed in real transcripts on this machine consuming well past
+ * 200k tokens in a single turn (e.g. claude-opus-4-8 at 768,448 and
+ * claude-fable-5 at 390,762), which is only possible with a ~1M window.
+ *
+ * An under-sized guess degrades gracefully rather than breaking: the
+ * percentage is clamped to 99, so an unknown large-context model reads as
+ * "nearly full" instead of throwing or reporting a nonsense >100 value.
+ */
+const CLAUDE_DEFAULT_CONTEXT_WINDOW = 200_000;
+const CLAUDE_LONG_CONTEXT_WINDOW = 1_000_000;
+
+/**
+ * Substrings of `message.model` known to carry the ~1M window. Matched as
+ * substrings so dated variants (e.g. "claude-opus-4-8-20260115") resolve too.
+ */
+const CLAUDE_LONG_CONTEXT_MODELS = [
+  'opus-4-8',
+  'opus-5',
+  'sonnet-5',
+  'fable-5',
+  'haiku-5',
+];
+
+/**
+ * Map a transcript `message.model` id to its assumed context window.
+ * Mirrors CopilotProvider's contextWindowForModel: one named default plus a
+ * small, documented override table. Unknown/empty models get the default.
+ */
+export function contextWindowForModel(model: string): number {
+  const normalized = (model || '').toLowerCase();
+  if (!normalized) return CLAUDE_DEFAULT_CONTEXT_WINDOW;
+  // Explicit "[1m]" suffix is how the 1M-context beta is tagged.
+  if (normalized.includes('[1m]')) return CLAUDE_LONG_CONTEXT_WINDOW;
+  for (const known of CLAUDE_LONG_CONTEXT_MODELS) {
+    if (normalized.includes(known)) return CLAUDE_LONG_CONTEXT_WINDOW;
+  }
+  return CLAUDE_DEFAULT_CONTEXT_WINDOW;
+}
+
+/** The token counts a transcript turn reports. All fields are optional. */
+export interface ClaudeTokenUsage {
+  input_tokens?: number;
+  cache_creation_input_tokens?: number;
+  cache_read_input_tokens?: number;
+  output_tokens?: number;
+}
+
+/** The subset of a transcript `"type":"assistant"` line we care about. */
+export interface ClaudeAssistantEntry {
+  type?: string;
+  /** True for subagent turns, which have their own separate context. */
+  isSidechain?: boolean;
+  message?: {
+    model?: string;
+    usage?: ClaudeTokenUsage;
+  };
+}
+
+/**
+ * Tokens currently occupying the context window for a turn.
+ *
+ * input_tokens + cache_creation_input_tokens + cache_read_input_tokens.
+ * `output_tokens` is deliberately EXCLUDED — it's what the model produced,
+ * not what was resident in the window when the request was made. Verified
+ * against a real transcript: 133 + 1112 + 360788 = 362033.
+ *
+ * Non-numeric / missing fields count as 0 so a partially-populated usage
+ * object still yields a usable total.
+ */
+export function sumContextTokens(usage: ClaudeTokenUsage | null | undefined): number {
+  if (!usage || typeof usage !== 'object') return 0;
+  const part = (value: unknown): number =>
+    typeof value === 'number' && Number.isFinite(value) && value > 0 ? value : 0;
+  return (
+    part(usage.input_tokens) +
+    part(usage.cache_creation_input_tokens) +
+    part(usage.cache_read_input_tokens)
+  );
+}
+
+/**
+ * Whether an entry represents real main-session context usage.
+ *
+ * Rejects:
+ *  - non-assistant lines (user, attachment, ai-title, ...),
+ *  - `isSidechain: true` subagent turns — they have their own context window
+ *    and would otherwise clobber the main session's reading,
+ *  - the `<synthetic>` model, which Claude writes for locally-injected error
+ *    placeholders (e.g. "Failed to authenticate: OAuth session expired") with
+ *    an all-zero usage block. Observed in real transcripts; without this an
+ *    errored session reports 0%.
+ *  - anything summing to zero tokens.
+ */
+export function isUsableUsageEntry(entry: ClaudeAssistantEntry | null | undefined): boolean {
+  if (!entry || typeof entry !== 'object') return false;
+  if (entry.type !== 'assistant') return false;
+  if (entry.isSidechain === true) return false;
+  const model = entry.message?.model || '';
+  if (model === '<synthetic>') return false;
+  return sumContextTokens(entry.message?.usage) > 0;
+}
+
+/**
+ * Pick the entry that reflects the session's current context fill: the LAST
+ * usable one in file order. Takes already-parsed entries so it stays pure.
+ * Returns null when nothing qualifies.
+ */
+export function selectLatestUsageEntry(
+  entries: Array<ClaudeAssistantEntry | null | undefined> | null | undefined,
+): ClaudeAssistantEntry | null {
+  if (!Array.isArray(entries)) return null;
+  for (let i = entries.length - 1; i >= 0; i--) {
+    const entry = entries[i];
+    if (isUsableUsageEntry(entry)) return entry as ClaudeAssistantEntry;
+  }
+  return null;
+}
+
+/**
+ * Scan a raw chunk of JSONL (a tail of a transcript) BACKWARDS and return the
+ * first usable usage entry found — i.e. the most recent one.
+ *
+ * Parsing backwards with an early return means we JSON.parse only a handful of
+ * lines instead of the whole chunk, which matters because transcripts run to
+ * multiple MB and JSON.parse is synchronous. The chunk's first line is usually
+ * truncated (the tail starts at an arbitrary byte offset); it simply fails to
+ * parse and is skipped.
+ */
+export function findLatestUsageEntryInTail(chunk: string | null | undefined): ClaudeAssistantEntry | null {
+  if (!chunk || typeof chunk !== 'string') return null;
+  const lines = chunk.split('\n');
+  for (let i = lines.length - 1; i >= 0; i--) {
+    const line = lines[i].trim();
+    if (!line || line.charCodeAt(0) !== 123 /* '{' */) continue;
+    // Cheap pre-filter: skip the (large) user/attachment lines without paying
+    // for a full JSON.parse of them.
+    if (!line.includes('"usage"')) continue;
+    let parsed: ClaudeAssistantEntry;
+    try {
+      parsed = JSON.parse(line) as ClaudeAssistantEntry;
+    } catch {
+      continue;
+    }
+    if (isUsableUsageEntry(parsed)) return parsed;
+  }
+  return null;
+}
+
+/**
+ * Turn a usage entry into an integer percentage of its model's context window.
+ * Clamped to 0-99 (mirrors CopilotProvider) so a rough estimate never claims a
+ * full or over-full window. Returns null when the entry carries no usable
+ * token count.
+ */
+export function contextPercentFromEntry(
+  entry: ClaudeAssistantEntry | null | undefined,
+): number | null {
+  const tokens = sumContextTokens(entry?.message?.usage);
+  if (tokens <= 0) return null;
+  const window = contextWindowForModel(entry?.message?.model || '');
+  const pct = Math.round((tokens / window) * 100);
+  return Math.max(0, Math.min(99, pct));
+}
+
+/**
+ * The last `custom-title` value in a chunk of transcript JSONL, or null.
+ * Scans backwards because the newest title wins (see renameSession).
+ */
+export function findLastCustomTitleInTail(chunk: string | null | undefined): string | null {
+  if (!chunk || typeof chunk !== 'string') return null;
+  const lines = chunk.split('\n');
+  for (let i = lines.length - 1; i >= 0; i--) {
+    const line = lines[i].trim();
+    if (!line || !line.includes('"custom-title"')) continue;
+    try {
+      const parsed = JSON.parse(line) as { type?: string; customTitle?: string };
+      if (parsed.type === 'custom-title' && typeof parsed.customTitle === 'string') {
+        return parsed.customTitle;
+      }
+    } catch {
+      continue;
+    }
+  }
+  return null;
+}
+
+/** Initial tail read. Comfortably covers the last turn of a normal session. */
+const CONTEXT_TAIL_BYTES = 256 * 1024;
+/** One widened retry for sessions whose final turn carries huge tool output. */
+const CONTEXT_TAIL_BYTES_WIDE = 2 * 1024 * 1024;
+
+/**
+ * Read the last `maxBytes` of a file asynchronously. Returns the text plus
+ * whether the read was truncated (i.e. the file is bigger than the window),
+ * so the caller knows whether widening could help. Never throws.
+ */
+async function readTailAsync(
+  path: string,
+  maxBytes: number,
+): Promise<{ text: string; truncated: boolean } | null> {
+  let handle: Awaited<ReturnType<typeof open>> | null = null;
+  try {
+    handle = await open(path, 'r');
+    const { size } = await handle.stat();
+    if (size <= 0) return null;
+    const length = Math.min(maxBytes, size);
+    const buffer = Buffer.alloc(length);
+    await handle.read(buffer, 0, length, size - length);
+    return { text: buffer.toString('utf-8'), truncated: length < size };
+  } catch {
+    return null;
+  } finally {
+    if (handle) await handle.close().catch(() => { /* ignore */ });
+  }
+}
+
+/** UUID v4 pattern. Guards writes so we only ever touch a real session file. */
+const CLAUDE_SESSION_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/** Bounded tail read used by renameSession's idempotence check. */
+const RENAME_TAIL_BYTES = 64 * 1024;
+
+/** Synchronous bounded tail read. Returns null on any failure. */
+function readTailSync(path: string, maxBytes: number): string | null {
+  let fd: number | null = null;
+  try {
+    const size = statSync(path).size;
+    if (size <= 0) return null;
+    const length = Math.min(maxBytes, size);
+    fd = openSync(path, 'r');
+    const buffer = Buffer.alloc(length);
+    const read = readSync(fd, buffer, 0, length, size - length);
+    return buffer.toString('utf-8', 0, read);
+  } catch {
+    return null;
+  } finally {
+    if (fd !== null) closeSync(fd);
+  }
+}
+
+/**
+ * Whether the file's final byte is a newline. Used to confirm the transcript
+ * has no partially-written trailing line before we append to it.
+ */
+function endsWithNewlineSync(path: string): boolean {
+  let fd: number | null = null;
+  try {
+    const size = statSync(path).size;
+    if (size <= 0) return false;
+    fd = openSync(path, 'r');
+    const buffer = Buffer.alloc(1);
+    const read = readSync(fd, buffer, 0, 1, size - 1);
+    return read === 1 && buffer[0] === 0x0a;
+  } catch {
+    return false;
+  } finally {
+    if (fd !== null) closeSync(fd);
+  }
+}
 
 /**
  * Read the first ~4KB of a file. Used to extract the JSON header line
@@ -126,21 +402,22 @@ export class ClaudeProvider implements CliProvider {
   findBinary(): string {
     try {
       const cmd = process.platform === 'win32' ? 'where claude' : 'which claude';
-      const result = execSync(cmd, {
+      const output = execSync(cmd, {
         encoding: 'utf-8',
         stdio: ['pipe', 'pipe', 'pipe'],
-      }).trim().split(/\r?\n/)[0].trim();
+      });
+      const result = pickSpawnableBinary(output.trim().split(/\r?\n/));
       if (result) return result;
     } catch { /* ignore */ }
 
     const home = homedir();
     const candidates = process.platform === 'win32'
+      // Extensionless npm shims are POSIX shell scripts; CreateProcess rejects
+      // them with error 193, so Windows only ever lists executable extensions.
       ? [
           join(home, '.local', 'bin', 'claude.exe'),
-          join(home, '.local', 'bin', 'claude'),
           join(home, 'AppData', 'Local', 'Programs', 'claude', 'claude.exe'),
           join(home, 'AppData', 'Roaming', 'npm', 'claude.cmd'),
-          join(home, 'AppData', 'Roaming', 'npm', 'claude'),
           'C:\\Program Files\\Claude\\claude.exe',
         ]
       : [
@@ -184,6 +461,12 @@ export class ClaudeProvider implements CliProvider {
   buildSpawnArgs(opts: SpawnOptions): string[] {
     const args: string[] = [];
     if (opts.sessionId) args.push('--session-id', opts.sessionId);
+    // Verified (Claude Code 2.1.206+): `-n, --name <name>` sets "a display name
+    // for this session (shown in the prompt box, /resume picker, and terminal
+    // title)". This was previously dropped, so a Claude session's name lived
+    // only in AgentMatrix's own cache and was invisible outside the app —
+    // Copilot has passed `-n` through since it was added.
+    if (opts.name) args.push('--name', opts.name);
     if (opts.permissionMode === 'bypassPermissions') {
       args.push('--dangerously-skip-permissions');
     } else if (opts.permissionMode) {
@@ -192,6 +475,9 @@ export class ClaudeProvider implements CliProvider {
     if (opts.model) args.push('--model', opts.model);
     if (opts.effort) args.push('--effort', opts.effort);
     if (opts.allowedTools) args.push('--allowedTools', opts.allowedTools);
+    // Verified: `--add-dir <directories...>` — "Additional directories to allow
+    // tool access to". Variadic, so all paths follow a single flag.
+    if (opts.addDirs?.length) args.push('--add-dir', ...opts.addDirs);
     if (opts.systemPrompt) {
       // Collapse to a single line; shell-quoting happens uniformly at spawn.
       const oneLine = opts.systemPrompt.replace(/\n/g, ' ').replace(/\s+/g, ' ').trim();
@@ -239,10 +525,39 @@ export class ClaudeProvider implements CliProvider {
   }
 
   /**
-   * Claude prints context usage in its TUI, so usage comes from
-   * `parseContextUsage` on the output stream, not from disk. No-op here.
+   * Context-window usage (% used, 0-99) read from Claude's own per-turn token
+   * accounting in the session transcript, rather than scraped from the TUI.
+   *
+   * Each `"type":"assistant"` line carries `message.usage`; the tokens resident
+   * in the window are input_tokens + cache_creation_input_tokens +
+   * cache_read_input_tokens (see sumContextTokens). The LAST non-sidechain
+   * entry is the session's current fill level.
+   *
+   * This is the more reliable of the two sources — `parseContextUsage` depends
+   * on the exact wording of Claude Code's status line and breaks whenever that
+   * changes, whereas the transcript schema is the CLI's own persisted record.
+   * Both remain available; callers may prefer this and fall back to the parser.
+   *
+   * Transcripts reach multiple MB, so we read a bounded 256KB tail and parse it
+   * backwards, stopping at the first usable entry — typically only a few
+   * JSON.parse calls. If the tail contains no usage entry (a final turn with
+   * very large tool output) we widen once to 2MB, then give up. All file I/O is
+   * async so Electron's main thread is never blocked.
+   *
+   * Returns null when the transcript can't be found or carries no usable usage.
    */
-  async getContextUsage(_sessionId: string): Promise<number | null> {
+  async getContextUsage(sessionId: string): Promise<number | null> {
+    const transcriptPath = this.getTranscriptPath(sessionId);
+    if (!transcriptPath) return null;
+
+    for (const bytes of [CONTEXT_TAIL_BYTES, CONTEXT_TAIL_BYTES_WIDE]) {
+      const tail = await readTailAsync(transcriptPath, bytes);
+      if (!tail) return null;
+      const entry = findLatestUsageEntryInTail(tail.text);
+      if (entry) return contextPercentFromEntry(entry);
+      // Already read the whole file — widening cannot surface anything new.
+      if (!tail.truncated) break;
+    }
     return null;
   }
 
@@ -381,13 +696,64 @@ export class ClaudeProvider implements CliProvider {
   }
 
   /**
-   * No-op at the disk level. Claude renames happen in-TUI via the `/rename`
-   * command (injected into the PTY by the client); the name is recorded in the
-   * transcript and picked up by the scanner. There's no separate metadata file
-   * to write, so we return false to signal "not handled here".
+   * Persist a session title in Claude's own on-disk store by appending a
+   * `custom-title` record to the session transcript.
+   *
+   * VERIFIED against real transcripts in ~/.claude/projects:
+   *  - The record is exactly `{"type":"custom-title","customTitle":"...",
+   *    "sessionId":"..."}` — three keys, observed identically across four
+   *    separate sessions. There is no separate title index or metadata file
+   *    anywhere under ~/.claude, so the transcript is the authoritative store.
+   *  - It is a SIDECAR line: unlike user/assistant lines it carries no `uuid`,
+   *    `parentUuid` or `timestamp`, so it sits outside the conversation DAG.
+   *    Appending one therefore cannot corrupt message replay.
+   *  - Newest-wins. Claude re-appends the current title on each checkpoint
+   *    (54-87 copies in long sessions). The sibling `ai-title` record was
+   *    observed CHANGING within a single file ("Update configuration settings"
+   *    → "Update config"), which is only coherent if the reader takes the last
+   *    occurrence.
+   *
+   * SAFETY: append-only — the file is never rewritten or truncated, so a
+   * multi-MB transcript can't be lost. We refuse to write unless the file
+   * already ends in a newline, so we can never concatenate onto (and corrupt)
+   * a partially-written trailing line.
+   *
+   * CAVEAT: a currently-running Claude process may re-append its own in-memory
+   * title at its next checkpoint, superseding this write. The rename is
+   * therefore reliable for idle//resumed sessions and best-effort for live
+   * ones. The app's own name cache (see app/api/sessions/rename/route.ts, which
+   * writes setCachedName + setActiveSessionName regardless of this return
+   * value) is what drives the AgentMatrix UI either way; this write is what
+   * makes the name visible OUTSIDE AgentMatrix.
    */
-  renameSession(_sessionId: string, _newName: string): boolean {
-    return false;
+  renameSession(sessionId: string, newName: string): boolean {
+    const name = newName.trim();
+    if (!name) return false;
+    if (!CLAUDE_SESSION_ID_RE.test(sessionId)) return false;
+
+    const transcriptPath = this.getTranscriptPath(sessionId);
+    if (!transcriptPath) return false;
+
+    try {
+      // Already the current title — skip the redundant append.
+      const tail = readTailSync(transcriptPath, RENAME_TAIL_BYTES);
+      if (tail !== null && findLastCustomTitleInTail(tail) === name) return true;
+
+      // Only append to a file in a known-good state. A missing trailing
+      // newline means the last line is partial (live writer mid-flush, or a
+      // truncated file); appending would corrupt it.
+      if (!endsWithNewlineSync(transcriptPath)) return false;
+
+      const record = JSON.stringify({
+        type: 'custom-title',
+        customTitle: name,
+        sessionId,
+      });
+      appendFileSync(transcriptPath, `${record}\n`, 'utf-8');
+      return true;
+    } catch {
+      return false;
+    }
   }
 
   /**

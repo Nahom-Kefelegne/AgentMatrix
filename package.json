@@ -12,7 +12,9 @@
     "electron:dev": "npm --no-update-notifier run build:preload && electron .",
     "electron:build": "npm --no-update-notifier run build:preload && npm --no-update-notifier run build && cp -r .next/static .next/standalone/.next/static && cp -r public .next/standalone/public && electron-builder",
     "fix:native": "node scripts/dependency-state.mjs repair",
-    "rebuild:native": "electron-rebuild -f -w node-pty"
+    "rebuild:native": "electron-rebuild -f -w node-pty",
+    "test": "vitest run",
+    "test:watch": "vitest"
   },
   "dependencies": {
     "@base-ui/react": "^1.2.0",
@@ -50,7 +52,8 @@
     "@types/trusted-types": "2.0.7",
     "electron": "^33.0.0",
     "electron-builder": "^25.0.0",
-    "typescript": "^5"
+    "typescript": "^5",
+    "vitest": "^4.1.10"
   },
   "overrides": {
     "node-gyp": "^11.0.0"

@@ -1,6 +1,7 @@
 import type { CliType, CliProvider, CliHealth } from './CliProvider';
 import { ClaudeProvider } from './ClaudeProvider';
 import { CopilotProvider } from './CopilotProvider';
+import { KimiProvider } from './KimiProvider';
 
 export type { CliType, CliProvider, CliHealth, SpawnOptions, ResumeOptions } from './CliProvider';
 
@@ -40,6 +41,9 @@ function getOrCreateProvider(type: CliType): CliProvider {
       case 'copilot':
         provider = new CopilotProvider();
         break;
+      case 'kimi':
+        provider = new KimiProvider();
+        break;
       default:
         throw new Error(`Unknown CLI type: ${type}`);
     }
@@ -57,14 +61,14 @@ export function getProvider(type: CliType): CliProvider {
  *  scan / probe / aggregate across all supported CLIs (session discovery,
  *  process detection, etc.). Providers are cached singletons. */
 export function allProviders(): CliProvider[] {
-  const types: CliType[] = ['claude', 'copilot'];
+  const types: CliType[] = ['claude', 'copilot', 'kimi'];
   return types.map(getOrCreateProvider);
 }
 
 /** Detect which CLIs are installed on this system. */
 export function detectInstalledCLIs(): CliType[] {
   const installed: CliType[] = [];
-  const types: CliType[] = ['claude', 'copilot'];
+  const types: CliType[] = ['claude', 'copilot', 'kimi'];
 
   for (const type of types) {
     try {
@@ -81,7 +85,7 @@ export function detectInstalledCLIs(): CliType[] {
 
 /** Check health of all known CLI types. */
 export function checkAllHealth(): CliHealth[] {
-  const types: CliType[] = ['claude', 'copilot'];
+  const types: CliType[] = ['claude', 'copilot', 'kimi'];
   return types.map(type => {
     const provider = getOrCreateProvider(type);
     return provider.checkHealth();

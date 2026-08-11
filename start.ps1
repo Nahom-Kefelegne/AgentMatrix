@@ -1,4 +1,4 @@
-# Agent Matrix — Start (Windows)
+﻿# Agent Matrix — Start (Windows)
 # Pull the latest code (fast-forward only) before launching so start.ps1 always
 # runs the newest version. Offline starts remain available, but if the remote is
 # reachable and local state blocks the update, stop instead of silently serving

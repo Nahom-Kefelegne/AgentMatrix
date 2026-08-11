@@ -25,7 +25,7 @@ import {
 } from '../lib/constants';
 import { requestSummary } from './services/SummaryService';
 import { queryOrchestrator, getOrchestratorId, isOrchestrator, resetOrchestrator } from './services/OrchestratorService';
-import { generateHandoffSummary, injectHandoffIntoSession } from './services/HandoffService';
+import { prepareHandoff, injectHandoffIntoSession, recordHandoffReceiver } from './services/HandoffService';
 import { restartPtySession } from './services/SessionLifecycleService';
 import { OutputParser } from './pty/OutputParser';
 import { reapOrphansForSessions, logReapResult } from './services/OrphanReaper';
@@ -124,7 +124,7 @@ function discoveredSessionName(cliType: CliType | undefined, sessionId: string):
 }
 
 function validCliType(value: unknown): CliType | undefined {
-  return value === 'copilot' || value === 'claude' ? value : undefined;
+  return value === 'copilot' || value === 'claude' || value === 'kimi' ? value : undefined;
 }
 
 export function setupTerminalBridge(io: SocketIOServer, ptyManager: PtyManager): void {
@@ -165,7 +165,7 @@ export function setupTerminalBridge(io: SocketIOServer, ptyManager: PtyManager):
       effort?: string;
       allowedTools?: string;
       systemPrompt?: string;
-      cliType?: 'claude' | 'copilot';
+      cliType?: CliType;
       copilotMode?: string;
     }) => {
       const sessionUuid = randomUUID();
@@ -709,14 +709,22 @@ export function setupTerminalBridge(io: SocketIOServer, ptyManager: PtyManager):
       const allowedTools = sourceProfile?.allowedTools;
       const copilotMode = data.copilotMode || sourceProfile?.copilotMode;
 
-      // Step 1: Generate summary from source session
+      // Step 1: Build the handoff bundle — the user's verbatim ask, raw paths to
+      // every prior session's transcript, and the source agent's own summary.
       socket.emit('session:handoff-status', { handoffId, status: 'summarizing' });
-      const result = await generateHandoffSummary(ptyManager, sourceSessionId, contextRequest, handoffId);
+      const result = await prepareHandoff(
+        ptyManager,
+        sourceSessionId,
+        contextRequest,
+        handoffId,
+        targetCwd,
+      );
 
-      if (!result.success) {
+      if (!result.success || !result.prepared) {
         socket.emit('session:handoff-status', { handoffId, status: 'error', error: result.error });
         return;
       }
+      const prepared = result.prepared;
 
       // Step 2: Spawn new session
       socket.emit('session:handoff-status', { handoffId, status: 'spawning' });
@@ -730,6 +738,20 @@ export function setupTerminalBridge(io: SocketIOServer, ptyManager: PtyManager):
       setCachedName(sessionUuid, name);
       io.emit(SOCKET_EVENTS.SESSION_START, sessionData);
 
+      // Link the new session back to this handoff BEFORE it can itself be handed
+      // off. This is the backwards edge that makes A -> B -> C chain: when B is
+      // handed off later, HandoffService looks B up here, loads this bundle, and
+      // prepends A's transcript and A's verbatim ask to C's bundle.
+      recordHandoffReceiver(handoffId, sessionUuid);
+
+      // The receiving session's cwd is the target repo, but the transcripts it
+      // is told to grep live under `~/.claude/projects/<project>/` etc., and the
+      // bundle under `~/.agentmatrix/handoffs/<id>/`. These are the narrowest
+      // directories that make those readable — never a whole state root.
+      console.log(
+        `[handoff] ${handoffId} granting scoped read access: ${prepared.addDirs.join(', ')}`,
+      );
+
       ptyManager.spawnNew(sessionUuid, {
         cwd: targetCwd,
         sessionUuid,
@@ -738,6 +760,7 @@ export function setupTerminalBridge(io: SocketIOServer, ptyManager: PtyManager):
         model,
         effort,
         allowedTools,
+        addDirs: prepared.addDirs,
         systemPrompt: data.systemPrompt,
         cliType,
         copilotMode,
@@ -771,7 +794,7 @@ export function setupTerminalBridge(io: SocketIOServer, ptyManager: PtyManager):
         socket.emit('session:handoff-status', { handoffId, status: 'injecting' });
         // Use fixed delay since onReady may not fire reliably
         setTimeout(() => {
-          injectHandoffIntoSession(ptyManager, sessionUuid, handoffId);
+          injectHandoffIntoSession(ptyManager, sessionUuid, prepared);
           socket.emit('session:handoff-status', {
             handoffId,
             status: 'done',
@@ -786,8 +809,13 @@ export function setupTerminalBridge(io: SocketIOServer, ptyManager: PtyManager):
     });
 
     // Query the orchestrator
-    socket.on('orchestrator:query', async ({ query, queryId }: { query: string; queryId: string }) => {
-      const result = await queryOrchestrator(query);
+    socket.on('orchestrator:query', async (
+      { query, queryId, timeoutMs }: { query: string; queryId: string; timeoutMs?: number },
+    ) => {
+      // Honour the caller's budget. Deep search greps ~/.claude and ~/.copilot
+      // and legitimately runs past captureQuery's 45s default; without this the
+      // server gave up early and the client saw an empty result.
+      const result = await queryOrchestrator(query, timeoutMs ? { timeoutMs } : undefined);
       socket.emit('orchestrator:result', { queryId, ...result });
     });
 

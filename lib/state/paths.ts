@@ -63,10 +63,57 @@ export function reviewFilePath(sessionId: string): string {
   return join(REVIEW_DIR, `${sessionId}.md`);
 }
 
-/** Per-handoff context-transfer markdown. */
+/**
+ * Per-handoff context-transfer markdown.
+ *
+ * LEGACY LAYOUT. Superseded by `handoffBundleDir` + `handoffMarkdownPath`, which
+ * give each handoff its own directory. Kept so the old flat `<id>.md` files left
+ * by earlier builds can still be located and cleaned up.
+ */
 export function handoffFilePath(handoffId: string): string {
   return join(HANDOFF_DIR, `${handoffId}.md`);
 }
+
+/**
+ * Per-handoff directory: `~/.agentmatrix/handoffs/<handoffId>/`.
+ *
+ * A directory per handoff rather than files in one shared folder, because this
+ * is the unit we grant the receiving session read access to via
+ * `SpawnOptions.addDirs`. Granting `HANDOFF_DIR` itself would expose every
+ * handoff the user has ever performed — including asks and summaries from
+ * unrelated repos — to satisfy a request for one file.
+ */
+export function handoffBundleDir(handoffId: string): string {
+  return join(HANDOFF_DIR, handoffId);
+}
+
+/** The rendered markdown the receiving session is pointed at. */
+export function handoffMarkdownPath(handoffId: string): string {
+  return join(handoffBundleDir(handoffId), 'handoff.md');
+}
+
+/**
+ * Machine-readable bundle. This is what makes provenance CHAIN: when the
+ * receiving session is later handed off in turn, its bundle is rebuilt from
+ * this file, so A's transcript and A's verbatim ask reach C.
+ */
+export function handoffBundlePath(handoffId: string): string {
+  return join(handoffBundleDir(handoffId), 'bundle.json');
+}
+
+/** The source agent's own summary, kept beside the bundle it is quoted in. */
+export function handoffSourceSummaryPath(handoffId: string): string {
+  return join(handoffBundleDir(handoffId), 'source-summary.md');
+}
+
+/**
+ * sessionId → handoffId, for sessions that were CREATED by a handoff.
+ *
+ * Lives outside the per-handoff directories (and is therefore never granted to
+ * an agent) because it is how the app walks backwards: given the source session
+ * of a new handoff, find the bundle that produced it, and chain onto it.
+ */
+export const HANDOFF_INDEX_PATH = join(HANDOFF_DIR, 'index.json');
 
 /**
  * Ensure a directory exists. Idempotent. Single sync stat + conditional

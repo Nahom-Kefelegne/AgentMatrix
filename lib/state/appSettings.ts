@@ -1,5 +1,7 @@
 import { readFileSync, writeFileSync } from 'fs';
 import { SETTINGS_PATH, ensureDir, AGENTMATRIX_DIR } from './paths';
+import type { OrchestratorProviderSetting } from './orchestratorProvider';
+import type { CliType } from '../cli/CliProvider';
 
 export interface AppSettings {
   autoResume: boolean;
@@ -8,7 +10,10 @@ export interface AppSettings {
   defaultEffort: string;
   defaultCopilotMode?: 'interactive' | 'plan' | 'autopilot';
   appendSystemPrompt: string;
-  defaultCli?: 'claude' | 'copilot';
+  defaultCli?: CliType;
+  /** Provider backing the hidden orchestrator session. 'auto' resolves at spawn
+   *  time to the first available provider in ORCHESTRATOR_PROVIDER_PREFERENCE. */
+  orchestratorProvider?: OrchestratorProviderSetting;
   useAgency?: boolean;
   dashboardV2?: boolean;
   dashboardV2PreferenceVersion?: number;
@@ -23,6 +28,7 @@ const DEFAULTS: AppSettings = {
   defaultEffort: '',
   defaultCopilotMode: 'interactive',
   appendSystemPrompt: '',
+  orchestratorProvider: 'auto',
 };
 
 export function resolveDashboardV2Preference(

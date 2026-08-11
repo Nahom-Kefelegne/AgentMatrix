@@ -17,7 +17,7 @@ import {
 import { memo, useCallback, useEffect, useRef, useState } from 'react';
 import type { AttentionItem, LaneItem } from '@/lib/dashboard/attentionQueue';
 import type { SessionData } from '@/lib/types';
-import CliIcon from '../CliIcon';
+import CliIcon, { cliDisplayName } from '../CliIcon';
 import ContextCanvas from '../context-canvas/ContextCanvas';
 import SessionConsole from '../SessionConsole';
 import DashboardV2Nav from './DashboardV2Nav';
@@ -461,7 +461,7 @@ function ConsoleWorkspace(props: DashboardV2ViewProps) {
           <div className="mc-console-identity">
             <span className="mc-console-provider">
               <CliIcon cliType={selectedSession.cliType} />
-              {selectedSession.cliType === 'copilot' ? 'GitHub Copilot' : 'Claude Code'}
+              {cliDisplayName(selectedSession.cliType)}
             </span>
             <div className="mc-console-name-row">
               <h2>{selectedSession.name}</h2>
