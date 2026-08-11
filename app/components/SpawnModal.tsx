@@ -47,6 +47,13 @@ interface LaunchMetadata {
   agencyVersion: string | null;
 }
 
+/**
+ * CLIs offered in the picker, in display order. Every entry must be registered
+ * in `getProvider` and reported by `checkAllHealth`, which gates availability —
+ * an uninstalled CLI still renders, disabled, with the reason underneath.
+ */
+const SELECTABLE_CLIS: CliType[] = ['copilot', 'claude', 'kimi'];
+
 function isCliAvailable(
   type: CliType,
   health: CliHealthInfo[],
@@ -55,6 +62,26 @@ function isCliAvailable(
 ): boolean {
   return health.some(item => item.type === type && item.installed)
     || (useAgency && agencyAvailable);
+}
+
+/**
+ * First CLI that can actually be launched, honouring the configured default.
+ *
+ * Walks SELECTABLE_CLIS rather than hardcoding a copilot→claude fallback: with
+ * three providers, a fixed pair can land on a CLI that isn't installed and
+ * open the modal on a disabled option.
+ */
+function preferredCli(
+  configuredDefault: CliType | undefined,
+  health: CliHealthInfo[],
+  useAgency: boolean,
+  agencyAvailable: boolean,
+): CliType {
+  if (configuredDefault && isCliAvailable(configuredDefault, health, useAgency, agencyAvailable)) {
+    return configuredDefault;
+  }
+  return SELECTABLE_CLIS.find(type => isCliAvailable(type, health, useAgency, agencyAvailable))
+    ?? SELECTABLE_CLIS[0];
 }
 
 export default function SpawnModal({ isOpen, onClose, onSessionSpawned }: SpawnModalProps) {
@@ -120,12 +147,7 @@ export default function SpawnModal({ isOpen, onClose, onSessionSpawned }: SpawnM
         const agencyAvailable = Boolean(healthPayload.agency?.installed);
         const agencyEnabled = Boolean(settings.useAgency && agencyAvailable);
         const configuredDefault = settings.defaultCli as CliType | undefined;
-        const preferred: CliType = configuredDefault
-          && isCliAvailable(configuredDefault, cliHealth, agencyEnabled, agencyAvailable)
-          ? configuredDefault
-          : isCliAvailable('copilot', cliHealth, agencyEnabled, agencyAvailable)
-            ? 'copilot'
-            : 'claude';
+        const preferred = preferredCli(configuredDefault, cliHealth, agencyEnabled, agencyAvailable);
         const nextMetadata = {
           settings: settings as AppSettings,
           cliHealth,
@@ -290,7 +312,7 @@ export default function SpawnModal({ isOpen, onClose, onSessionSpawned }: SpawnM
           </div>
         </div>
         <OptionGroup>
-          {(['copilot', 'claude'] as CliType[]).map(type => {
+          {SELECTABLE_CLIS.map(type => {
             const health = metadata?.cliHealth.find(item => item.type === type);
             const available = metadata
               ? isCliAvailable(type, metadata.cliHealth, useAgency, metadata.agencyAvailable)
