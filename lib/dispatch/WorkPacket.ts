@@ -112,7 +112,7 @@ void _capabilityFlagsAreExhaustive;
  * hard requirements only; *choosing* among providers is
  * `lib/state/orchestratorProvider.ts`'s job, and `'auto'` is a choice.
  */
-export const DISPATCHABLE_PROVIDERS = ['claude', 'copilot', 'kimi'] as const satisfies readonly CliType[];
+export const DISPATCHABLE_PROVIDERS = ['claude', 'copilot', 'kimi', 'codex'] as const satisfies readonly CliType[];
 
 /** Same drift guard, for `CliType`. */
 type UnlistedProvider = Exclude<CliType, (typeof DISPATCHABLE_PROVIDERS)[number]>;

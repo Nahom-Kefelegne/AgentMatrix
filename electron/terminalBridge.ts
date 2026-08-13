@@ -124,7 +124,9 @@ function discoveredSessionName(cliType: CliType | undefined, sessionId: string):
 }
 
 function validCliType(value: unknown): CliType | undefined {
-  return value === 'copilot' || value === 'claude' || value === 'kimi' ? value : undefined;
+  return value === 'copilot' || value === 'claude' || value === 'kimi' || value === 'codex'
+    ? value
+    : undefined;
 }
 
 export function setupTerminalBridge(io: SocketIOServer, ptyManager: PtyManager): void {

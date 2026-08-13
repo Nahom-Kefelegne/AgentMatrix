@@ -43,12 +43,14 @@ function parseTranscript(transcriptPath: string, cliType: CliType): FileOp[] {
   const cached = parsedTranscriptCache.get(transcriptPath);
   if (cached?.mtimeMs === mtimeMs) return cached.ops;
 
-  // Kimi has no parser yet and its wire.jsonl is NOT Claude's schema. Falling
-  // through to parseClaudeTranscript would mine a foreign format for tool
-  // calls and surface whatever coincidentally matched as this session's edits.
-  // Report "no ops" until a real parseKimi lands — an empty changed-files list
-  // is honest; a fabricated one is not.
-  const ops = cliType === 'kimi'
+  // Kimi's wire.jsonl and Codex's rollout-*.jsonl are BOTH line-delimited JSON,
+  // and neither uses Claude's schema. Falling through to parseClaudeTranscript
+  // would mine a foreign format for tool calls and surface whatever
+  // coincidentally matched as this session's edits. Report "no ops" until real
+  // parsers land — an empty changed-files list is honest; a fabricated one is
+  // not. (Codex wraps every line as {"timestamp","type","payload"}; its
+  // per-item schema was not verified when CodexProvider was written.)
+  const ops = cliType === 'kimi' || cliType === 'codex'
     ? []
     : cliType === 'copilot'
       ? parseCopilotTranscript(transcriptPath)

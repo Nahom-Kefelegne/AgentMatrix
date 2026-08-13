@@ -2,6 +2,11 @@ import type { CliType, CliProvider, CliHealth } from './CliProvider';
 import { ClaudeProvider } from './ClaudeProvider';
 import { CopilotProvider } from './CopilotProvider';
 import { KimiProvider } from './KimiProvider';
+import { CodexProvider } from './CodexProvider';
+// Single source of truth for "every registered CliType", so adding a provider
+// means editing one list rather than three copies that drift. uiMetadata is
+// dependency-free by contract, so importing it here pulls in nothing.
+import { CLI_TYPES } from './uiMetadata';
 
 export type { CliType, CliProvider, CliHealth, SpawnOptions, ResumeOptions } from './CliProvider';
 
@@ -44,6 +49,9 @@ function getOrCreateProvider(type: CliType): CliProvider {
       case 'kimi':
         provider = new KimiProvider();
         break;
+      case 'codex':
+        provider = new CodexProvider();
+        break;
       default:
         throw new Error(`Unknown CLI type: ${type}`);
     }
@@ -61,14 +69,14 @@ export function getProvider(type: CliType): CliProvider {
  *  scan / probe / aggregate across all supported CLIs (session discovery,
  *  process detection, etc.). Providers are cached singletons. */
 export function allProviders(): CliProvider[] {
-  const types: CliType[] = ['claude', 'copilot', 'kimi'];
+  const types: CliType[] = CLI_TYPES;
   return types.map(getOrCreateProvider);
 }
 
 /** Detect which CLIs are installed on this system. */
 export function detectInstalledCLIs(): CliType[] {
   const installed: CliType[] = [];
-  const types: CliType[] = ['claude', 'copilot', 'kimi'];
+  const types: CliType[] = CLI_TYPES;
 
   for (const type of types) {
     try {
@@ -85,7 +93,7 @@ export function detectInstalledCLIs(): CliType[] {
 
 /** Check health of all known CLI types. */
 export function checkAllHealth(): CliHealth[] {
-  const types: CliType[] = ['claude', 'copilot', 'kimi'];
+  const types: CliType[] = CLI_TYPES;
   return types.map(type => {
     const provider = getOrCreateProvider(type);
     return provider.checkHealth();

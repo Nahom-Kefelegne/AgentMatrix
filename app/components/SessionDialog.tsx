@@ -34,6 +34,13 @@ const CLI_BADGE_META: Record<string, { svg: string; color: string; name: string 
     color: '#5B5BD6',
     name: 'Kimi Code',
   },
+  // Generic terminal-caret mark, NOT OpenAI's brand logo. Without this entry
+  // CliBadge renders nothing at all for codex sessions.
+  codex: {
+    svg: `<svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" xmlns="http://www.w3.org/2000/svg"><rect x="1.2" y="2.4" width="13.6" height="11.2" rx="2.2"/><path d="M4.6 6.2 6.9 8l-2.3 1.8"/><path d="M8.6 10.4h2.9"/></svg>`,
+    color: '#10A37F',
+    name: 'Codex CLI',
+  },
 };
 
 function CliBadge({ cliType }: { cliType?: CliType }) {

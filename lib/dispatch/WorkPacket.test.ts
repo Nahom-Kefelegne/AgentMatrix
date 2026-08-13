@@ -735,6 +735,6 @@ describe('constant tables', () => {
 
   it('lists only registered providers as pinnable', () => {
     // Mirrors the `getOrCreateProvider` switch in lib/cli/index.ts.
-    expect([...DISPATCHABLE_PROVIDERS].sort()).toEqual(['claude', 'copilot', 'kimi']);
+    expect([...DISPATCHABLE_PROVIDERS].sort()).toEqual(['claude', 'codex', 'copilot', 'kimi']);
   });
 });

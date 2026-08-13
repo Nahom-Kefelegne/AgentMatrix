@@ -19,18 +19,26 @@ import { describe, it, expect } from 'vitest';
 import {
   AGENTMATRIX_INJECTION_MARKER,
   HANDOFF_BUNDLE_VERSION,
+  STANDARDS_EXCERPT_MAX_CHARS,
+  STANDARDS_FILENAMES,
   buildHandoffBundle,
   buildReconciliationInstruction,
+  excerptStandards,
   extractFirstUserMessage,
   fenceFor,
   formatAppTaskAsk,
   hasAskText,
+  hasStandards,
   isHandoffBundle,
   mergeTrace,
+  noStandardsFound,
   renderHandoffBundleMarkdown,
   resolveOriginalAsk,
+  resolveProjectStandards,
+  standardsGrantDirs,
   traceGrantDirs,
   type HandoffBundle,
+  type StandardsCandidate,
   type TranscriptRef,
 } from './handoffBundle';
 
@@ -43,6 +51,35 @@ const CLAUDE_A = `${CLAUDE_DIR}/aaaa1111.jsonl`;
 const CLAUDE_B = `${CLAUDE_DIR}/bbbb2222.jsonl`;
 const COPILOT_DIR = '/home/u/.copilot/session-state/cccc3333';
 const COPILOT_C = `${COPILOT_DIR}/events.jsonl`;
+
+const SOURCE_CWD = '/src/api';
+const TARGET_CWD = '/target/web';
+const SOURCE_AGENTS_MD = `${SOURCE_CWD}/AGENTS.md`;
+const TARGET_AGENTS_MD = `${TARGET_CWD}/AGENTS.md`;
+
+/** Real-shaped standards text, including a fence, so verbatim survival is testable. */
+const STANDARDS_TEXT = [
+  '# Engineering standards',
+  '',
+  '- No `any`. Ever.',
+  '- Every exported function carries a doc comment saying WHY.',
+  '',
+  '```sh',
+  'npm test   # must pass before you claim done',
+  '```',
+].join('\n');
+
+function standardsCandidate(over: Partial<StandardsCandidate> = {}): StandardsCandidate {
+  return {
+    path: SOURCE_AGENTS_MD,
+    dir: SOURCE_CWD,
+    filename: 'AGENTS.md',
+    origin: 'source-cwd',
+    cwd: SOURCE_CWD,
+    contents: STANDARDS_TEXT,
+    ...over,
+  };
+}
 
 function claudeUserLine(content: unknown, extra: Record<string, unknown> = {}): string {
   return JSON.stringify({ type: 'user', message: { role: 'user', content }, ...extra });
@@ -421,6 +458,248 @@ describe('traceGrantDirs', () => {
   });
 });
 
+// ─── Project standards ───────────────────────────────────────────────
+//
+// The property these protect mirrors the one protecting the ask: A STANDARDS
+// EXCERPT IS NEVER MODEL TEXT. It is a byte-for-byte prefix of a file on disk,
+// and when nothing is found that absence is a value the bundle holds and
+// renders — never a quietly missing section.
+
+describe('excerptStandards — bounded, but always verbatim', () => {
+  it('returns a short file whole, untruncated', () => {
+    const result = excerptStandards(STANDARDS_TEXT, 8000);
+    expect(result.excerpt).toBe(STANDARDS_TEXT);
+    expect(result.truncated).toBe(false);
+    expect(result.omittedChars).toBe(0);
+  });
+
+  it('truncates at the cap and reports how much was dropped', () => {
+    const long = 'x'.repeat(500);
+    const result = excerptStandards(long, 100);
+    expect(result.truncated).toBe(true);
+    expect(result.excerpt).toHaveLength(100);
+    expect(result.omittedChars).toBe(400);
+  });
+
+  it('pulls the cut back to a line boundary rather than splitting a rule', () => {
+    const lines = ['- rule one', '- rule two', '- rule three that runs past the cap'].join('\n');
+    const result = excerptStandards(lines, 25);
+    // 25 lands inside "- rule three…"; the cut retreats to the newline after two.
+    expect(result.excerpt).toBe('- rule one\n- rule two');
+    expect(result.truncated).toBe(true);
+  });
+
+  it('does not retreat past half the budget, so a single long line still yields text', () => {
+    const contents = `a\n${'b'.repeat(500)}`;
+    const result = excerptStandards(contents, 100);
+    expect(result.excerpt).toHaveLength(100);
+  });
+
+  it('is ALWAYS a byte-for-byte prefix — the verbatim guarantee', () => {
+    const cases = [STANDARDS_TEXT, 'x'.repeat(500), 'a\nb\nc\n'.repeat(100), '', '\n\n\n'];
+    for (const contents of cases) {
+      for (const cap of [1, 7, 25, 100, 8000]) {
+        const { excerpt, omittedChars } = excerptStandards(contents, cap);
+        expect(contents.startsWith(excerpt)).toBe(true);
+        expect(excerpt.length + omittedChars).toBe(contents.length);
+      }
+    }
+  });
+
+  it('defaults to the documented cap', () => {
+    const huge = 'y'.repeat(STANDARDS_EXCERPT_MAX_CHARS + 100);
+    expect(excerptStandards(huge).excerpt).toHaveLength(STANDARDS_EXCERPT_MAX_CHARS);
+  });
+});
+
+describe('resolveProjectStandards', () => {
+  it('records which filename matched and where it was found', () => {
+    const standards = resolveProjectStandards({
+      candidates: [standardsCandidate()],
+      searchedDirs: [SOURCE_CWD, TARGET_CWD],
+    });
+    expect(standards.state).toBe('found');
+    expect(hasStandards(standards)).toBe(true);
+    expect(standards.docs).toHaveLength(1);
+    expect(standards.docs[0]).toMatchObject({
+      path: SOURCE_AGENTS_MD,
+      dir: SOURCE_CWD,
+      filename: 'AGENTS.md',
+      origin: 'source-cwd',
+      cwd: SOURCE_CWD,
+      excerpt: STANDARDS_TEXT,
+      truncated: false,
+    });
+    expect(standards.searchedDirs).toEqual([SOURCE_CWD, TARGET_CWD]);
+  });
+
+  it('reports every distinct file across the source and target cwd, in order', () => {
+    const standards = resolveProjectStandards({
+      candidates: [
+        standardsCandidate(),
+        standardsCandidate({
+          path: `${SOURCE_CWD}/CLAUDE.md`, filename: 'CLAUDE.md', contents: '# Claude-only notes',
+        }),
+        standardsCandidate({
+          path: TARGET_AGENTS_MD, dir: TARGET_CWD, cwd: TARGET_CWD,
+          origin: 'target-cwd', contents: '# Target repo rules',
+        }),
+      ],
+      searchedDirs: [SOURCE_CWD, TARGET_CWD],
+    });
+    expect(standards.docs.map(d => d.path)).toEqual([
+      SOURCE_AGENTS_MD, `${SOURCE_CWD}/CLAUDE.md`, TARGET_AGENTS_MD,
+    ]);
+    expect(standards.docs.map(d => d.origin)).toEqual(['source-cwd', 'source-cwd', 'target-cwd']);
+  });
+
+  it('collapses the same absolute path, which is what source cwd === target cwd produces', () => {
+    const standards = resolveProjectStandards({
+      candidates: [
+        standardsCandidate(),
+        standardsCandidate({ origin: 'target-cwd' }), // same path, second sweep
+      ],
+      searchedDirs: [SOURCE_CWD],
+    });
+    expect(standards.docs).toHaveLength(1);
+    expect(standards.docs[0].origin).toBe('source-cwd'); // first occurrence wins
+  });
+
+  it('truncates each doc independently at the cap', () => {
+    const standards = resolveProjectStandards({
+      candidates: [
+        standardsCandidate({ contents: 'z'.repeat(300) }),
+        standardsCandidate({ path: TARGET_AGENTS_MD, dir: TARGET_CWD, contents: 'short' }),
+      ],
+      maxExcerptChars: 100,
+    });
+    expect(standards.docs[0]).toMatchObject({ truncated: true, omittedChars: 200 });
+    expect(standards.docs[0].excerpt).toHaveLength(100);
+    expect(standards.docs[1]).toMatchObject({ truncated: false, excerpt: 'short' });
+  });
+
+  it('never rewrites the file text it was handed', () => {
+    const messy = '  leading spaces\n\n\tTABBED RULE\ntrailing  \n';
+    const standards = resolveProjectStandards({ candidates: [standardsCandidate({ contents: messy })] });
+    expect(standards.docs[0].excerpt).toBe(messy);
+  });
+
+  it('falls to none-found when nothing was located, and says where it looked', () => {
+    const standards = resolveProjectStandards({
+      candidates: [],
+      searchedDirs: [SOURCE_CWD, TARGET_CWD],
+      noneFoundNote: 'nothing in either repo',
+    });
+    expect(standards.state).toBe('none-found');
+    expect(hasStandards(standards)).toBe(false);
+    expect(standards.docs).toEqual([]);
+    expect(standards.searchedDirs).toEqual([SOURCE_CWD, TARGET_CWD]);
+    expect(standards.note).toBe('nothing in either repo');
+    expect(standards.filenames).toEqual([...STANDARDS_FILENAMES]);
+  });
+
+  it('supplies a default note when the caller gives no reason', () => {
+    expect(resolveProjectStandards({ candidates: [] }).note).toMatch(/no directory could be searched/i);
+    expect(resolveProjectStandards({ candidates: [], searchedDirs: ['/x'] }).note)
+      .toMatch(/none of the recognised instruction filenames/i);
+  });
+
+  it('looks for the three filenames all installed CLIs recognise, AGENTS.md first', () => {
+    expect(STANDARDS_FILENAMES).toEqual(['AGENTS.md', 'CLAUDE.md', '.github/copilot-instructions.md']);
+  });
+});
+
+describe('buildHandoffBundle — standards', () => {
+  it('carries the resolved standards into the bundle', () => {
+    const bundle = buildHandoffBundle({
+      handoffId: 'hf-s', createdAt: 1, targetCwd: TARGET_CWD, contextRequest: 'q',
+      source: { sessionId: 's', cliType: 'claude' },
+      ask: resolveOriginalAsk({}),
+      standards: resolveProjectStandards({ candidates: [standardsCandidate()] }),
+    });
+    expect(bundle.standards?.state).toBe('found');
+    expect(bundle.standards?.docs[0].excerpt).toBe(STANDARDS_TEXT);
+  });
+
+  it('defaults to an explicit none-found state rather than leaving the field absent', () => {
+    const bundle = bundleAtoB();
+    expect(bundle.standards).toBeDefined();
+    expect(bundle.standards?.state).toBe('none-found');
+    expect(bundle.standards?.note).toBeTruthy();
+  });
+
+  it('does NOT inherit standards from the upstream bundle — they are per-hop', () => {
+    const hop1 = buildHandoffBundle({
+      handoffId: 'hf-1s', createdAt: 1, targetCwd: SOURCE_CWD, contextRequest: 'q',
+      source: { sessionId: 'sess-A', cliType: 'claude', transcriptPath: CLAUDE_A, transcriptDir: CLAUDE_DIR },
+      ask: resolveOriginalAsk({ appTask: { id: 't-1', subject: ASK_TEXT, description: '' } }),
+      standards: resolveProjectStandards({ candidates: [standardsCandidate()] }),
+    });
+    // Hop 2 moves to a directory with no standards; hop 1's must NOT follow.
+    const hop2 = buildHandoffBundle({
+      handoffId: 'hf-2s', createdAt: 2, targetCwd: '/elsewhere', contextRequest: 'q',
+      source: { sessionId: 'sess-B', cliType: 'copilot', transcriptPath: COPILOT_C, transcriptDir: COPILOT_DIR },
+      previous: hop1,
+      ask: resolveOriginalAsk({ inherited: hop1.ask }),
+    });
+    expect(hop2.ask.text).toBe(hop1.ask.text);          // the ask still chains
+    expect(hop2.standards?.state).toBe('none-found');   // the standards do not
+  });
+
+  it('round-trips the standards through JSON, which is how the chain is stored', () => {
+    const bundle = buildHandoffBundle({
+      handoffId: 'hf-j', createdAt: 1, targetCwd: TARGET_CWD, contextRequest: 'q',
+      source: { sessionId: 's', cliType: 'claude' },
+      ask: resolveOriginalAsk({}),
+      standards: resolveProjectStandards({ candidates: [standardsCandidate()] }),
+    });
+    const revived = JSON.parse(JSON.stringify(bundle));
+    expect(isHandoffBundle(revived)).toBe(true);
+    expect(revived.standards.docs[0].excerpt).toBe(STANDARDS_TEXT);
+  });
+
+  it('still validates a v1 bundle written before the standards field existed', () => {
+    const legacy = { ...bundleAtoB() } as Partial<HandoffBundle>;
+    delete legacy.standards;
+    expect(isHandoffBundle(legacy)).toBe(true);
+  });
+});
+
+describe('standardsGrantDirs', () => {
+  it('grants each file\'s containing directory, deduplicated, order preserved', () => {
+    const bundle = buildHandoffBundle({
+      handoffId: 'hf-g', createdAt: 1, targetCwd: TARGET_CWD, contextRequest: 'q',
+      source: { sessionId: 's', cliType: 'claude' },
+      ask: resolveOriginalAsk({}),
+      standards: resolveProjectStandards({
+        candidates: [
+          standardsCandidate(),
+          standardsCandidate({ path: `${SOURCE_CWD}/CLAUDE.md`, filename: 'CLAUDE.md' }),
+          standardsCandidate({
+            path: `${TARGET_CWD}/.github/copilot-instructions.md`,
+            dir: `${TARGET_CWD}/.github`,
+            filename: '.github/copilot-instructions.md',
+            origin: 'target-cwd',
+            cwd: TARGET_CWD,
+          }),
+        ],
+      }),
+    });
+    // Two files in one directory collapse to one grant; .github is granted on
+    // its own rather than the repo root above it.
+    expect(standardsGrantDirs(bundle)).toEqual([SOURCE_CWD, `${TARGET_CWD}/.github`]);
+  });
+
+  it('grants nothing when nothing was found', () => {
+    expect(standardsGrantDirs(bundleAtoB())).toEqual([]);
+  });
+
+  it('tolerates a bundle with no standards field at all', () => {
+    const legacy = { ...bundleAtoB(), standards: undefined } as HandoffBundle;
+    expect(standardsGrantDirs(legacy)).toEqual([]);
+  });
+});
+
 describe('isHandoffBundle', () => {
   it('rejects non-bundles', () => {
     expect(isHandoffBundle(null)).toBe(false);
@@ -473,13 +752,15 @@ describe('renderHandoffBundleMarkdown', () => {
     expect(md).toContain('"type":"user.message"'); // Copilot schema hint
   });
 
-  it('orders the sections ask -> trace -> summary, and labels the summary as not ground truth', () => {
+  it('orders the sections ask -> standards -> trace -> summary, and labels what is not ground truth', () => {
     const askAt = md.indexOf('## 1. THE ASK');
-    const traceAt = md.indexOf('## 2. THE TRACE');
-    const summaryAt = md.indexOf('## 3. THE PREVIOUS');
-    const reconcileAt = md.indexOf('## 4. DO THIS FIRST');
+    const standardsAt = md.indexOf('## 2. THE STANDARDS');
+    const traceAt = md.indexOf('## 3. THE TRACE');
+    const summaryAt = md.indexOf('## 4. THE PREVIOUS');
+    const reconcileAt = md.indexOf('## 5. DO THIS FIRST');
     expect(askAt).toBeGreaterThan(-1);
-    expect(traceAt).toBeGreaterThan(askAt);
+    expect(standardsAt).toBeGreaterThan(askAt);
+    expect(traceAt).toBeGreaterThan(standardsAt);
     expect(summaryAt).toBeGreaterThan(traceAt);
     expect(reconcileAt).toBeGreaterThan(summaryAt);
     expect(md).toContain('GROUND TRUTH');
@@ -493,7 +774,8 @@ describe('renderHandoffBundleMarkdown', () => {
 
   it('does not inline transcript contents — paths only', () => {
     // A 9 MB transcript must never end up in here; the rendered doc stays small.
-    expect(md.length).toBeLessThan(8000);
+    // Standards ARE inlined, but capped per file — see the truncation tests.
+    expect(md.length).toBeLessThan(10000);
   });
 
   it('makes a missing ask visible instead of substituting the summary', () => {
@@ -515,6 +797,125 @@ describe('renderHandoffBundleMarkdown', () => {
   it('notes when the ask was carried through an earlier handoff', () => {
     expect(md).toContain('hf-1');
     expect(md).toMatch(/carried forward unchanged/i);
+  });
+});
+
+describe('renderHandoffBundleMarkdown — the standards section', () => {
+  function withStandards(candidates: StandardsCandidate[], maxExcerptChars?: number): string {
+    const bundle = buildHandoffBundle({
+      handoffId: 'hf-r', createdAt: 1, targetCwd: TARGET_CWD, contextRequest: 'q',
+      source: { sessionId: 's', cliType: 'claude', transcriptPath: CLAUDE_A, transcriptDir: CLAUDE_DIR },
+      ask: resolveOriginalAsk({ firstUserMessage: { text: ASK_TEXT, transcriptPath: CLAUDE_A } }),
+      standards: resolveProjectStandards(
+        maxExcerptChars === undefined ? { candidates } : { candidates, maxExcerptChars },
+      ),
+    });
+    return renderHandoffBundleMarkdown(bundle);
+  }
+
+  it('reproduces the standards text verbatim, fences and all', () => {
+    const out = withStandards([standardsCandidate()]);
+    expect(out).toContain(STANDARDS_TEXT);
+    // The file contains a ``` fence, so the wrapper must outgrow it.
+    expect(out).toContain('````markdown');
+  });
+
+  it('names the matched filename, the absolute path, and which cwd it came from', () => {
+    const out = withStandards([standardsCandidate()]);
+    expect(out).toContain('`AGENTS.md`');
+    expect(out).toContain(SOURCE_AGENTS_MD);
+    expect(out).toContain('the source session\'s working directory');
+  });
+
+  it('renders both repos\' standards when both exist', () => {
+    const out = withStandards([
+      standardsCandidate(),
+      standardsCandidate({
+        path: TARGET_AGENTS_MD, dir: TARGET_CWD, cwd: TARGET_CWD,
+        origin: 'target-cwd', contents: '# Target repo rules\n- ship behind a flag',
+      }),
+    ]);
+    expect(out).toContain(SOURCE_AGENTS_MD);
+    expect(out).toContain(TARGET_AGENTS_MD);
+    expect(out).toContain('- ship behind a flag');
+    expect(out).toContain('the target working directory');
+  });
+
+  it('says so, loudly, when an excerpt was truncated, and gives the path for the rest', () => {
+    const long = `${STANDARDS_TEXT}\n${'- another rule\n'.repeat(200)}`;
+    const out = withStandards([standardsCandidate({ contents: long })], 120);
+    expect(out).toMatch(/at least \d+ more characters follow/i);
+    expect(out).toContain(SOURCE_AGENTS_MD);
+    // Truncated, but what IS shown is still the file's own opening bytes.
+    expect(out).toContain('# Engineering standards');
+    expect(out).not.toContain('- another rule');
+  });
+
+  it('marks a standards file that exists but is empty, instead of printing a blank fence', () => {
+    const out = withStandards([standardsCandidate({ contents: '   \n\n' })]);
+    expect(out).toMatch(/exists but is empty/i);
+    expect(out).toMatch(/do not infer any/i);
+  });
+
+  it('labels the standards as binding and never as a summary', () => {
+    const out = withStandards([standardsCandidate()]);
+    expect(out).toContain('## 2. THE STANDARDS');
+    expect(out).toContain('BINDING');
+    expect(out).toMatch(/verbatim/i);
+    expect(out).toMatch(/not a summary/i);
+  });
+
+  it('makes a MISSING standards file visible, with the directories searched', () => {
+    const bundle = buildHandoffBundle({
+      handoffId: 'hf-ns', createdAt: 1, targetCwd: TARGET_CWD, contextRequest: 'q',
+      source: { sessionId: 's', cliType: 'claude', transcriptPath: CLAUDE_A, transcriptDir: CLAUDE_DIR },
+      ask: resolveOriginalAsk({ firstUserMessage: { text: ASK_TEXT, transcriptPath: CLAUDE_A } }),
+      standards: noStandardsFound([SOURCE_CWD, TARGET_CWD]),
+      summaryText: 'WE ALWAYS USE TABS AND NEVER WRITE TESTS',
+    });
+    const out = renderHandoffBundleMarkdown(bundle);
+    expect(out).toContain('## 2. THE STANDARDS');
+    expect(out).toContain('**No project standards file was found.**');
+    expect(out).toContain(SOURCE_CWD);
+    expect(out).toContain(TARGET_CWD);
+    expect(out).toContain('`AGENTS.md`');
+    expect(out).toContain('`.github/copilot-instructions.md`');
+    // The summary is NOT allowed to fill the standards slot, exactly as it is
+    // not allowed to fill the ask slot.
+    const section = out.slice(out.indexOf('## 2.'), out.indexOf('## 3.'));
+    expect(section).not.toContain('WE ALWAYS USE TABS');
+    expect(section).toMatch(/ask the user where the project's standards live/i);
+  });
+
+  it('renders a standards section even for a bundle written before the field existed', () => {
+    const legacy = { ...bundleAtoB(), standards: undefined } as HandoffBundle;
+    const out = renderHandoffBundleMarkdown(legacy);
+    expect(out).toContain('## 2. THE STANDARDS');
+    expect(out).toContain('**No project standards file was found.**');
+  });
+});
+
+describe('renderHandoffBundleMarkdown — the acknowledgement step', () => {
+  it('requires naming the files and listing the constraints, not just "I read them"', () => {
+    const bundle = buildHandoffBundle({
+      handoffId: 'hf-a', createdAt: 1, targetCwd: TARGET_CWD, contextRequest: 'q',
+      source: { sessionId: 's', cliType: 'claude', transcriptPath: CLAUDE_A, transcriptDir: CLAUDE_DIR },
+      ask: resolveOriginalAsk({ firstUserMessage: { text: ASK_TEXT, transcriptPath: CLAUDE_A } }),
+      standards: resolveProjectStandards({ candidates: [standardsCandidate()] }),
+    });
+    const out = renderHandoffBundleMarkdown(bundle);
+    const steps = out.slice(out.indexOf('## 5. DO THIS FIRST'));
+    expect(steps).toMatch(/ACKNOWLEDGE the standards explicitly/);
+    expect(steps).toMatch(/does not count/i);
+    // The acknowledgement is step 1 — before the divergence check, not after.
+    expect(steps.indexOf('ACKNOWLEDGE')).toBeLessThan(steps.indexOf('DIVERGES'));
+    expect(steps).toMatch(/DIVERGES from the ask OR from the standards/);
+  });
+
+  it('demands the gap be stated out loud when no standards were found', () => {
+    const steps = renderHandoffBundleMarkdown(bundleAtoB());
+    expect(steps).toMatch(/State explicitly that NO project standards file was found/);
+    expect(steps).toMatch(/do not invent conventions/i);
   });
 });
 
@@ -546,5 +947,50 @@ describe('buildReconciliationInstruction', () => {
   it('singularizes for a one-hop chain', () => {
     const single = buildReconciliationInstruction(bundleAtoB(), '/x/handoff.md');
     expect(single).toContain('1 raw prior session transcript,');
+  });
+
+  it('demands an explicit standards acknowledgement before any work', () => {
+    const bundle = buildHandoffBundle({
+      handoffId: 'hf-i', createdAt: 1, targetCwd: TARGET_CWD, contextRequest: 'q',
+      source: { sessionId: 's', cliType: 'claude', transcriptPath: CLAUDE_A, transcriptDir: CLAUDE_DIR },
+      ask: resolveOriginalAsk({ firstUserMessage: { text: ASK_TEXT, transcriptPath: CLAUDE_A } }),
+      standards: resolveProjectStandards({ candidates: [standardsCandidate()] }),
+    });
+    const text = buildReconciliationInstruction(bundle, '/x/handoff.md');
+    expect(text).toMatch(/ENGINEERING STANDARDS/);
+    expect(text).toMatch(/binding/i);
+    expect(text).toMatch(/acknowledge it explicitly in your first reply/i);
+    expect(text).toMatch(/list the specific constraints/i);
+    expect(text).toMatch(/does not count/i);
+    expect(text).toContain('1 instruction file');
+    expect(text).not.toContain('\n'); // still one PTY line
+  });
+
+  it('pluralizes the instruction-file count', () => {
+    const bundle = buildHandoffBundle({
+      handoffId: 'hf-i2', createdAt: 1, targetCwd: TARGET_CWD, contextRequest: 'q',
+      source: { sessionId: 's', cliType: 'claude', transcriptPath: CLAUDE_A, transcriptDir: CLAUDE_DIR },
+      ask: resolveOriginalAsk({}),
+      standards: resolveProjectStandards({
+        candidates: [
+          standardsCandidate(),
+          standardsCandidate({ path: TARGET_AGENTS_MD, dir: TARGET_CWD, cwd: TARGET_CWD, origin: 'target-cwd' }),
+        ],
+      }),
+    });
+    expect(buildReconciliationInstruction(bundle, '/x/h.md')).toContain('2 instruction files');
+  });
+
+  it('tells the receiver to say so out loud when no standards were found', () => {
+    const text = buildReconciliationInstruction(bundleAtoB(), '/x/handoff.md');
+    expect(text).toMatch(/NO project standards file could be found/i);
+    expect(text).toMatch(/ask where the project's standards live/i);
+    expect(text).not.toContain('\n');
+  });
+
+  it('is still marked as app plumbing with the standards clause attached', () => {
+    const text = buildReconciliationInstruction(bundleAtoB(), '/x/handoff.md');
+    expect(text.startsWith(AGENTMATRIX_INJECTION_MARKER)).toBe(true);
+    expect(extractFirstUserMessage(claudeUserLine(text), 'claude')).toBeUndefined();
   });
 });

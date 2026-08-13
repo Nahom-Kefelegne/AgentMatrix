@@ -52,7 +52,7 @@ interface LaunchMetadata {
  * in `getProvider` and reported by `checkAllHealth`, which gates availability —
  * an uninstalled CLI still renders, disabled, with the reason underneath.
  */
-const SELECTABLE_CLIS: CliType[] = ['copilot', 'claude', 'kimi'];
+const SELECTABLE_CLIS: CliType[] = ['copilot', 'claude', 'kimi', 'codex'];
 
 function isCliAvailable(
   type: CliType,

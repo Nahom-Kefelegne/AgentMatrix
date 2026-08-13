@@ -15,17 +15,34 @@
  *     inherited that as established fact, with no way to tell "what the user
  *     asked for" apart from "what the previous agent happened to do".
  *
- * The bundle separates the three things that were blended into one summary:
+ * The bundle separates the four things that were blended into one summary:
  *
- *   1. THE ASK      the user's own words, VERBATIM. Never regenerated, never
- *                   passed through a model at any hop — see `OriginalAsk`.
- *   2. THE TRACE    absolute paths to the raw transcript of every session in the
- *                   chain, oldest first, each tagged with its `cliType` so the
- *                   receiver knows which schema it is grepping. Paths only:
- *                   real transcripts reach 9+ MB, so contents are never inlined.
- *   3. THE SUMMARY  the previous agent's own account, explicitly labelled as
- *                   possibly-drifted. Still useful as an entry point; never
- *                   ground truth.
+ *   1. THE ASK       the user's own words, VERBATIM. Never regenerated, never
+ *                    passed through a model at any hop — see `OriginalAsk`.
+ *   2. THE STANDARDS the project's own engineering rules, quoted VERBATIM from
+ *                    the instruction file(s) on disk — see `ProjectStandards`.
+ *   3. THE TRACE     absolute paths to the raw transcript of every session in
+ *                    the chain, oldest first, each tagged with its `cliType` so
+ *                    the receiver knows which schema it is grepping. Paths only:
+ *                    real transcripts reach 9+ MB, so contents are never inlined.
+ *   4. THE SUMMARY   the previous agent's own account, explicitly labelled as
+ *                    possibly-drifted. Still useful as an entry point; never
+ *                    ground truth.
+ *
+ * WHY STANDARDS ARE IN THE BUNDLE AT ALL
+ * --------------------------------------
+ * When an agent works IN the repo that holds `AGENTS.md`, its CLI discovers the
+ * file natively and no help is needed. The gap is a handoff whose `targetCwd` is
+ * a DIFFERENT directory from where the standards live: the receiver then works
+ * to no standards at all, silently, and nothing ever checks that it read them.
+ *
+ * Note what this deliberately does NOT do: it does not push the standards in via
+ * `SpawnOptions.systemPrompt`. That field reaches ONLY Claude (`ClaudeProvider`
+ * maps it to `--append-system-prompt`); `CopilotProvider` ignores it and
+ * `KimiProvider` has no equivalent flag. Standards injected that way would be
+ * silently Claude-only — the same class of invisible failure this module exists
+ * to remove. Quoting them into the bundle works for all three CLIs, because all
+ * three can read a markdown file they have been pointed at.
  *
  * THIS MODULE IS DATA + PURE FUNCTIONS ONLY.
  * No `fs`, no `path`, no `electron` — same constraint `WorkPacket.ts` documents,
@@ -179,6 +196,252 @@ export function resolveOriginalAsk(candidates: AskCandidates): OriginalAsk {
   };
 }
 
+// ─── The standards ───────────────────────────────────────────────────
+
+/**
+ * Instruction filenames to look for, in priority order.
+ *
+ * `AGENTS.md` first because it is the only one all three installed CLIs
+ * recognise — it is the convention this repo standardises on. `CLAUDE.md` is
+ * Claude's own additional filename, and `.github/copilot-instructions.md` is
+ * Copilot's; both are included because a repo that predates the AGENTS.md
+ * convention may only have one of those, and finding no standards when
+ * standards exist is exactly the silent failure being fixed.
+ *
+ * Relative paths, resolved against a cwd by the I/O layer. Note the third entry
+ * contains a separator: joining is the caller's job, and so is `dirname`.
+ */
+export const STANDARDS_FILENAMES = [
+  'AGENTS.md',
+  'CLAUDE.md',
+  '.github/copilot-instructions.md',
+] as const;
+
+export type StandardsFilename = typeof STANDARDS_FILENAMES[number];
+
+/**
+ * Per-file cap on the verbatim excerpt, in characters.
+ *
+ * JUDGEMENT CALL, stated plainly. 8,000 characters is roughly 2,000 tokens, so
+ * the worst realistic case (a source-repo file and a target-repo file, both
+ * long) costs about 4,000 tokens of the receiver's context — comparable to one
+ * medium source file, and far cheaper than the receiver building to no
+ * standards at all. Most `AGENTS.md` files fit whole. When one does not, the
+ * excerpt is still a byte-for-byte PREFIX and the absolute path is always
+ * rendered next to it, so the receiver can read the remainder itself.
+ *
+ * The alternative — summarizing a long standards file to fit — is explicitly
+ * rejected: a model-written paraphrase of a rule is not the rule.
+ */
+export const STANDARDS_EXCERPT_MAX_CHARS = 8_000;
+
+/** Which cwd a standards file was discovered under. */
+export type StandardsOrigin = 'source-cwd' | 'target-cwd';
+
+export interface StandardsDoc {
+  /** Absolute path to the file actually found. */
+  path: string;
+  /**
+   * Narrowest directory that must be granted for `path` to be readable.
+   * Computed by the caller (`dirname`), for the same reason `TranscriptRef.dir`
+   * is: this module may not import `path`.
+   */
+  dir: string;
+  /** Which convention matched, so the receiver knows what is in play. */
+  filename: StandardsFilename;
+  /** Whether this came from the source session's cwd or the target cwd. */
+  origin: StandardsOrigin;
+  /** The cwd it was found under. Absolute. */
+  cwd: string;
+  /**
+   * The file's own bytes, VERBATIM — a prefix of the file, never a paraphrase.
+   *
+   * INVARIANT: `fileContents.startsWith(excerpt)` holds for every doc. Nothing
+   * in this module or in `HandoffService` sends this text through a model, and
+   * nothing reflows, re-wraps, or re-indents it. Same discipline as
+   * `OriginalAsk.text`, for the same reason: a summarized rule is not the rule.
+   */
+  excerpt: string;
+  /**
+   * Characters dropped off the end of the excerpt. 0 when the whole file fits.
+   *
+   * A LOWER BOUND, not an exact figure: the I/O layer reads only a bounded head
+   * of the file, so a pathologically large instruction file may have more
+   * beyond what was measured. The rendered text says "at least".
+   */
+  omittedChars: number;
+  /** True when `excerpt` is only the head of a longer file. */
+  truncated: boolean;
+}
+
+/**
+ * The standards half of the bundle.
+ *
+ * `state` exists so that "we looked and found nothing" is a value the bundle
+ * HOLDS and RENDERS, exactly as `AskSource.unavailable` is. A missing standards
+ * file must be visible to the receiver; an absent section would read as "there
+ * are no rules here", which is indistinguishable from "nobody checked".
+ */
+export type StandardsState = 'found' | 'none-found';
+
+export interface ProjectStandards {
+  state: StandardsState;
+  /** Every distinct file found, source cwd first. Empty when `none-found`. */
+  docs: StandardsDoc[];
+  /** Directories that were actually searched, so "none found" says where. */
+  searchedDirs: string[];
+  /** Filenames looked for, in priority order — rendered in the none-found case. */
+  filenames: string[];
+  /** Why nothing was found, or any caveat worth rendering. */
+  note?: string;
+}
+
+/** True when the bundle carries at least one real standards file. */
+export function hasStandards(standards: ProjectStandards | null | undefined): boolean {
+  return !!standards && standards.state === 'found' && standards.docs.length > 0;
+}
+
+/**
+ * The "we looked and found nothing" value. Never `null`, never an absent field:
+ * the renderer must always have something to print.
+ */
+export function noStandardsFound(searchedDirs: string[] = [], note?: string): ProjectStandards {
+  return {
+    state: 'none-found',
+    docs: [],
+    searchedDirs,
+    filenames: [...STANDARDS_FILENAMES],
+    note: note
+      ?? (searchedDirs.length === 0
+        ? 'No directory could be searched: neither the source session\'s cwd nor the target cwd was known.'
+        : 'None of the recognised instruction filenames exist in the directories searched.'),
+  };
+}
+
+/**
+ * Cut `contents` down to at most `maxChars`, VERBATIM.
+ *
+ * The result is always a byte-for-byte prefix of the input — that is the whole
+ * point. The only cleverness is that when a cut lands mid-line, it is pulled
+ * back to the previous newline (as long as that keeps at least half the budget),
+ * so the excerpt ends on a whole rule rather than half a sentence. Pulling back
+ * still yields a prefix, so the verbatim guarantee is untouched.
+ */
+export function excerptStandards(
+  contents: string,
+  maxChars: number = STANDARDS_EXCERPT_MAX_CHARS,
+): { excerpt: string; omittedChars: number; truncated: boolean } {
+  if (maxChars <= 0) {
+    return { excerpt: '', omittedChars: contents.length, truncated: contents.length > 0 };
+  }
+  if (contents.length <= maxChars) {
+    return { excerpt: contents, omittedChars: 0, truncated: false };
+  }
+  let cut = maxChars;
+  const lastNewline = contents.lastIndexOf('\n', maxChars);
+  if (lastNewline > maxChars / 2) cut = lastNewline;
+  return {
+    excerpt: contents.slice(0, cut),
+    omittedChars: contents.length - cut,
+    truncated: true,
+  };
+}
+
+/** One candidate file, already located and read by the I/O layer. */
+export interface StandardsCandidate {
+  /** Absolute path. */
+  path: string;
+  /** `dirname(path)`, computed by the caller. */
+  dir: string;
+  filename: StandardsFilename;
+  origin: StandardsOrigin;
+  /** The cwd this candidate was found under. */
+  cwd: string;
+  /** The file's text as read from disk. Excerpting happens here, not there. */
+  contents: string;
+}
+
+export interface StandardsInputs {
+  candidates: readonly StandardsCandidate[];
+  /** Directories the caller actually looked in, in the order it looked. */
+  searchedDirs?: readonly string[];
+  /** Override the per-file excerpt cap. Tests use this; production does not. */
+  maxExcerptChars?: number;
+  /** Rendered when nothing was found. */
+  noneFoundNote?: string;
+}
+
+/**
+ * Turn located files into the bundle's `standards` section. Pure.
+ *
+ * Order is preserved as given (the caller searches the source cwd first, then
+ * the target cwd), and duplicates are collapsed BY ABSOLUTE PATH — when the
+ * source and target cwd are the same directory, one file must not be reported
+ * twice. The first occurrence wins, so a file present under both is attributed
+ * to the source cwd.
+ *
+ * JUDGEMENT CALL: every distinct file found is reported, not just the
+ * highest-priority one. A repo with both `AGENTS.md` and `CLAUDE.md` gets both
+ * quoted. They are often near-duplicates, which costs some context — but
+ * silently dropping one of two files that both claim to state the rules is the
+ * failure mode this section exists to remove, and the receiver can see for
+ * itself that they overlap.
+ */
+export function resolveProjectStandards(inputs: StandardsInputs): ProjectStandards {
+  const searchedDirs = [...(inputs.searchedDirs ?? [])];
+  const cap = inputs.maxExcerptChars ?? STANDARDS_EXCERPT_MAX_CHARS;
+
+  const seen = new Set<string>();
+  const docs: StandardsDoc[] = [];
+  for (const candidate of inputs.candidates) {
+    if (seen.has(candidate.path)) continue;
+    seen.add(candidate.path);
+    const { excerpt, omittedChars, truncated } = excerptStandards(candidate.contents, cap);
+    docs.push({
+      path: candidate.path,
+      dir: candidate.dir,
+      filename: candidate.filename,
+      origin: candidate.origin,
+      cwd: candidate.cwd,
+      excerpt,
+      omittedChars,
+      truncated,
+    });
+  }
+
+  if (docs.length === 0) return noStandardsFound(searchedDirs, inputs.noneFoundNote);
+
+  return {
+    state: 'found',
+    docs,
+    searchedDirs,
+    filenames: [...STANDARDS_FILENAMES],
+  };
+}
+
+/**
+ * Directories that must be granted so the receiver can read every standards
+ * file. Deduplicated, order preserved.
+ *
+ * SCOPING: `dir` is the file's own containing directory and nothing above it.
+ * For `.github/copilot-instructions.md` that is `<repo>/.github` — tight. For a
+ * root-level `AGENTS.md` the containing directory IS the repo root, which is as
+ * narrow as the convention permits; the alternative would be granting the file
+ * path itself, and `--add-dir` is documented as taking directories and was not
+ * verified to accept a file. That trade-off is already documented for
+ * transcripts in `HandoffService.computeAddDirs`, and it is the same one here.
+ */
+export function standardsGrantDirs(bundle: HandoffBundle): string[] {
+  const seen = new Set<string>();
+  const dirs: string[] = [];
+  for (const doc of bundle.standards?.docs ?? []) {
+    if (!doc.dir || seen.has(doc.dir)) continue;
+    seen.add(doc.dir);
+    dirs.push(doc.dir);
+  }
+  return dirs;
+}
+
 // ─── The trace ───────────────────────────────────────────────────────
 
 export interface TranscriptRef {
@@ -221,6 +484,11 @@ export const TRANSCRIPT_SCHEMA_HINTS: Readonly<Record<CliType, string>> = {
   kimi:
     'wire.jsonl — the main agent\'s communication record. ITS SCHEMA IS UNVERIFIED in this repo: do NOT assume '
     + 'Claude or Copilot field names. Read the first few lines to learn the shape before grepping for anything.',
+  codex:
+    'rollout-<timestamp>-<uuid>.jsonl under ~/.codex/sessions/YYYY/MM/DD/. Every line is a wrapper record '
+    + '{"timestamp":…,"type":…,"payload":{…}}; the first line is {"type":"session_meta","payload":{"id","cwd",'
+    + '"originator","cli_version",…}}. THE PER-ITEM SCHEMA BEYOND THAT HEADER IS UNVERIFIED in this repo: do NOT '
+    + 'assume Claude or Copilot field names. Read the first few lines to learn the shape before grepping.',
 };
 
 /**
@@ -297,6 +565,15 @@ export interface HandoffBundle {
   /** Upstream handoff ids, oldest first, excluding this one. Empty on hop 1. */
   chain: string[];
   ask: OriginalAsk;
+  /**
+   * The project's engineering rules, quoted verbatim. Never `null` and never
+   * absent — "none found" is a value it holds, so the gap always renders.
+   *
+   * Optional in the TYPE only so that a v1 bundle written before this field
+   * existed still satisfies `isHandoffBundle` when read back off disk at the
+   * next hop. Every bundle `buildHandoffBundle` produces has it set.
+   */
+  standards?: ProjectStandards;
   /** Oldest session first; the last entry is the immediate source session. */
   trace: TranscriptRef[];
   /** `null` when the source agent produced no usable summary. */
@@ -319,6 +596,17 @@ export interface BundleInputs {
   /** The bundle from the handoff that created the source session, if any. */
   previous?: HandoffBundle | null;
   ask: OriginalAsk;
+  /**
+   * Standards discovered for THIS hop. Omit and the bundle records "none
+   * found", which renders as a visible gap.
+   *
+   * Deliberately NOT inherited from `previous`, unlike the ask. The ask is the
+   * user's fixed intent and must survive every hop unchanged; standards are a
+   * property of the directories this particular hop runs in. Carrying an
+   * upstream repo's `AGENTS.md` into a handoff that has since moved elsewhere
+   * would present rules that do not govern the receiver's work as if they did.
+   */
+  standards?: ProjectStandards | null;
   /** The source agent's summary text; omit/empty for "no summary". */
   summaryText?: string | null;
   /** The context-transfer request the user typed. */
@@ -376,6 +664,7 @@ export function buildHandoffBundle(inputs: BundleInputs): HandoffBundle {
     targetCwd: inputs.targetCwd,
     chain,
     ask,
+    standards: inputs.standards ?? noStandardsFound(),
     trace,
     summary,
   };
@@ -527,13 +816,100 @@ function askSourceLabel(ask: OriginalAsk): string {
   }
 }
 
+function standardsOriginLabel(origin: StandardsOrigin): string {
+  return origin === 'source-cwd'
+    ? 'the source session\'s working directory'
+    : 'the target working directory';
+}
+
+/**
+ * Section 2. Either every found file quoted verbatim, or a loud, specific
+ * account of where we looked and found nothing.
+ */
+function renderStandardsSection(standards: ProjectStandards, out: string[]): void {
+  out.push('## 2. THE STANDARDS — the project\'s engineering rules (BINDING)');
+  out.push('');
+
+  if (!hasStandards(standards)) {
+    out.push('**No project standards file was found.**');
+    out.push('');
+    out.push(`Reason: ${standards.note ?? 'unknown.'}`);
+    out.push('');
+    if (standards.searchedDirs.length > 0) {
+      out.push('Looked for '
+        + standards.filenames.map(name => `\`${name}\``).join(', ')
+        + ' in:');
+      out.push('');
+      for (const dir of standards.searchedDirs) out.push(`- \`${dir}\``);
+      out.push('');
+    }
+    out.push(
+      'This is stated rather than omitted on purpose: an absent section would read as "this project has no '
+      + 'rules", which is indistinguishable from "nobody checked". Nothing has been substituted here — no '
+      + 'invented conventions, and no rules inferred from the summary in section 4.',
+    );
+    out.push('');
+    out.push(
+      'Say so explicitly in your first reply, and ask the user where the project\'s standards live before you '
+      + 'write code.',
+    );
+    return;
+  }
+
+  out.push(
+    'Quoted verbatim from the file(s) below. These are the project\'s rules and they are BINDING on your work — '
+    + 'they constrain HOW you build, while section 1 defines WHAT. They are reproduced here because your CLI '
+    + 'will only discover an instruction file inside its own working directory, and a handoff can move you out '
+    + 'of the directory where these live.',
+  );
+  out.push('');
+  out.push(
+    'None of this text has been through a model: it is a byte-for-byte prefix of the file, not a summary. Where '
+    + 'an excerpt is truncated, the absolute path is given — read the rest yourself rather than guessing at it.',
+  );
+  out.push('');
+
+  for (const doc of standards.docs) {
+    out.push(`### \`${doc.filename}\` — ${standardsOriginLabel(doc.origin)}`);
+    out.push('');
+    out.push(`- Full file: \`${doc.path}\``);
+    out.push(`- Found under: \`${doc.cwd}\``);
+    if (doc.truncated) {
+      out.push(
+        `- Excerpt: the first ${doc.excerpt.length} characters, verbatim. At least ${doc.omittedChars} more `
+        + 'characters follow in the file — open the path above to read them before you rely on this section '
+        + 'being complete.',
+      );
+    } else {
+      out.push(`- Excerpt: the complete file, verbatim (${doc.excerpt.length} characters).`);
+    }
+    out.push('');
+    if (doc.excerpt.trim().length === 0) {
+      out.push('**This file exists but is empty.** It states no rules; do not infer any.');
+      out.push('');
+      continue;
+    }
+    const fence = fenceFor(doc.excerpt);
+    out.push(`${fence}markdown`);
+    out.push(doc.excerpt);
+    out.push(fence);
+    out.push('');
+  }
+
+  out.push(
+    'Where these rules and the previous agent\'s work in section 4 disagree, these rules win. Where these rules '
+    + 'and the ask in section 1 genuinely conflict, do not silently pick one — say so and ask.',
+  );
+}
+
 /**
  * Render the bundle as the markdown the receiving session is pointed at.
  *
  * Section order is the point: the ask comes first and is labelled ground truth;
- * the raw trace comes second; the previous agent's account comes last and is
- * labelled as possibly-drifted. The final section turns that into an action —
- * reconcile before building.
+ * the project's standards come second, because they constrain everything that
+ * follows; the raw trace comes third; the previous agent's account comes last
+ * and is labelled as possibly-drifted. The final section turns all of that into
+ * an action — reconcile and acknowledge before building.
  */
 export function renderHandoffBundleMarkdown(bundle: HandoffBundle): string {
   const out: string[] = [];
@@ -583,14 +959,20 @@ export function renderHandoffBundleMarkdown(bundle: HandoffBundle): string {
   }
   out.push('');
 
-  // ── 2. THE TRACE ──
-  out.push('## 2. THE TRACE — raw prior transcripts (oldest first)');
+  // ── 2. THE STANDARDS ──
+  // Never conditional: a bundle read back from an older build may have no
+  // `standards` field at all, and that must still render as a visible gap.
+  renderStandardsSection(bundle.standards ?? noStandardsFound(), out);
+  out.push('');
+
+  // ── 3. THE TRACE ──
+  out.push('## 3. THE TRACE — raw prior transcripts (oldest first)');
   out.push('');
   if (bundle.trace.length === 0) {
     out.push('No prior transcripts are available.');
   } else {
     out.push(
-      'These are the previous agents\' unedited session logs. Grep them; do not take the summary in section 3 '
+      'These are the previous agents\' unedited session logs. Grep them; do not take the summary in section 4 '
       + 'as a substitute. They can be large (multiple MB), so search them rather than reading them whole.',
     );
     out.push('');
@@ -608,11 +990,11 @@ export function renderHandoffBundleMarkdown(bundle: HandoffBundle): string {
   }
   out.push('');
 
-  // ── 3. THE PREVIOUS AGENT'S ACCOUNT ──
-  out.push('## 3. THE PREVIOUS AGENT\'S OWN ACCOUNT (NOT ground truth)');
+  // ── 4. THE PREVIOUS AGENT'S ACCOUNT ──
+  out.push('## 4. THE PREVIOUS AGENT\'S OWN ACCOUNT (NOT ground truth)');
   out.push('');
   if (!bundle.summary) {
-    out.push('The source session produced no usable summary. Work from sections 1 and 2.');
+    out.push('The source session produced no usable summary. Work from sections 1 to 3.');
   } else {
     out.push(
       `Written by the source session (\`${bundle.summary.sessionId}\`, ${bundle.summary.cliType}) about itself, `
@@ -635,31 +1017,57 @@ export function renderHandoffBundleMarkdown(bundle: HandoffBundle): string {
   }
   out.push('');
 
-  // ── 4. RECONCILE FIRST ──
-  out.push('## 4. DO THIS FIRST — reconcile, then build');
+  // ── 5. RECONCILE FIRST ──
+  out.push('## 5. DO THIS FIRST — acknowledge, reconcile, then build');
   out.push('');
-  if (bundle.ask.source === 'unavailable') {
-    out.push('1. Tell the user the original ask could not be recovered and ask them to restate it.');
-    out.push('2. Only then grep the transcripts in section 2 to see what was actually built.');
-    out.push('3. Report divergences between what they restate and what you find.');
+  out.push(
+    'Every step below happens BEFORE you write any code, and each one produces visible output. An '
+    + 'unacknowledged standard and an unreported divergence look identical to work done correctly — that is the '
+    + 'silent failure this document exists to prevent.',
+  );
+  out.push('');
+
+  const steps: string[] = [];
+  if (hasStandards(bundle.standards)) {
+    steps.push(
+      'Read section 2 in full, plus the full file at each path it lists if the excerpt was truncated. Then '
+      + 'ACKNOWLEDGE the standards explicitly: name each file you read, and list the specific constraints from '
+      + 'it that apply to this task. "I have read the standards" on its own does not count — the list is the '
+      + 'acknowledgement.',
+    );
   } else {
-    out.push('1. Re-read section 1. That, and only that, is what the user asked for.');
-    out.push(
-      '2. Grep the transcripts in section 2 for what the previous agent(s) actually did — files created and '
+    steps.push(
+      'State explicitly that NO project standards file was found (section 2 records where we looked), and ask '
+      + 'the user where the project\'s standards live. Do not invent conventions and do not infer them from the '
+      + 'previous agent\'s summary.',
+    );
+  }
+
+  if (bundle.ask.source === 'unavailable') {
+    steps.push('Tell the user the original ask could not be recovered and ask them to restate it.');
+    steps.push('Only then grep the transcripts in section 3 to see what was actually built.');
+    steps.push('Report divergences between what they restate and what you find.');
+  } else {
+    steps.push('Re-read section 1. That, and only that, is what the user asked for.');
+    steps.push(
+      'Grep the transcripts in section 3 for what the previous agent(s) actually did — files created and '
       + 'edited, decisions taken, direction chosen. Use the per-CLI schema notes; the formats differ.',
     );
-    out.push(
-      '3. Report, as a short list, every place prior work DIVERGES from the ask: work built in a direction the '
-      + 'ask does not call for, scope the user never requested, and parts of the ask never addressed.',
+    steps.push(
+      'Report, as a short list, every place prior work DIVERGES from the ask OR from the standards in '
+      + 'section 2: work built in a direction the ask does not call for, scope the user never requested, parts '
+      + 'of the ask never addressed, and existing code that breaks the project\'s own rules.',
     );
-    out.push(
-      '4. If you find a divergence, say so and ask how to proceed BEFORE writing code. Do not inherit the '
+    steps.push(
+      'If you find a divergence, say so and ask how to proceed BEFORE writing code. Do not inherit the '
       + 'previous direction just because infrastructure for it already exists.',
     );
-    out.push('5. If you find none, say so explicitly, then continue the work.');
+    steps.push('If you find none, say so explicitly, then continue the work — under the standards in section 2.');
   }
+
+  steps.forEach((step, index) => out.push(`${index + 1}. ${step}`));
   out.push('');
-  out.push('Do not delete this file or anything in section 2.');
+  out.push('Do not delete this file or anything in section 3.');
   out.push('');
 
   return out.join('\n');
@@ -673,6 +1081,11 @@ export function renderHandoffBundleMarkdown(bundle: HandoffBundle): string {
  * report before any work starts, and it never asks the receiver to delete
  * anything.
  *
+ * It also demands an EXPLICIT acknowledgement of the project standards. Being
+ * handed rules and quietly not reading them is indistinguishable, from the
+ * outside, from having read and followed them; requiring the receiver to name
+ * the constraints back is what makes the difference observable.
+ *
  * Prefixed with `AGENTMATRIX_INJECTION_MARKER` so that if this session is later
  * handed off, `extractFirstUserMessage` can recognise this turn as app plumbing
  * rather than mistaking it for the user's original ask.
@@ -682,15 +1095,33 @@ export function buildReconciliationInstruction(
   markdownPath: string,
 ): string {
   const traced = bundle.trace.filter(ref => ref.path).length;
+  const standards = bundle.standards ?? noStandardsFound();
+  const found = hasStandards(standards);
+
+  const standardsItem = found
+    ? `(2) the project's ENGINEERING STANDARDS, quoted verbatim from ${standards.docs.length} instruction `
+      + `file${standards.docs.length === 1 ? '' : 's'} on disk — these are binding on how you work;`
+    : '(2) a STANDARDS section recording that no project standards file could be found, and where we looked;';
+
+  const standardsAction = found
+    ? 'BEFORE anything else, read the standards section in full and acknowledge it explicitly in your first '
+      + 'reply: name each standards file and list the specific constraints from it that apply to this task '
+      + '(saying only "I have read the standards" does not count).'
+    : 'BEFORE anything else, state explicitly in your first reply that NO project standards file was found, and '
+      + 'ask where the project\'s standards live — do not invent conventions or infer them from the summary.';
+
   const parts = [
     `${AGENTMATRIX_INJECTION_MARKER} Before doing ANY work, read ${markdownPath}.`,
-    'It contains three separate things:',
+    'It contains four separate things:',
     '(1) the user\'s ORIGINAL ASK, verbatim and never passed through a model — this is ground truth;',
-    `(2) absolute paths to ${traced} raw prior session transcript${traced === 1 ? '' : 's'}, oldest first, each tagged with which CLI wrote it;`,
-    '(3) the previous agent\'s own summary, which is a paraphrase and may have drifted.',
-    'Grep the raw transcripts and cross-check what was actually built against the original ask,',
-    'then report every place prior work diverges from that ask — wrong direction, unrequested scope,',
-    'or parts of the ask never addressed — and ask before continuing if you find any.',
+    standardsItem,
+    `(3) absolute paths to ${traced} raw prior session transcript${traced === 1 ? '' : 's'}, oldest first, each tagged with which CLI wrote it;`,
+    '(4) the previous agent\'s own summary, which is a paraphrase and may have drifted.',
+    standardsAction,
+    'Then grep the raw transcripts and cross-check what was actually built against the original ask,',
+    'and report every place prior work diverges from that ask or from those standards — wrong direction,',
+    'unrequested scope, parts of the ask never addressed, or code that breaks the project\'s own rules —',
+    'and ask before continuing if you find any.',
     'Do NOT delete the handoff file or the transcripts; later handoffs read them.',
   ];
   return parts.join(' ');

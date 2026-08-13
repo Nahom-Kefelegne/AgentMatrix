@@ -23,7 +23,9 @@ export async function POST(request: Request) {
     // the not-supported guard below and silently launch Claude with
     // Claude-only flags.
     const cliType: CliType =
-      rawCli === 'copilot' || rawCli === 'kimi' || rawCli === 'claude' ? rawCli : 'claude';
+      rawCli === 'copilot' || rawCli === 'kimi' || rawCli === 'codex' || rawCli === 'claude'
+        ? rawCli
+        : 'claude';
 
     if (!task || !cwd) {
       return NextResponse.json({ error: 'Missing task or cwd' }, { status: 400 });

@@ -13,7 +13,7 @@
 
 /** The persisted setting value. Wider than `CliType` only in that it carries
  *  'auto'; every concrete member is a registered provider. */
-export type OrchestratorProviderSetting = 'claude' | 'copilot' | 'kimi' | 'auto';
+export type OrchestratorProviderSetting = 'claude' | 'copilot' | 'kimi' | 'codex' | 'auto';
 
 /** A concrete provider the orchestrator can actually run as. */
 export type OrchestratorProvider = Exclude<OrchestratorProviderSetting, 'auto'>;
@@ -24,7 +24,17 @@ export type OrchestratorProvider = Exclude<OrchestratorProviderSetting, 'auto'>;
  * The orchestrator issues many small, internal, mostly-mechanical queries, so
  * per-token cost matters more than peak capability. Kimi leads now that
  * KimiProvider is registered; Claude is the cheap capable fallback; Copilot is
- * last because it's the heaviest.
+ * heavier still.
+ *
+ * Codex is LAST, and the reason is a property of how the orchestrator spawns
+ * rather than of the CLI's price list. Orchestrator sessions do not pin a
+ * model, so each provider runs whatever it defaults to — and Codex's documented
+ * default is `gpt-5.6-sol`, its flagship ("the strongest capability for complex
+ * coding, computer use, research, and cybersecurity"). Codex does have cheap
+ * models (`gpt-5.6-luna`, `gpt-5.4-mini`), but nothing in this path selects
+ * them, so an auto-picked Codex would quietly run the most expensive default of
+ * the four. Copilot at least defaults to its routed `auto` model. Move Codex up
+ * only together with a change that pins a cheap model for orchestrator work.
  *
  * THIS IS THE ONE KNOB — change the order here, nowhere else.
  */
@@ -32,6 +42,7 @@ export const ORCHESTRATOR_PROVIDER_PREFERENCE: OrchestratorProvider[] = [
   'kimi',
   'claude',
   'copilot',
+  'codex',
 ];
 
 /**

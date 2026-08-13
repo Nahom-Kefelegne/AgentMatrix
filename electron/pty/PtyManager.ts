@@ -79,18 +79,28 @@ export class PtyManager {
       // Default to first provider (should be claude)
       this.defaultProvider = providers.values().next().value!;
     } else {
-      // Lazy-load providers — always register both so cliType routing works
-      // even if the binary isn't on PATH (Agency may manage it)
+      // Register EVERY known provider, so cliType routing works even when the
+      // binary isn't on PATH (Agency may manage it, or the user may install it
+      // later without restarting).
+      //
+      // This enumerates via `allProviders()` rather than naming CLIs, because
+      // the hardcoded claude+copilot list that used to live here silently broke
+      // every provider added after it: selecting Codex in the UI spawned CLAUDE,
+      // logging only a console warning while the session looked correct in the
+      // dashboard. `allProviders()` is derived from CliType, so a new provider
+      // is routable here the moment it's registered in lib/cli.
       try {
-        const { getProvider, getDefaultProvider } = require('../../lib/cli');
-        const claude = getProvider('claude') as CliProvider;
-        this.providers.set('claude', claude);
-        const copilot = getProvider('copilot') as CliProvider;
-        this.providers.set('copilot', copilot);
+        const { allProviders, getDefaultProvider } = require('../../lib/cli');
+        for (const provider of allProviders() as CliProvider[]) {
+          this.providers.set(provider.type, provider);
+        }
         this.defaultProvider = getDefaultProvider() as CliProvider;
       } catch (err) {
         console.warn('[PtyManager] Provider loading failed, using fallback:', err);
-        // Fallback: create providers directly
+        // Degraded last resort: only reached if `lib/cli` itself failed to
+        // load, in which case most of the app is already broken. Deliberately
+        // minimal — do NOT grow this list as providers are added, or it becomes
+        // a second place that silently goes stale.
         try {
           const { ClaudeProvider } = require('../../lib/cli/ClaudeProvider');
           const claude = new ClaudeProvider();

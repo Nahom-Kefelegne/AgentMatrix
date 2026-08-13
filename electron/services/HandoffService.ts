@@ -4,9 +4,10 @@
  * All the reasoning about *what* a handoff bundle contains lives in
  * `lib/dispatch/handoffBundle.ts`, which is pure and unit-tested. This module
  * does only the things that need a disk or a PTY: locating transcripts through
- * the provider, reading a bounded head of one, asking the source agent for its
- * summary, writing the bundle out, and typing the reconciliation instruction
- * into the receiving session.
+ * the provider, reading a bounded head of one, locating and reading the
+ * project's standards files, asking the source agent for its summary, writing
+ * the bundle out, and typing the reconciliation instruction into the receiving
+ * session.
  *
  * WHAT CHANGED, AND WHY
  * ---------------------
@@ -16,16 +17,23 @@
  * previous agent's chosen direction arrived as established fact (work drift),
  * and deleting the file meant a second handoff had nothing to chain onto.
  *
- * Now the receiver gets the user's ask verbatim, RAW PATHS to every prior
- * session's transcript, and the summary explicitly labelled as the source
- * agent's own account — plus an instruction to reconcile the three before
+ * Now the receiver gets the user's ask verbatim, the project's own engineering
+ * standards quoted verbatim, RAW PATHS to every prior session's transcript, and
+ * the summary explicitly labelled as the source agent's own account — plus an
+ * instruction to acknowledge the standards and reconcile the rest before
  * writing any code. Nothing is deleted.
+ *
+ * On standards specifically: they are quoted INTO the bundle rather than pushed
+ * through `SpawnOptions.systemPrompt`, because that option reaches only Claude
+ * (`--append-system-prompt`) — Copilot ignores it and Kimi has no equivalent.
+ * A file every CLI can be told to read is the only mechanism that works for all
+ * three.
  */
 
 import { PtyManager } from '../pty/PtyManager';
 import { captureQuery } from '../../lib/cli/acp/captureQuery';
 import { closeSync, mkdirSync, openSync, readFileSync, readSync, writeFileSync } from 'fs';
-import { dirname } from 'path';
+import { dirname, join, resolve } from 'path';
 import { getProvider } from '../../lib/cli';
 import type { CliType } from '../../lib/cli/CliProvider';
 import { getAllAppTasks } from '../../lib/state/appTaskStore';
@@ -41,15 +49,21 @@ import {
 } from '../../lib/state/paths';
 import {
   AGENTMATRIX_INJECTION_MARKER,
+  STANDARDS_FILENAMES,
   buildHandoffBundle,
   buildReconciliationInstruction,
   extractFirstUserMessage,
   isHandoffBundle,
   renderHandoffBundleMarkdown,
   resolveOriginalAsk,
+  resolveProjectStandards,
+  standardsGrantDirs,
   traceGrantDirs,
   type HandoffBundle,
   type OriginalAsk,
+  type ProjectStandards,
+  type StandardsCandidate,
+  type StandardsOrigin,
 } from '../../lib/dispatch/handoffBundle';
 
 /**
@@ -61,6 +75,17 @@ import {
  * is what makes a bounded head safe.
  */
 const TRANSCRIPT_HEAD_BYTES = 1_048_576; // 1 MiB
+
+/**
+ * How much of a standards file to read.
+ *
+ * Only the first `STANDARDS_EXCERPT_MAX_CHARS` are ever quoted, so this bound
+ * exists purely so the "N more characters follow" figure is meaningful without
+ * pulling an unbounded file into the main process. 256 KiB is roughly 30x the
+ * largest instruction file worth writing; beyond it the omitted-character count
+ * under-reports, which is why the rendered text says "at least".
+ */
+const STANDARDS_HEAD_BYTES = 262_144; // 256 KiB
 
 // ─── Small disk helpers ──────────────────────────────────────────────
 
@@ -199,6 +224,98 @@ function sourceOriginalAsk(
   });
 }
 
+// ─── Discovering the project's standards ─────────────────────────────
+
+/**
+ * The source session's working directory.
+ *
+ * Prefers the active-sessions cache (in memory, free). Falls back to asking the
+ * provider, which is real I/O — Claude scans project dirs, Copilot opens a
+ * workspace.yaml — but this runs once per handoff, right after a 90s summary
+ * capture, so the cost is noise. Returns undefined rather than guessing.
+ */
+function findSourceCwd(
+  ptyManager: PtyManager,
+  sessionId: string,
+  cliType: CliType,
+): string | undefined {
+  const cached = getActiveSession(sessionId)?.cwd;
+  if (cached) return cached;
+  try {
+    return ptyManager.findSessionCwd(sessionId, cliType);
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Locate the project's engineering standards and read them VERBATIM.
+ *
+ * WHY THIS EXISTS: when an agent works IN the repo holding `AGENTS.md`, its CLI
+ * discovers the file natively. The gap is a handoff whose `targetCwd` is a
+ * different directory from where the standards live — the receiver then works
+ * to no standards, silently.
+ *
+ * WHERE IT LOOKS: the source session's cwd first, then `targetCwd`. Only those
+ * two directories, and only at their top level (plus `.github/` for Copilot's
+ * filename). No walking up to parents: a parent directory's instruction file
+ * does not reliably govern a child project, and walking upward from an
+ * arbitrary cwd could reach a home directory and pull in something unrelated.
+ * That is a real limitation for monorepos where `AGENTS.md` sits above the
+ * package being worked in — flagged, not silently handled.
+ *
+ * WHAT IT REPORTS: every distinct file found, not just the first. Both repos'
+ * standards can be relevant at once, and a repo can carry both `AGENTS.md` and
+ * `CLAUDE.md`. Deduplication by absolute path happens in the pure layer, which
+ * covers the common case of source cwd === target cwd.
+ *
+ * Never throws: unreadable and absent files are indistinguishable here, and
+ * both simply mean "not found", which is itself a rendered state.
+ */
+function discoverProjectStandards(
+  sourceCwd: string | undefined,
+  targetCwd: string,
+): ProjectStandards {
+  const roots: Array<{ cwd: string; origin: StandardsOrigin }> = [];
+  const seenRoots = new Set<string>();
+  const addRoot = (cwd: string | undefined, origin: StandardsOrigin) => {
+    if (!cwd) return;
+    let normalized: string;
+    try {
+      normalized = resolve(cwd);
+    } catch {
+      return;
+    }
+    // Case-insensitive on Windows; the pure layer's path-level dedupe is the
+    // real safety net, this just avoids searching the same tree twice.
+    const key = process.platform === 'win32' ? normalized.toLowerCase() : normalized;
+    if (seenRoots.has(key)) return;
+    seenRoots.add(key);
+    roots.push({ cwd: normalized, origin });
+  };
+  addRoot(sourceCwd, 'source-cwd');
+  addRoot(targetCwd, 'target-cwd');
+
+  const candidates: StandardsCandidate[] = [];
+  for (const { cwd, origin } of roots) {
+    for (const filename of STANDARDS_FILENAMES) {
+      const path = join(cwd, filename);
+      const contents = readHead(path, STANDARDS_HEAD_BYTES);
+      if (contents === null) continue; // absent, a directory, or unreadable
+      candidates.push({ path, dir: dirname(path), filename, origin, cwd, contents });
+    }
+  }
+
+  return resolveProjectStandards({
+    candidates,
+    searchedDirs: roots.map(root => root.cwd),
+    noneFoundNote: roots.length === 0
+      ? 'Neither the source session\'s working directory nor the target working directory could be determined, '
+        + 'so no directory was searched.'
+      : `None of ${STANDARDS_FILENAMES.join(', ')} exist (or are readable) in the directories listed below.`,
+  });
+}
+
 // ─── Step 1: build the bundle ────────────────────────────────────────
 
 export interface PreparedHandoff {
@@ -283,6 +400,17 @@ export async function prepareHandoff(
   }
   const ask = sourceOriginalAsk(sourceSessionId, cliType, transcriptPath, upstream);
 
+  // Discovered fresh for THIS hop, never inherited from `upstream`: standards
+  // are a property of the directories this handoff actually runs in, and the
+  // target can differ from the one the previous bundle was built against.
+  const sourceCwd = findSourceCwd(ptyManager, sourceSessionId, cliType);
+  const standards = discoverProjectStandards(sourceCwd, targetCwd);
+  if (standards.state === 'none-found') {
+    console.warn(
+      `[handoff] ${handoffId} no standards file found in: ${standards.searchedDirs.join(', ') || '(none searched)'}`,
+    );
+  }
+
   const bundle = buildHandoffBundle({
     handoffId,
     createdAt: Date.now(),
@@ -299,6 +427,7 @@ export async function prepareHandoff(
     },
     previous: upstream,
     ask,
+    standards,
     summaryText,
   });
 
@@ -354,10 +483,26 @@ export async function prepareHandoff(
  *    file itself would be tighter still, but `--add-dir` is documented as taking
  *    directories and was not verified to accept a file — silently mis-scoping
  *    would be worse than a slightly wider, understood grant.
+ *  - Each standards file's containing directory. For
+ *    `.github/copilot-instructions.md` that is `<repo>/.github`, which is tight.
+ *    For a root-level `AGENTS.md` it is the repo root — as narrow as the
+ *    convention allows, since the file lives there by definition. Nothing ABOVE
+ *    a repo root is ever granted, and no state root is: discovery only ever
+ *    looks in the source session's cwd and in `targetCwd`, so nothing outside
+ *    those two working directories can reach this list.
+ *
+ * `targetCwd` itself is dropped at the end. The receiving session is spawned
+ * with it as its cwd, so granting it again is a no-op — and leaving it in would
+ * make the logged grant list read as though the handoff had widened access when
+ * it had not.
  */
 function computeAddDirs(bundle: HandoffBundle): string[] {
-  const dirs = [handoffBundleDir(bundle.handoffId), ...traceGrantDirs(bundle)];
-  return [...new Set(dirs)];
+  const dirs = [
+    handoffBundleDir(bundle.handoffId),
+    ...traceGrantDirs(bundle),
+    ...standardsGrantDirs(bundle),
+  ];
+  return [...new Set(dirs)].filter(dir => dir !== bundle.targetCwd);
 }
 
 // ─── Step 2: inject the reconciliation instruction ───────────────────

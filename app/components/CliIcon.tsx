@@ -26,6 +26,15 @@ export const CLI_ICON_META: Record<string, { svg: string; color: string; name: s
     name: 'Kimi Code',
     shortName: 'Kimi',
   },
+  // Generic terminal-caret mark, NOT OpenAI's brand logo — kept in sync with
+  // CODEX_ICON_SVG in lib/cli/CodexProvider.ts, which cannot be imported here
+  // (it pulls in child_process/fs at module scope).
+  codex: {
+    svg: `<svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" xmlns="http://www.w3.org/2000/svg"><rect x="1.2" y="2.4" width="13.6" height="11.2" rx="2.2"/><path d="M4.6 6.2 6.9 8l-2.3 1.8"/><path d="M8.6 10.4h2.9"/></svg>`,
+    color: '#10A37F',
+    name: 'Codex CLI',
+    shortName: 'Codex',
+  },
 };
 
 /** Display name for a CLI, falling back to Claude's for legacy sessions with
