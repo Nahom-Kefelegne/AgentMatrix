@@ -1,3 +1,4 @@
+import { execFileSync } from 'child_process';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'fs';
 import { homedir } from 'os';
 import { dirname, join, resolve } from 'path';
@@ -123,14 +124,53 @@ export function buildAgentMatrixCopilotMcpConfig(port: number): string {
 }
 
 /**
+ * Register AgentMatrix with Codex, which stores MCP servers in
+ * `~/.codex/config.toml` under `[mcp_servers.<name>]`. We shell out to
+ * `codex mcp add` rather than hand-write TOML: the CLI owns its own format,
+ * the call is idempotent (re-adding replaces the entry), and it preserves the
+ * rest of the user's config — none of which a blind TOML edit can guarantee.
+ *
+ * Best-effort: if Codex isn't installed the resolve/exec throws and we skip it,
+ * exactly like the other providers are skipped when absent. Session identity and
+ * capability are injected per-PTY at spawn (like Claude); only the port is
+ * baked into the static config here. Codex forwards the launching process's
+ * environment to stdio MCP servers, so those per-session vars reach the server.
+ */
+function configureCodexMcp(port: number, serverPath: string): boolean {
+  let binary: string;
+  try {
+    const { getProvider } = require('../../lib/cli');
+    binary = getProvider('codex').findBinary();
+  } catch {
+    return false; // Codex not installed — nothing to configure.
+  }
+  try {
+    execFileSync(
+      binary,
+      ['mcp', 'add', 'agentmatrix', '--env', `AGENTMATRIX_PORT=${port}`, '--', 'node', serverPath],
+      { stdio: ['ignore', 'ignore', 'ignore'], timeout: 15_000, windowsHide: true },
+    );
+    return true;
+  } catch (error) {
+    console.error('[mcp-config] codex mcp add failed:', error);
+    return false;
+  }
+}
+
+/**
  * Claude discovers MCP servers only from persistent configuration, so keep its
  * inheriting definition installed. Copilot is injected per managed process;
  * remove the legacy global entry so unmanaged Copilot sessions do not expose a
- * server that lacks AgentMatrix session credentials.
+ * server that lacks AgentMatrix session credentials. Kimi reads the same
+ * `mcpServers` JSON shape as Claude from `~/.kimi-code/mcp.json`. Codex uses its
+ * own CLI to write TOML (see configureCodexMcp).
  */
 export function ensureAgentMatrixMcpConfig(port: number): void {
+  const serverPath = agentMatrixServerPath();
   const configured = [
-    configureServer(join(homedir(), '.claude.json'), port, agentMatrixServerPath()),
+    configureServer(join(homedir(), '.claude.json'), port, serverPath),
+    configureServer(join(homedir(), '.kimi-code', 'mcp.json'), port, serverPath),
+    configureCodexMcp(port, serverPath),
     removeServer(join(homedir(), '.copilot', 'mcp-config.json'), 'agentmatrix'),
   ];
   if (configured.some(Boolean)) console.log('[mcp-config] AgentMatrix MCP configuration refreshed');

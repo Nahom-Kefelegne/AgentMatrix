@@ -129,7 +129,189 @@ function validCliType(value: unknown): CliType | undefined {
     : undefined;
 }
 
+export interface HandoffRequest {
+  sourceSessionId: string;
+  contextRequest: string;
+  targetCwd: string;
+  handoffId: string;
+  sessionName?: string;
+  permissionMode?: string;
+  model?: string;
+  effort?: string;
+  systemPrompt?: string;
+  cliType?: CliType;
+  copilotMode?: string;
+}
+
+export interface HandoffOutcome {
+  ok: boolean;
+  newSessionId?: string;
+  error?: string;
+}
+
+/**
+ * The whole handoff: build the bundle, spawn the receiver, inject the
+ * reconciliation instruction. Extracted from the `session:handoff` socket
+ * handler so BOTH entry points run identical code:
+ *
+ *   - the HandoffModal in the UI (via the socket event), and
+ *   - an agent that calls the `request_handoff` MCP tool (via the global
+ *     trigger registered in setupTerminalBridge).
+ *
+ * Before this existed, an agent saying "hand this off to Claude" did nothing —
+ * agents had no channel to fire `session:handoff`, so the delegation was just
+ * text. Now the agent path and the human path are the same function; the only
+ * differences are who receives status updates and whether a requesting socket
+ * subscribes to the new session's output.
+ *
+ * `emitStatus` receives each `session:handoff-status` payload — bound to the
+ * requesting socket for the UI path, broadcast via `io.emit` for the agent path
+ * (so the dashboard still shows progress even though no socket asked). Returns
+ * once the receiver is spawned; the reconciliation injection is fired on a timer
+ * inside, matching the original handler.
+ */
+export async function runHandoff(
+  io: SocketIOServer,
+  ptyManager: PtyManager,
+  data: HandoffRequest,
+  emitStatus: (payload: Record<string, unknown>) => void,
+  subscribeOutput?: (sessionId: string) => void,
+): Promise<HandoffOutcome> {
+  const { sourceSessionId, contextRequest, targetCwd, handoffId } = data;
+  const sourceProfile = getActiveSession(sourceSessionId);
+  const sourceSession = getSession(sourceSessionId);
+  const cliType = validCliType(data.cliType)
+    || validCliType(sourceSession?.cliType)
+    || validCliType(sourceProfile?.cliType)
+    || 'claude';
+  const permissionMode = data.permissionMode
+    || sourceProfile?.permissionMode
+    || require('../lib/state/appSettings').getSettings().defaultPermissionMode;
+  const model = data.model || sourceProfile?.model;
+  const effort = data.effort || sourceProfile?.effort;
+  const allowedTools = sourceProfile?.allowedTools;
+  const copilotMode = data.copilotMode || sourceProfile?.copilotMode;
+
+  // Step 1: Build the handoff bundle — the user's verbatim ask, raw paths to
+  // every prior session's transcript, the project standards, and the source
+  // agent's own summary.
+  emitStatus({ handoffId, status: 'summarizing' });
+  const result = await prepareHandoff(
+    ptyManager,
+    sourceSessionId,
+    contextRequest,
+    handoffId,
+    targetCwd,
+  );
+
+  if (!result.success || !result.prepared) {
+    emitStatus({ handoffId, status: 'error', error: result.error });
+    return { ok: false, error: result.error };
+  }
+  const prepared = result.prepared;
+
+  // Step 2: Spawn new session
+  emitStatus({ handoffId, status: 'spawning' });
+  const { randomUUID } = require('crypto');
+  const sessionUuid = randomUUID();
+  const name = data.sessionName || `handoff-${handoffId}`;
+  const { setCachedName } = require('../lib/state/nameCache');
+
+  const sessionData = createSessionEntry(sessionUuid, name, targetCwd, cliType);
+  addSession(sessionData);
+  setCachedName(sessionUuid, name);
+  io.emit(SOCKET_EVENTS.SESSION_START, sessionData);
+
+  // Link the new session back to this handoff BEFORE it can itself be handed
+  // off. This is the backwards edge that makes A -> B -> C chain: when B is
+  // handed off later, HandoffService looks B up here, loads this bundle, and
+  // prepends A's transcript and A's verbatim ask to C's bundle.
+  recordHandoffReceiver(handoffId, sessionUuid);
+
+  // The receiving session's cwd is the target repo, but the transcripts it
+  // is told to grep live under `~/.claude/projects/<project>/` etc., and the
+  // bundle under `~/.agentmatrix/handoffs/<id>/`. These are the narrowest
+  // directories that make those readable — never a whole state root.
+  console.log(
+    `[handoff] ${handoffId} granting scoped read access: ${prepared.addDirs.join(', ')}`,
+  );
+
+  ptyManager.spawnNew(sessionUuid, {
+    cwd: targetCwd,
+    sessionUuid,
+    name,
+    permissionMode,
+    model,
+    effort,
+    allowedTools,
+    addDirs: prepared.addDirs,
+    systemPrompt: data.systemPrompt,
+    cliType,
+    copilotMode,
+  });
+
+  const active = getActiveSessions().filter(session => session.id !== sessionUuid);
+  active.push({
+    id: sessionUuid,
+    name,
+    cwd: targetCwd,
+    cliType,
+    permissionMode,
+    model,
+    effort,
+    allowedTools,
+    copilotMode,
+  });
+  saveActiveSessions(active);
+
+  // Only the UI path has a requesting socket to subscribe; the agent path
+  // relies on the SESSION_START broadcast above so clients pick the session up.
+  subscribeOutput?.(sessionUuid);
+
+  // Auto-accept trust prompts for handoff sessions too
+  watchForTrustPrompt(ptyManager, sessionUuid, name);
+
+  const newPty = ptyManager.getSession(sessionUuid);
+  if (!newPty) {
+    emitStatus({ handoffId, status: 'error', error: 'Failed to spawn session' });
+    return { ok: false, newSessionId: sessionUuid, error: 'Failed to spawn session' };
+  }
+  newPty.onStateChange = (info) => io.emit('session:state', { sessionId: sessionUuid, ...info });
+  newPty.onContextUpdate = (usage) => io.emit('session:context', { sessionId: sessionUuid, usage });
+
+  // Step 3: Wait for ready, then inject the reconciliation instruction.
+  // Fixed delay since onReady may not fire reliably.
+  emitStatus({ handoffId, status: 'injecting' });
+  setTimeout(() => {
+    injectHandoffIntoSession(ptyManager, sessionUuid, prepared);
+    emitStatus({ handoffId, status: 'done', newSessionId: sessionUuid });
+  }, 8000);
+
+  return { ok: true, newSessionId: sessionUuid };
+}
+
+/**
+ * Registered on globalThis so a Next.js API route — which runs in the same
+ * process as the socket server but has no closure access to `io`/`ptyManager` —
+ * can trigger a handoff on an agent's behalf. Mirrors how the socket server
+ * itself is exposed via `globalThis.__socketIO` (see lib/state/socketEmitter).
+ */
+export type HandoffTrigger = (data: HandoffRequest) => Promise<HandoffOutcome>;
+
+export function getHandoffTrigger(): HandoffTrigger | null {
+  const trigger = (globalThis as Record<string, unknown>).__agentmatrixHandoff;
+  return typeof trigger === 'function' ? (trigger as HandoffTrigger) : null;
+}
+
 export function setupTerminalBridge(io: SocketIOServer, ptyManager: PtyManager): void {
+  // Expose a handoff trigger to same-process API routes (the `request_handoff`
+  // MCP tool posts to /api/handoff/request, which has no closure access to
+  // `io`/`ptyManager`). Agent-triggered handoffs broadcast their status via
+  // `io.emit` — no requesting socket — so the dashboard still shows progress.
+  (globalThis as Record<string, unknown>).__agentmatrixHandoff =
+    (data: HandoffRequest): Promise<HandoffOutcome> =>
+      runHandoff(io, ptyManager, data, (payload) => io.emit('session:handoff-status', payload));
+
   // Sessions currently mid-teardown (terminal:end fired, animation + kill
   // pending). Shared across sockets. While a session is here, terminal:resume
   // is refused so an accidental click during the ~8s close animation can't
@@ -683,131 +865,17 @@ export function setupTerminalBridge(io: SocketIOServer, ptyManager: PtyManager):
     });
 
     // Context handoff — generate summary from source, spawn new session, inject handoff
-    socket.on('session:handoff', async (data: {
-      sourceSessionId: string;
-      contextRequest: string;
-      targetCwd: string;
-      handoffId: string;
-      sessionName?: string;
-      permissionMode?: string;
-      model?: string;
-      effort?: string;
-      systemPrompt?: string;
-      cliType?: CliType;
-      copilotMode?: string;
-    }) => {
-      const { sourceSessionId, contextRequest, targetCwd, handoffId } = data;
-      const sourceProfile = getActiveSession(sourceSessionId);
-      const sourceSession = getSession(sourceSessionId);
-      const cliType = validCliType(data.cliType)
-        || validCliType(sourceSession?.cliType)
-        || validCliType(sourceProfile?.cliType)
-        || 'claude';
-      const permissionMode = data.permissionMode
-        || sourceProfile?.permissionMode
-        || require('../lib/state/appSettings').getSettings().defaultPermissionMode;
-      const model = data.model || sourceProfile?.model;
-      const effort = data.effort || sourceProfile?.effort;
-      const allowedTools = sourceProfile?.allowedTools;
-      const copilotMode = data.copilotMode || sourceProfile?.copilotMode;
-
-      // Step 1: Build the handoff bundle — the user's verbatim ask, raw paths to
-      // every prior session's transcript, and the source agent's own summary.
-      socket.emit('session:handoff-status', { handoffId, status: 'summarizing' });
-      const result = await prepareHandoff(
+    socket.on('session:handoff', async (data: HandoffRequest) => {
+      const outcome = await runHandoff(
+        io,
         ptyManager,
-        sourceSessionId,
-        contextRequest,
-        handoffId,
-        targetCwd,
+        data,
+        (payload) => socket.emit('session:handoff-status', payload),
+        subscribeOutput,
       );
-
-      if (!result.success || !result.prepared) {
-        socket.emit('session:handoff-status', { handoffId, status: 'error', error: result.error });
-        return;
+      if (outcome.newSessionId) {
+        socket.emit('terminal:spawned', { sessionId: outcome.newSessionId, name: data.sessionName || `handoff-${data.handoffId}` });
       }
-      const prepared = result.prepared;
-
-      // Step 2: Spawn new session
-      socket.emit('session:handoff-status', { handoffId, status: 'spawning' });
-      const { randomUUID } = require('crypto');
-      const sessionUuid = randomUUID();
-      const name = data.sessionName || `handoff-${handoffId}`;
-      const { setCachedName } = require('../lib/state/nameCache');
-
-      const sessionData = createSessionEntry(sessionUuid, name, targetCwd, cliType);
-      addSession(sessionData);
-      setCachedName(sessionUuid, name);
-      io.emit(SOCKET_EVENTS.SESSION_START, sessionData);
-
-      // Link the new session back to this handoff BEFORE it can itself be handed
-      // off. This is the backwards edge that makes A -> B -> C chain: when B is
-      // handed off later, HandoffService looks B up here, loads this bundle, and
-      // prepends A's transcript and A's verbatim ask to C's bundle.
-      recordHandoffReceiver(handoffId, sessionUuid);
-
-      // The receiving session's cwd is the target repo, but the transcripts it
-      // is told to grep live under `~/.claude/projects/<project>/` etc., and the
-      // bundle under `~/.agentmatrix/handoffs/<id>/`. These are the narrowest
-      // directories that make those readable — never a whole state root.
-      console.log(
-        `[handoff] ${handoffId} granting scoped read access: ${prepared.addDirs.join(', ')}`,
-      );
-
-      ptyManager.spawnNew(sessionUuid, {
-        cwd: targetCwd,
-        sessionUuid,
-        name,
-        permissionMode,
-        model,
-        effort,
-        allowedTools,
-        addDirs: prepared.addDirs,
-        systemPrompt: data.systemPrompt,
-        cliType,
-        copilotMode,
-      });
-
-      const active = getActiveSessions().filter(session => session.id !== sessionUuid);
-      active.push({
-        id: sessionUuid,
-        name,
-        cwd: targetCwd,
-        cliType,
-        permissionMode,
-        model,
-        effort,
-        allowedTools,
-        copilotMode,
-      });
-      saveActiveSessions(active);
-
-      subscribeOutput(sessionUuid);
-
-      // Auto-accept trust prompts for handoff sessions too
-      watchForTrustPrompt(ptyManager, sessionUuid, name);
-
-      const newPty = ptyManager.getSession(sessionUuid);
-      if (newPty) {
-        newPty.onStateChange = (info) => io.emit('session:state', { sessionId: sessionUuid, ...info });
-        newPty.onContextUpdate = (usage) => io.emit('session:context', { sessionId: sessionUuid, usage });
-
-        // Step 3: Wait for ready, then inject handoff
-        socket.emit('session:handoff-status', { handoffId, status: 'injecting' });
-        // Use fixed delay since onReady may not fire reliably
-        setTimeout(() => {
-          injectHandoffIntoSession(ptyManager, sessionUuid, prepared);
-          socket.emit('session:handoff-status', {
-            handoffId,
-            status: 'done',
-            newSessionId: sessionUuid,
-          });
-        }, 8000);
-      } else {
-        socket.emit('session:handoff-status', { handoffId, status: 'error', error: 'Failed to spawn session' });
-      }
-
-      socket.emit('terminal:spawned', { sessionId: sessionUuid, name });
     });
 
     // Query the orchestrator

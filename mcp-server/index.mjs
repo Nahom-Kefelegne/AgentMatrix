@@ -75,6 +75,35 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
       },
     },
     {
+      name: 'request_handoff',
+      description:
+        'Hand this session off to a NEW session running a different coding agent (claude, copilot, kimi, or codex). '
+        + 'Use when a different provider is better suited to continue — e.g. the task shifted, you are stuck, or you hit a limit. '
+        + 'The receiver is spawned in this session\'s working directory and is given the user\'s ORIGINAL ask verbatim, a raw path to this session\'s transcript to grep, and the project\'s AGENTS.md standards; it must reconcile against them before working. '
+        + 'You can only hand off your own session. Returns immediately; the new session appears in the AgentMatrix dashboard.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          to: {
+            type: 'string',
+            enum: ['claude', 'copilot', 'kimi', 'codex'],
+            description: 'The coding agent the new session should run as. Must differ from the current one.',
+          },
+          context_request: {
+            type: 'string',
+            maxLength: 4000,
+            description: 'What the receiving agent should continue or do next. Describe the goal, not a summary of the whole session — the receiver already gets the verbatim ask and the raw transcript.',
+          },
+          cwd: {
+            type: 'string',
+            description: 'Optional working directory for the new session. Defaults to this session\'s directory.',
+          },
+        },
+        required: ['to', 'context_request'],
+        additionalProperties: false,
+      },
+    },
+    {
       name: 'present_code',
       description: 'Present an exact repository file or range when seeing it materially helps the user understand the result. Markdown renders as a document. Do not use for routine internal exploration or duplicate an automatic design-doc preview.',
       inputSchema: {
@@ -468,6 +497,17 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       return result(name === 'request_attention'
         ? 'AgentMatrix notified the user that this session needs attention.'
         : 'AgentMatrix recorded that this session is complete.');
+    }
+    if (name === 'request_handoff') {
+      const payload = await post('/api/handoff/request', {
+        to: args.to,
+        context_request: args.context_request,
+        cwd: args.cwd,
+      });
+      return result(
+        payload?.message
+        || `Handoff to ${args.to} started (id ${payload?.handoffId ?? 'unknown'}).`,
+      );
     }
     if (['open_file', 'reveal_range', 'open_symbol', 'show_search_results', 'open_diff', 'open_review'].includes(name)) {
       return await requestNavigation(name, args);
