@@ -283,6 +283,26 @@ export class PtyManager {
         buildAgentMatrixCopilotMcpConfig(mcpPort),
       ];
     }
+    // Codex does NOT forward its process environment to MCP server subprocesses.
+    // Verified: an interactive codex session's agentmatrix MCP server saw no
+    // session id, so every tool call failed with "not started by a managed
+    // session" — even though the vars were set on codex's own PTY env below.
+    // (`codex exec` DOES forward, which masked this earlier; the interactive TUI
+    // AgentMatrix actually uses does not.) Deliver the per-session identity
+    // through codex's own `-c` config override, which sets the launch env of the
+    // named MCP server. The base64url capability needs no TOML escaping, and the
+    // overrides are prepended so they precede any `resume` subcommand.
+    if (provider.type === 'codex' && navigationIdentity) {
+      const parsedPort = Number.parseInt(process.env.PORT || '3000', 10);
+      const mcpPort = Number.isFinite(parsedPort) ? parsedPort : 3000;
+      effectiveCliArgs = [
+        '-c', `mcp_servers.agentmatrix.env.AGENTMATRIX_SESSION_ID="${navigationIdentity.sessionId}"`,
+        '-c', `mcp_servers.agentmatrix.env.AGENTMATRIX_NAVIGATION_CAPABILITY="${navigationIdentity.capability}"`,
+        '-c', `mcp_servers.agentmatrix.env.AGENTMATRIX_PORT="${mcpPort}"`,
+        ...effectiveCliArgs,
+      ];
+    }
+
     if (navigationIdentity) {
       env.AGENTMATRIX_SESSION_ID = navigationIdentity.sessionId;
       env.AGENTMATRIX_NAVIGATION_CAPABILITY = navigationIdentity.capability;

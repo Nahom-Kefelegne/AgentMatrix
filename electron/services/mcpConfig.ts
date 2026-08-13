@@ -144,10 +144,22 @@ function configureCodexMcp(port: number, serverPath: string): boolean {
   } catch {
     return false; // Codex not installed — nothing to configure.
   }
+  // Derive the launch command + env from the SAME serverDefinition every other
+  // provider uses. This must NOT be a bare `node`: an app-spawned CLI child
+  // cannot rely on `node` being on PATH (verified — codex reported the tools
+  // absent when the MCP server was `node <path>`, because launching it failed).
+  // In Electron the command is the app's own binary run as Node
+  // (ELECTRON_RUN_AS_NODE=1), an absolute path that always resolves — exactly
+  // what Claude and Kimi already use. `codex mcp add` takes env as repeated
+  // `--env KEY=VALUE` and the command after `--`.
+  const def = serverDefinition(port, serverPath);
+  const command = def.command as string;
+  const envPairs = Object.entries(def.env as Record<string, string>)
+    .flatMap(([key, value]) => ['--env', `${key}=${value}`]);
   try {
     execFileSync(
       binary,
-      ['mcp', 'add', 'agentmatrix', '--env', `AGENTMATRIX_PORT=${port}`, '--', 'node', serverPath],
+      ['mcp', 'add', 'agentmatrix', ...envPairs, '--', command, serverPath],
       { stdio: ['ignore', 'ignore', 'ignore'], timeout: 15_000, windowsHide: true },
     );
     return true;
