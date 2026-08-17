@@ -239,6 +239,19 @@ history and document navigation.
 2. Validated raster asset endpoint with ETags and byte/dimension limits.
 3. Turn-level transcript reconciliation for multi-file changes.
 4. Narrow file observation for Bash-generated Markdown.
-5. Sandboxed, lazy Mermaid rendering.
+5. Sandboxed, lazy Mermaid rendering:
+   - detect fenced code blocks whose language is `mermaid`
+   - keep the original source available through Preview/Source
+   - dynamically import Mermaid only when a document contains a diagram
+   - use strict security mode with no HTML labels, click handlers, external
+     links, scripts, or runtime configuration from document content
+   - render into an isolated, noninteractive container after sanitizing the
+     generated SVG
+   - show a bounded error state with **View source** when parsing fails
+   - cap diagram source length, node/edge count, generated SVG size, and render
+     time before falling back to source
+   - use static rendering only; no continuous layout animation
+   - re-render on theme change and document content change
+   - never fetch remote resources
 6. Optional wide-screen Preview/Source split.
 7. Explicit MCP `open_document` with `rendered | source | split` intent.

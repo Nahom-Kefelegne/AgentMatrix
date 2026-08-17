@@ -1,4 +1,14 @@
-export const AGENTMATRIX_MCP_INSTRUCTIONS = `
+# Proposed Context Canvas MCP Instruction
+
+**Status:** Approved and applied to MCP initialization instructions
+**Last reviewed:** 2026-08-13
+
+This document records the approved AgentMatrix MCP initialization instruction.
+The runtime source is `mcp-server/instructions.mjs`.
+
+## Proposed Instruction
+
+```text
 AgentMatrix provides status tools and Context Canvas tools for this managed coding session.
 
 STATUS LIFECYCLE
@@ -102,4 +112,44 @@ EXAMPLES
 
 COMPATIBILITY
 open_file, reveal_range, open_diff, and open_review remain available temporarily. Prefer the typed presentation tools for new work. Repository and symbol search are disabled; investigate normally, then present verified evidence.
-`.trim();
+```
+
+## Review Notes
+
+### Primary change
+
+The instruction begins with the user's inspection experience rather than tool
+availability.
+
+### Agent decision model
+
+```mermaid
+flowchart TD
+    A["Anticipate the user's likely next inspection"]
+    B{"Verified artifact ready?"}
+    C{"Materially improves the next step?"}
+    D["Choose the single best Canvas tool"]
+    E["Use no Canvas tool"]
+    F["Present once"]
+    G["Give only the concise text still needed"]
+
+    A --> B
+    B -- No --> E
+    B -- Yes --> C
+    C -- No --> E
+    C -- Yes --> D
+    D --> F
+    F --> G
+```
+
+### Deliberate properties
+
+- Invocation remains agent-decided.
+- Explicit user intent is a strong trigger.
+- Proactive calls require verified evidence and material benefit.
+- “No Canvas tool” remains valid.
+- One primary artifact is preferred.
+- Canvas and text have distinct roles.
+- Anti-spam and security constraints remain explicit.
+
+Applied in AgentMatrix MCP server version `1.4.0`.

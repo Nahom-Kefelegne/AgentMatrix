@@ -21,7 +21,7 @@ const sessionId = process.env.AGENTMATRIX_SESSION_ID || process.env.CLAUDE_SESSI
 const capability = process.env.AGENTMATRIX_NAVIGATION_CAPABILITY || '';
 
 const server = new Server(
-  { name: 'agentmatrix', version: '1.3.0' },
+  { name: 'agentmatrix', version: '1.4.0' },
   {
     capabilities: { tools: {} },
     instructions: AGENTMATRIX_MCP_INSTRUCTIONS,

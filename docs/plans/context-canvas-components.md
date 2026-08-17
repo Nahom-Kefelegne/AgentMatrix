@@ -651,14 +651,264 @@ Authoritative run references and rerun controls remain a later extension.
 
 ## 8. Component 4: Plan
 
-Plan proves same-kind replacement:
+Plan is the session's live execution map.
 
+It answers:
+
+> “What is this session trying to accomplish, where is it now, and what is
+> preventing progress?”
+
+It is intentionally different from the Task Board:
+
+| Plan Canvas | Task Board |
+|---|---|
+| Session-authored execution outline | Human-owned durable work inventory |
+| One current plan per session | Many tasks across sessions |
+| Replaced as the agent's approach changes | Explicit create/assign/update lifecycle |
+| Read-only evidence in V1 | User-editable workflow |
+| Ends with the session/runtime retention window | Persists as app state |
+
+### 8.1 Current and target typed contract
+
+The current production request is:
+
+```ts
+interface PlanCanvasRequest {
+  kind: 'plan';
+  title: string;
+  summary: string;
+  payload: {
+    items: Array<{
+      id: string;
+      label: string;
+      status: 'pending' | 'in_progress' | 'done' | 'blocked';
+    }>;
+  };
+}
+```
+
+The current server guarantees:
+
+- 1–100 items
+- unique item IDs
+- bounded labels
+- valid status values
 - one retained plan per session
-- pending/in-progress/done/blocked items
-- active phase emphasis
-- silent update while visible
+- full-list replacement rather than patches
 
-V1 replaces the full item list. No patch operation or nested task tree.
+Plan renderer implementation will extend the item schema with an optional, bounded
+`summary` (maximum 1,000 characters). The model uses it for concise work
+completed/current intent/blocker context. It remains plain text; no Markdown or
+arbitrary HTML is accepted.
+
+Stable IDs are meaningful even though each update replaces the full request.
+They let the renderer preserve the visible item/scroll anchor and distinguish a
+status change from a newly inserted phase.
+
+### 8.2 Visual direction
+
+Plan extends the shared evidence spine into an **execution rail**. The ordered
+items form one continuous route rather than a stack of dashboard cards.
+
+```text
+  SESSION PLAN                         UPDATED 2:14 PM
+  3 of 6 complete                     50%
+  ━━━━━━━━━━━━━━━╺━━━━━━━━━━━━━━
+
+  ▸ ✓  Audit the current session flow               DONE
+      └ Summary of the work completed for this step.
+  │
+  ▸ ✓  Define the response contract                 DONE
+  │
+  ▾ ●  Implement the retained plan renderer         NOW
+      └ Building the rail, replacement behavior,
+        progress state, and disclosure interactions.
+  │
+  ▸ !  Resolve Windows restart readiness            BLOCKED
+  │
+  ▸ ○  Validate reconnect replacement               PENDING
+  │
+  ○  Update architecture documentation              PENDING
+```
+
+The signature is the active phase interrupting the rail with a violet
+**NOW** marker. Completed nodes use healthy green, blocked nodes use warning
+amber, and pending nodes remain structural/faint. Critical red is reserved for
+actual failed delivery or corrupt data, not normal blocked work.
+
+The component reuses the existing Canvas palette and typography:
+
+- plan labels: UI sans
+- status, progress, and timestamp: UI monospace
+- active: `--mc-review`
+- complete: `--mc-healthy`
+- blocked: `--mc-warning`
+- pending: `--mc-faint`
+
+No ambient or continuous animation is added. Progress changes use structure,
+color, and weight so the component remains RDP-friendly.
+
+### 8.3 Information hierarchy
+
+The shared Canvas header continues to own title, summary, source, and accepted
+time. The Plan body adds:
+
+1. **Progress band**
+   - completed / total
+   - derived percentage
+   - compact counts for active and blocked items when non-zero
+2. **Execution rail**
+   - request order is preserved
+   - exact label text is preserved
+   - visible status name accompanies every icon
+   - each item with a summary is a native disclosure button
+   - one summary is expanded at a time to preserve scanability
+3. **Active phase emphasis**
+   - every `in_progress` item is marked current
+   - multiple active items are allowed because the protocol does not forbid
+     parallel phases
+4. **Blocked emphasis**
+   - blocked status is explicit
+   - V1 does not invent a reason; the agent must include useful context in the
+     item label
+
+### 8.4 Update behavior
+
+Plan is the component that proves **silent same-kind replacement**.
+
+When a newer Plan request arrives:
+
+- if Plan is active and not human-protected, replace it in place
+- do not append one history entry per progress update
+- preserve scroll position by anchoring the first visible stable item ID
+- if the active item still exists, keep it visible
+- if the expanded item still exists, preserve its disclosure state
+- if the active item was removed, fall back to the nearest surviving item
+- if the expanded item was removed, open the new active item when available
+- if Canvas is pinned to another artifact or contains human-opened content,
+  keep only the newest Plan in the queue
+- if Plan is already queued, replace that queued Plan rather than adding
+  another count
+- reconnect hydration keeps the newest accepted Plan only
+
+The first Plan open participates in normal Canvas history. Subsequent updates
+mutate that Plan history slot so Back/Forward returns to the latest execution
+state, not a timeline of dozens of progress snapshots.
+
+### 8.5 Interaction scope
+
+Plan V1 is deliberately read-only.
+
+It supports:
+
+- Canvas pin, close, resize, Back/Forward, queue, and Back to Conversation
+- native scrolling for plans up to 100 items
+- optional browser text selection/copy
+- status/progress inspection after session switching or reconnect
+- clickable disclosure rows with one expanded summary at a time
+- Enter/Space activation through native button semantics
+
+It does not support:
+
+- user checkboxes
+- drag/reorder
+- editing item text or status
+- nested phases/subtasks
+- converting items to Task Board tasks
+- sending “continue from here” prompts
+- patch updates or streaming
+
+Those actions would blur session evidence with human task management and need a
+separate product decision.
+
+### 8.6 Empty, complete, and blocked states
+
+The server disallows an empty plan. If corrupted data reaches the renderer:
+
+```text
+Plan unavailable
+The session did not provide any plan items.
+```
+
+When every item is done:
+
+- progress is 100%
+- the rail remains visible as a completion receipt
+- the component does not mark the session done; `work_complete` owns session
+  lifecycle
+
+When blocked items exist:
+
+- the progress band reports the blocked count
+- Plan itself does not raise session attention in V1
+- the session should use `request_attention` or `request_decision` when human
+  input is genuinely required
+
+### 8.7 Accessibility
+
+- ordered list semantics preserve execution order
+- summary rows use buttons with `aria-expanded` and `aria-controls`
+- each status has visible text and screen-reader text; color/icon is never the
+  only signal
+- active items use `aria-current="step"`
+- progress uses `role="progressbar"` with current/max values
+- long labels wrap instead of truncating
+- focus remains in the terminal when a Plan arrives
+- no animation is required to understand a status change
+
+### 8.8 Validation matrix
+
+#### Routing and delivery
+
+- adding `plan` to `CANVAS_RENDERED_KINDS` changes MCP delivery to
+  `canvas_renderer`
+- Plan renders from the typed payload without adapting to legacy navigation
+- unsupported Validation/Runtime/Browser requests remain queued
+
+#### Replacement
+
+- first selected-session Plan opens and enters history
+- newer Plan replaces the visible Plan without history growth
+- stable active item stays visible
+- removed active item falls back predictably
+- background queued Plan is replaced by its newer request
+- pinned Code/Locations/Decision remains protected
+- duplicate requestRef is ignored
+- reconnect restores only the latest retained Plan
+
+#### Status combinations
+
+- all pending
+- one and multiple in-progress
+- mixed done/in-progress/pending
+- one and multiple blocked
+- all done
+- 1 item and 100 items
+- missing summaries, long summaries, long labels, and rapid full-list replacements
+- disclosure open/close and one-open-row behavior
+- expanded stable item preserved after replacement
+
+#### Visual/manual
+
+- wide and narrow Canvas
+- dark and light themes
+- keyboard and screen-reader pass
+- terminal focus preserved on first open and update
+- no scroll jump when an anchored item survives
+
+### 8.9 Acceptance criteria
+
+Plan is complete when:
+
+1. A real managed session calls `update_plan`.
+2. The selected session displays the execution rail without moving terminal
+   focus.
+3. A second `update_plan` changes the visible statuses in place.
+4. Repeated updates do not grow history or queue length.
+5. Background, pinned, close-watermark, and reconnect behavior remains correct.
+6. A 100-item plan remains readable and responsive without virtualization.
+7. TypeScript, production build, state probes, and live Electron validation
+   pass.
 
 ## 9. Component 5: Runtime Evidence
 

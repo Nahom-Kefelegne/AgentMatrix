@@ -101,6 +101,9 @@ flowchart LR
 |----------|-------|------------|
 | [Control Center](dashboard-v2.md) | Console-first dashboard and Context Canvas | Native command rail, unified session list, embedded CLI, fullscreen, Monaco code/diff preview, navigation tools, focus and security contracts |
 | [Context Canvas Markdown](context-canvas-markdown.md) | Rendered session design documents | Sanitized GFM rendering, Preview/Source, automatic docs/design previews, file-change event and link security contracts |
+| [Context Canvas Agent Instructions](context-canvas-agent-instructions.md) | Current model-facing Canvas policy audit | Exact injected strings, provider delivery layers, duplication analysis, anticipation framing, and candidate improvements |
+| [Context Canvas Prompt Strengthening Plan](context-canvas-prompt-strengthening-plan.md) | Proposed agent-decided Canvas policy roadmap | Canonical anticipation principle, per-tool contracts, decision flow, examples, regression evaluation, and rollout |
+| [Context Canvas MCP Instruction](context-canvas-proposed-mcp-instruction.md) | Applied anticipation-first MCP initialization policy | Full instruction, tool contracts, examples, presentation rules, and Mermaid decision flow |
 | [AgentMatrix Tooling Showcase](markdown-preview-live-check.md) | Live session-tool walkthrough | Status routing, Canvas navigation, Markdown preview, queue protection, diff/review, terminal links, and cross-platform behavior |
 | [Release Briefings](release-briefings.md) | Release-triggered first-run experience | Explicit campaign IDs, one-time local acknowledgement, returning-user start pages, and release checklist |
 | [Session Dashboard Migration](session-dashboard-migration.md) | Deprecating legacy session modals | Product-fit decisions, target surfaces, migration sequence, and lifecycle-control contract |
