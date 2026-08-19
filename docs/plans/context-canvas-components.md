@@ -1,6 +1,6 @@
 # Context Canvas Component Roadmap
 
-Status: **Locations and Decision implemented locally; remaining components planned**
+Status: **Locations and Decision shipped; remaining components planned**
 
 Related foundations:
 
@@ -128,7 +128,7 @@ Each new typed Changes request already remounts the diff data boundary by
 
 ## 5. Component 1: Locations
 
-Implementation status: **Complete locally**
+Implementation status: **Shipped in `52cf0bb`**
 
 ### 5.1 Purpose
 
@@ -398,7 +398,7 @@ Locations is complete when:
 
 Decision is the first interactive artifact.
 
-Implementation status: **Complete locally**
+Implementation status: **Shipped in `52cf0bb`**
 
 Locations proved typed rendering, queueing, history, reconnect restoration, and
 typed-to-Code handoff. Decision can now extend that foundation without changing
