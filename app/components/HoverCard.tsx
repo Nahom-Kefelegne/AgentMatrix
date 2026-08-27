@@ -1,5 +1,6 @@
 'use client';
 
+import { forwardRef } from 'react';
 import type { CharacterData, Action } from '@/lib/types';
 import { STATUS_COLORS } from '@/lib/constants';
 
@@ -64,19 +65,23 @@ export function ActionList({ actions, max = 3 }: ActionListProps) {
 
 interface HoverCardProps {
   character: CharacterData | null;
-  x: number;
-  y: number;
+  x?: number;
+  y?: number;
 }
 
-export default function HoverCard({ character, x, y }: HoverCardProps) {
+const HoverCard = forwardRef<HTMLDivElement, HoverCardProps>(function HoverCard(
+  { character, x, y },
+  ref,
+) {
   if (!character) return null;
 
   return (
     <div
+      ref={ref}
       style={{
         position: 'fixed',
-        left: x + 16,
-        top: y + 16,
+        left: x === undefined ? 0 : x + 16,
+        top: y === undefined ? 0 : y + 16,
         background: '#151520',
         border: '1px solid #2a2a3e',
         borderRadius: 8,
@@ -85,6 +90,7 @@ export default function HoverCard({ character, x, y }: HoverCardProps) {
         pointerEvents: 'none',
         minWidth: 220,
         maxWidth: 320,
+        willChange: x === undefined ? 'transform' : undefined,
       }}
     >
       {/* Name */}
@@ -147,4 +153,6 @@ export default function HoverCard({ character, x, y }: HoverCardProps) {
       )}
     </div>
   );
-}
+});
+
+export default HoverCard;

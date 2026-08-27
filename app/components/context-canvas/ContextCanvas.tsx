@@ -24,6 +24,7 @@ import {
 import type {
   DecisionCanvasRequest,
   LocationsCanvasRequest,
+  PlanCanvasRequest,
 } from '@/lib/canvas/types';
 import { isRepositorySearchAction } from '@/lib/navigation/types';
 import type { ContextCanvasController } from './useContextCanvas';
@@ -51,6 +52,11 @@ const LocationsArtifact = dynamic(() => import('./LocationsArtifact'), {
 const DecisionArtifact = dynamic(() => import('./DecisionArtifact'), {
   ssr: false,
   loading: () => <div className="cc-loading" role="status">Loading decision…</div>,
+});
+
+const PlanArtifact = dynamic(() => import('./PlanArtifact'), {
+  ssr: false,
+  loading: () => <div className="cc-loading" role="status">Loading plan…</div>,
 });
 
 interface ContextCanvasProps {
@@ -108,6 +114,10 @@ export default function ContextCanvas({ sessionId, sessionName, cwd, controller 
       : null;
   const decisionRequest: DecisionCanvasRequest | null =
     artifact?.type === 'typed' && artifact.request.kind === 'decision'
+      ? artifact.request
+      : null;
+  const planRequest: PlanCanvasRequest | null =
+    artifact?.type === 'typed' && artifact.request.kind === 'plan'
       ? artifact.request
       : null;
   const disabledSearch =
@@ -274,6 +284,9 @@ export default function ContextCanvas({ sessionId, sessionName, cwd, controller 
             request={decisionRequest}
             onResolved={controller.resolveDecision}
           />
+        ) : null}
+        {planRequest && renderer === 'plan' ? (
+          <PlanArtifact key={planRequest.sessionId} request={planRequest} />
         ) : null}
         {request && (renderer === 'diff' || renderer === 'review') ? (
           <DiffCanvas

@@ -36,7 +36,7 @@ export default function DashboardV2Container({
   navigation,
 }: DashboardV2ContainerProps) {
   perfRender('DashboardV2Container');
-  const { connected, socketRef } = useSocketContext();
+  const { connected, onEvent, socketRef } = useSocketContext();
   const [now, setNow] = useState(() => Date.now());
   const sessionList = useMemo(() => Array.from(sessions.values()), [sessions]);
   const model = useMemo(
@@ -189,6 +189,10 @@ export default function DashboardV2Container({
     setSelectedSessionId(sessionId);
     onSelectionChange?.(sessionId);
   }, [onSelectionChange]);
+  const handleOpenOfficeSession = useCallback((sessionId: string) => {
+    handleSelectSession(sessionId);
+    navigation.onViewChange('dashboard');
+  }, [handleSelectSession, navigation]);
 
   const selectedSession = selectedSessionId ? sessions.get(selectedSessionId) ?? null : null;
   const selectedContextUsage = selectedSessionId
@@ -281,6 +285,7 @@ export default function DashboardV2Container({
   return (
     <>
       <DashboardV2
+        sessions={sessions}
         model={model}
         selectedSession={selectedSession}
         selectedAttention={selectedAttention}
@@ -292,7 +297,9 @@ export default function DashboardV2Container({
         changes={changes}
         sessionControlState={selectedSessionId ? sessionControls[selectedSessionId] ?? null : null}
         sessionControlsAvailable={connected}
+        onOfficeEvent={onEvent}
         onSelectSession={handleSelectSession}
+        onOpenOfficeSession={handleOpenOfficeSession}
         onReviewChanges={handleReviewChanges}
         onRequestSummary={handleRequestSummary}
         onFullscreenSession={setFullscreenSessionId}

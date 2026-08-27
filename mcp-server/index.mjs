@@ -21,7 +21,7 @@ const sessionId = process.env.AGENTMATRIX_SESSION_ID || process.env.CLAUDE_SESSI
 const capability = process.env.AGENTMATRIX_NAVIGATION_CAPABILITY || '';
 
 const server = new Server(
-  { name: 'agentmatrix', version: '1.4.0' },
+  { name: 'agentmatrix', version: '1.5.0' },
   {
     capabilities: { tools: {} },
     instructions: AGENTMATRIX_MCP_INSTRUCTIONS,
@@ -223,6 +223,11 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
                 status: {
                   type: 'string',
                   enum: ['pending', 'in_progress', 'done', 'blocked'],
+                },
+                summary: {
+                  type: 'string',
+                  maxLength: 1000,
+                  description: 'Optional concise context for this step, such as completed work, current intent, or a blocker.',
                 },
               },
               required: ['id', 'label', 'status'],

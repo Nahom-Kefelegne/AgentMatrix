@@ -15,6 +15,7 @@ import {
   SlidersHorizontal,
   Terminal,
 } from 'lucide-react';
+import dynamic from 'next/dynamic';
 import { memo, useCallback, useEffect, useRef, useState } from 'react';
 import type { AttentionItem, LaneItem } from '@/lib/dashboard/attentionQueue';
 import type { SessionData } from '@/lib/types';
@@ -23,6 +24,15 @@ import ContextCanvas from '../context-canvas/ContextCanvas';
 import SessionConsole from '../SessionConsole';
 import DashboardV2Nav from './DashboardV2Nav';
 import type { DashboardV2ViewProps, SessionControlState } from './types';
+
+const OfficeWorkspace = dynamic(() => import('../office/OfficeWorkspace'), {
+  ssr: false,
+  loading: () => (
+    <main className="mc-office-workspace mc-office-workspace--loading" role="status">
+      Loading Office...
+    </main>
+  ),
+});
 
 const STATUS_LABEL: Record<SessionData['status'], string> = {
   attention: 'Needs You',
@@ -585,9 +595,12 @@ function ConsoleWorkspace(props: DashboardV2ViewProps) {
 }
 
 export default function DashboardV2(props: DashboardV2ViewProps) {
+  const officeActive = props.navigation.viewMode === 'office';
   return (
     <div className="mc-shell" data-scroll-area>
-      <a className="mc-skip-link" href="#mc-console-workspace">Skip to CLI</a>
+      <a className="mc-skip-link" href={officeActive ? '#mc-office-workspace' : '#mc-console-workspace'}>
+        {officeActive ? 'Skip to Office' : 'Skip to CLI'}
+      </a>
       <div className="mc-frame">
         <DashboardV2Nav {...props.navigation} />
         <div className="mc-workspace">
@@ -597,7 +610,17 @@ export default function DashboardV2(props: DashboardV2ViewProps) {
             selectedSessionId={props.selectedSessionId}
             onSelect={props.onSelectSession}
           />
-          <ConsoleWorkspace {...props} />
+          {officeActive ? (
+            <OfficeWorkspace
+              sessions={props.sessions}
+              onEvent={props.onOfficeEvent}
+              selectedSessionId={props.selectedSessionId}
+              onSelectSession={props.onSelectSession}
+              onOpenSession={props.onOpenOfficeSession}
+            />
+          ) : (
+            <ConsoleWorkspace {...props} />
+          )}
         </div>
       </div>
     </div>

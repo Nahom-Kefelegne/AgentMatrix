@@ -1,16 +1,12 @@
 'use client';
 
-import { useState, useCallback, useRef, useEffect, useMemo } from 'react';
+import { useState, useCallback, useEffect, useMemo } from 'react';
 import dynamic from 'next/dynamic';
-import type { CharacterData } from '@/lib/types';
 import { useSessionContext } from '@/lib/hooks/useSessionContext';
 import { useDashboardV2Flag } from '@/lib/hooks/useDashboardV2Flag';
 import { SocketProvider, useSocketContext } from './components/SocketProvider';
 import { ThemeProvider } from './components/ThemeProvider';
 import HeaderBar from './components/HeaderBar';
-import OfficeCanvas from './components/OfficeCanvas';
-import type { OfficeCanvasHandle } from './components/OfficeCanvas';
-import HoverCard from './components/HoverCard';
 import SetupModal from './components/SetupModal';
 import TaskBoard from './components/TaskBoard';
 import ResumeModal from './components/ResumeModal';
@@ -33,6 +29,7 @@ import {
 import { initPerfMonitor } from '@/lib/perf';
 
 const EditorView = dynamic(() => import('./components/editor/EditorView'), { ssr: false });
+const OfficeWorkspace = dynamic(() => import('./components/office/OfficeWorkspace'), { ssr: false });
 type DashboardV2Props = DashboardV2ContainerProps;
 
 const DashboardV2Container = dynamic<DashboardV2Props>(
@@ -51,8 +48,6 @@ function OfficeView() {
     setStoredEnabled: setStoredDashboardV2Enabled,
   } = useDashboardV2Flag();
 
-  const [hoveredChar, setHoveredChar] = useState<CharacterData | null>(null);
-  const [hoverPos, setHoverPos] = useState({ x: 0, y: 0 });
   const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null);
   const [dashboardV2SessionId, setDashboardV2SessionId] = useState<string | null>(null);
   const [showSetup, setShowSetup] = useState(false);
@@ -64,8 +59,10 @@ function OfficeView() {
   const [introLaunch, setIntroLaunch] = useState<IntroBriefingLaunch | null | undefined>(undefined);
   const [viewMode, setViewMode] = useState<'office' | 'dashboard' | 'editor'>('dashboard');
   const [editorUnlocked, setEditorUnlocked] = useState(false);
-  const canvasRef = useRef<OfficeCanvasHandle>(null);
-  const dashboardV2Active = viewMode === 'dashboard' && dashboardV2Loaded && dashboardV2Enabled;
+  const dashboardV2Active =
+    (viewMode === 'dashboard' || viewMode === 'office')
+    && dashboardV2Loaded
+    && dashboardV2Enabled;
 
   useEffect(() => {
     try {
@@ -108,24 +105,6 @@ function OfficeView() {
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
   }, [viewMode]);
-
-  const handleHover = useCallback((char: CharacterData | null, screenX: number, screenY: number) => {
-    setHoveredChar(char);
-    setHoverPos({ x: screenX, y: screenY });
-  }, []);
-
-  const handleClick = useCallback((char: CharacterData | null) => {
-    if (!char) { setSelectedSessionId(null); return; }
-    if (char.isAgent) {
-      for (const [sid, s] of sessions) {
-        if (s.agents?.some(a => a.id === char.id || a.name === char.name)) {
-          setSelectedSessionId(sid);
-          return;
-        }
-      }
-    }
-    setSelectedSessionId(char.id);
-  }, [sessions]);
 
   const handleCloseDialog = useCallback(() => setSelectedSessionId(null), []);
 
@@ -194,6 +173,10 @@ function OfficeView() {
     }
     setSelectedSessionId(sessionId);
   }, [dashboardV2Enabled, dashboardV2Loaded]);
+  const handleOpenLegacyOfficeSession = useCallback((sessionId: string) => {
+    setSelectedSessionId(sessionId);
+    setViewMode('dashboard');
+  }, []);
   const handleIntroComplete = useCallback(() => {
     try {
       localStorage.setItem(WELCOME_COMPLETION_STORAGE_KEY, 'done');
@@ -210,6 +193,7 @@ function OfficeView() {
     connected,
     sessionCount: sessions.size,
     editorUnlocked,
+    viewMode,
     onViewChange: handleViewChange,
     onNewSession: handleOpenSpawn,
     onResume: handleOpenResume,
@@ -226,6 +210,7 @@ function OfficeView() {
     handleOpenTasks,
     handleViewChange,
     sessions.size,
+    viewMode,
   ]);
 
   if (introLaunch === undefined) return null;
@@ -258,26 +243,19 @@ function OfficeView() {
         />
       )}
 
-      {/* Office view is enabled but mounted ONLY while it's the active view: its
-          GameEngine runs a 60fps requestAnimationFrame render loop, so keeping
-          it mounted (even hidden) would burn CPU/GPU — and stream frames over a
-          remote session — behind the dashboard. Unmounting on view change runs
-          the engine's cleanup (cancelAnimationFrame), so the loop only runs
-          while you're actually looking at the office. */}
-      {viewMode === 'office' && (
-        <div style={{ display: 'contents' }}>
-          <OfficeCanvas
-            ref={canvasRef}
-            sessions={sessions}
-            onEvent={onEvent}
-            onHover={handleHover}
-            onClick={handleClick}
-            scrollToId={selectedSessionId}
-            socketRef={socketRef}
-            connected={connected}
-          />
-          <HoverCard character={hoveredChar} x={hoverPos.x} y={hoverPos.y} />
-        </div>
+      {/* Dashboard V1 compatibility path. Dashboard V2 renders the same lazy
+          OfficeWorkspace inside its shared command rail and session list.
+          Office always unmounts when inactive so no canvas loop can continue
+          behind a terminal or editor. */}
+      {viewMode === 'office' && (!dashboardV2Loaded || !dashboardV2Enabled) && (
+        <OfficeWorkspace
+          sessions={sessions}
+          onEvent={onEvent}
+          selectedSessionId={selectedSessionId}
+          onSelectSession={handleOpenLegacyOfficeSession}
+          onOpenSession={handleOpenLegacyOfficeSession}
+          legacy
+        />
       )}
 
       {viewMode === 'dashboard' && !dashboardV2Loaded && (
@@ -287,7 +265,7 @@ function OfficeView() {
         </div>
       )}
 
-      {viewMode === 'dashboard' && dashboardV2Loaded && dashboardV2Enabled && (
+      {(viewMode === 'dashboard' || viewMode === 'office') && dashboardV2Loaded && dashboardV2Enabled && (
         <DashboardV2Container
           sessions={sessions}
           contextMap={contextMap}

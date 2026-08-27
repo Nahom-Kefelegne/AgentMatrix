@@ -69,6 +69,7 @@ export class Character {
 
   private spriteSheet: SpriteSheet;
   private charIndex: number;
+  private labelWidth: number | null = null;
 
   constructor(
     id: string,
@@ -127,6 +128,18 @@ export class Character {
 
   setPath(path: Point[]): void {
     this.path = [...path];
+  }
+
+  teleportTo(tileX: number, tileY: number): void {
+    this.x = tileX * TILE_SIZE;
+    this.y = tileY * TILE_SIZE;
+    this.path = [];
+  }
+
+  setName(name: string): void {
+    if (this.name === name) return;
+    this.name = name;
+    this.labelWidth = null;
   }
 
   update(dt: number): void {
@@ -407,13 +420,13 @@ export class Character {
     const labelX = (this.x + TILE_SIZE / 2) * scale;
     const labelY = (this.y + TILE_SIZE + 1) * scale;
 
-    const metrics = ctx.measureText(label);
+    this.labelWidth ??= ctx.measureText(label).width;
     const padX = 4;
     const padY = 2;
 
     // Background pill
     ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
-    const bgWidth = metrics.width + padX * 2;
+    const bgWidth = this.labelWidth + padX * 2;
     const bgHeight = fontSize + padY * 2;
     ctx.beginPath();
     const r = 3;
@@ -484,13 +497,15 @@ export class Character {
   }
 
   /** Render floating emoji on the HD overlay */
-  renderEmojiHD(ctx: CanvasRenderingContext2D, scale: number): void {
+  renderEmojiHD(ctx: CanvasRenderingContext2D, scale: number, reducedMotion = false): void {
     if (!this.statusEmoji) return;
 
     const x = (this.x + TILE_SIZE / 2) * scale;
     const baseY = (this.y - 14) * scale;
     // Gentle bob up and down
-    const bob = Math.sin((Character.EMOJI_DURATION - this.emojiTimer) * 3) * 4;
+    const bob = reducedMotion
+      ? 0
+      : Math.sin((Character.EMOJI_DURATION - this.emojiTimer) * 3) * 4;
     const y = baseY + bob;
 
     // For persistent emojis, don't fade. For timed ones, fade in last 1s.

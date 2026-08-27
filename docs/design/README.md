@@ -99,7 +99,9 @@ flowchart LR
 
 | Document | Scope | Key Topics |
 |----------|-------|------------|
+| [Repository Flow Map](repository-flow-map.md) | Visual repository and runtime architecture | Source tree, Electron/server/renderer topology, session events, Control Center, Context Canvas, Plan, Decision, and Markdown flows |
 | [Control Center](dashboard-v2.md) | Console-first dashboard and Context Canvas | Native command rail, unified session list, embedded CLI, fullscreen, Monaco code/diff preview, navigation tools, focus and security contracts |
+| [Office Reintegration Plan](../plans/office-control-center-reintegration.md) | Performance-first return of the pixel Office | Shared Control Center shell, lazy workspace, bounded rendering, RDP-safe suspension, responsive fit, snapshot correctness, and rollout budgets |
 | [Context Canvas Markdown](context-canvas-markdown.md) | Rendered session design documents | Sanitized GFM rendering, Preview/Source, automatic docs/design previews, file-change event and link security contracts |
 | [Context Canvas Agent Instructions](context-canvas-agent-instructions.md) | Current model-facing Canvas policy audit | Exact injected strings, provider delivery layers, duplication analysis, anticipation framing, and candidate improvements |
 | [Context Canvas Prompt Strengthening Plan](context-canvas-prompt-strengthening-plan.md) | Proposed agent-decided Canvas policy roadmap | Canonical anticipation principle, per-tool contracts, decision flow, examples, regression evaluation, and rollout |

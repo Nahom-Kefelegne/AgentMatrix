@@ -13,7 +13,12 @@ export class CharacterManager {
   // Track reserved chairs so agents don't overlap (teamId → set of "x,y" keys)
   private reservedChairs = new Map<string, Set<string>>();
 
-  spawn(session: SessionData, spriteSheet: SpriteSheet, tileMap: TileMap): Character {
+  spawn(
+    session: SessionData,
+    spriteSheet: SpriteSheet,
+    tileMap: TileMap,
+    animateEntrance = true,
+  ): Character {
     const charIndex = this.nextCharIndex;
     this.nextCharIndex = (this.nextCharIndex + 1) % Math.max(spriteSheet.characterCount, 6);
 
@@ -22,8 +27,8 @@ export class CharacterManager {
       session.name,
       session.color,
       spriteSheet,
-      ENTRANCE_POINT.x,
-      ENTRANCE_POINT.y,
+      animateEntrance ? ENTRANCE_POINT.x : session.deskPosition.x,
+      animateEntrance ? ENTRANCE_POINT.y : session.deskPosition.y,
       charIndex,
     );
 
@@ -33,7 +38,9 @@ export class CharacterManager {
     char.teamId = session.teamId;
 
     // Path to desk
-    char.moveTo(session.deskPosition.x, session.deskPosition.y, tileMap);
+    if (animateEntrance) {
+      char.moveTo(session.deskPosition.x, session.deskPosition.y, tileMap);
+    }
 
     this.characters.set(session.id, char);
     return char;
@@ -46,6 +53,7 @@ export class CharacterManager {
     teamId: string,
     spriteSheet: SpriteSheet,
     tileMap: TileMap,
+    animateEntrance = true,
   ): Character {
     const charIndex = this.nextCharIndex;
     this.nextCharIndex = (this.nextCharIndex + 1) % Math.max(spriteSheet.characterCount, 6);
@@ -60,8 +68,8 @@ export class CharacterManager {
       agent.name,
       agent.color,
       spriteSheet,
-      ENTRANCE_POINT.x,
-      ENTRANCE_POINT.y,
+      animateEntrance ? ENTRANCE_POINT.x : chair.x,
+      animateEntrance ? ENTRANCE_POINT.y : chair.y,
       charIndex,
       true, // isAgent
       undefined, // parentName resolved later
@@ -71,18 +79,25 @@ export class CharacterManager {
     char.teamId = teamId;
 
     // Walk to meeting room chair
-    char.moveTo(chair.x, chair.y, tileMap);
+    if (animateEntrance) {
+      char.moveTo(chair.x, chair.y, tileMap);
+    }
 
     this.characters.set(agent.id, char);
     return char;
   }
 
   /** Move the parent session character to the meeting room too */
-  moveParentToMeeting(parentId: string, teamId: string, tileMap: TileMap): void {
+  moveParentToMeeting(
+    parentId: string,
+    teamId: string,
+    tileMap: TileMap,
+    animate = true,
+  ): void {
     const char = this.characters.get(parentId);
     if (!char) return;
     // Don't move if already in a meeting for this team
-    if (char.teamId === teamId && char.status === 'meeting') return;
+    if (animate && char.teamId === teamId && char.status === 'meeting') return;
 
     const roomIndex = this.getOrAssignRoom(teamId);
     const room = MEETING_ROOMS[roomIndex];
@@ -90,7 +105,8 @@ export class CharacterManager {
 
     char.status = 'meeting';
     char.teamId = teamId;
-    char.moveTo(chair.x, chair.y, tileMap);
+    if (animate) char.moveTo(chair.x, chair.y, tileMap);
+    else char.teleportTo(chair.x, chair.y);
   }
 
   private getOrAssignRoom(teamId: string): number {
@@ -173,9 +189,9 @@ export class CharacterManager {
     }
   }
 
-  renderEmojisHD(ctx: CanvasRenderingContext2D, scale: number): void {
+  renderEmojisHD(ctx: CanvasRenderingContext2D, scale: number, reducedMotion = false): void {
     for (const char of this.characters.values()) {
-      char.renderEmojiHD(ctx, scale);
+      char.renderEmojiHD(ctx, scale, reducedMotion);
     }
   }
 

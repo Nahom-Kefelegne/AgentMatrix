@@ -1,6 +1,7 @@
 import { TileType, OFFICE_GRID, WALKABLE_TILES, TILE_SIZE, MAP_COLS, MAP_ROWS } from '@/lib/constants';
 
 const T = TILE_SIZE;
+let sharedCacheCanvas: HTMLCanvasElement | null = null;
 
 // Color palette
 const COLORS = {
@@ -46,7 +47,6 @@ const COLORS = {
 
 export class TileMap {
   private grid: TileType[][] = OFFICE_GRID;
-  private cacheCanvas: HTMLCanvasElement | null = null;
 
   getTile(col: number, row: number): TileType {
     if (row < 0 || row >= MAP_ROWS || col < 0 || col >= MAP_COLS) {
@@ -61,15 +61,15 @@ export class TileMap {
 
   render(ctx: CanvasRenderingContext2D): void {
     // Cache the tilemap to an offscreen canvas (it never changes)
-    if (!this.cacheCanvas) {
-      this.cacheCanvas = document.createElement('canvas');
-      this.cacheCanvas.width = MAP_COLS * T;
-      this.cacheCanvas.height = MAP_ROWS * T;
-      const cctx = this.cacheCanvas.getContext('2d')!;
+    if (!sharedCacheCanvas) {
+      sharedCacheCanvas = document.createElement('canvas');
+      sharedCacheCanvas.width = MAP_COLS * T;
+      sharedCacheCanvas.height = MAP_ROWS * T;
+      const cctx = sharedCacheCanvas.getContext('2d')!;
       cctx.imageSmoothingEnabled = false;
       this.renderAll(cctx);
     }
-    ctx.drawImage(this.cacheCanvas, 0, 0);
+    ctx.drawImage(sharedCacheCanvas, 0, 0);
   }
 
   private renderAll(ctx: CanvasRenderingContext2D): void {

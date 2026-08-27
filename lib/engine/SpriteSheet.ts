@@ -11,6 +11,21 @@ const DIRS_PER_CHAR = 3;  // down, left, up
 const CHAR_BLOCK_W = FRAME_W * FRAMES_PER_DIR;  // 64
 const CHAR_BLOCK_H = FRAME_H * DIRS_PER_CHAR;   // 51
 const CHARS_PER_ROW = 8;
+const imagePromises = new Map<string, Promise<HTMLImageElement>>();
+
+function loadImage(url: string): Promise<HTMLImageElement> {
+  const existing = imagePromises.get(url);
+  if (existing) return existing;
+  const promise = new Promise<HTMLImageElement>((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => resolve(img);
+    img.onerror = () => reject(new Error(`Failed to load sprite sheet: ${url}`));
+    img.src = url;
+  });
+  imagePromises.set(url, promise);
+  promise.catch(() => imagePromises.delete(url));
+  return promise;
+}
 
 export interface CharacterFrameInfo {
   /** Pixel X offset of this character's block in the sheet */
@@ -27,17 +42,9 @@ export class SpriteSheet {
     return this.ready;
   }
 
-  load(url: string): Promise<void> {
-    return new Promise((resolve, reject) => {
-      const img = new Image();
-      img.onload = () => {
-        this.image = img;
-        this.ready = true;
-        resolve();
-      };
-      img.onerror = () => reject(new Error(`Failed to load sprite sheet: ${url}`));
-      img.src = url;
-    });
+  async load(url: string): Promise<void> {
+    this.image = await loadImage(url);
+    this.ready = true;
   }
 
   getCharacterFrame(charIndex: number): CharacterFrameInfo {

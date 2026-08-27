@@ -100,6 +100,19 @@ ipcMain.handle('shell:open-external', async (event, rawUrl: unknown) => {
   return true;
 });
 
+ipcMain.handle('window:is-visible', event => {
+  if (!isTrustedRendererUrl(event.senderFrame?.url ?? event.sender.getURL())) return false;
+  return Boolean(mainWindow?.isVisible() && !mainWindow.isMinimized());
+});
+
+function emitWindowVisibility(): void {
+  if (!mainWindow || mainWindow.isDestroyed() || mainWindow.webContents.isDestroyed()) return;
+  mainWindow.webContents.send(
+    'window:visibility',
+    mainWindow.isVisible() && !mainWindow.isMinimized(),
+  );
+}
+
 function createWindow() {
   mainWindow = new BrowserWindow({
     width: 1400,
@@ -130,6 +143,10 @@ function createWindow() {
   const splashPath = path.join(__dirname, '..', 'public', 'splash.html');
   mainWindow.loadFile(splashPath);
   mainWindow.once('ready-to-show', () => mainWindow?.show());
+  mainWindow.on('show', emitWindowVisibility);
+  mainWindow.on('hide', emitWindowVisibility);
+  mainWindow.on('minimize', emitWindowVisibility);
+  mainWindow.on('restore', emitWindowVisibility);
 
   mainWindow.on('close', (e) => {
     // On macOS, clicking red X / Cmd+W hides the window (keeps app in tray).

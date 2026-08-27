@@ -98,6 +98,8 @@ append prompt on both new and resumed sessions.
 The approved anticipation-first instruction is recorded verbatim in
 [`context-canvas-proposed-mcp-instruction.md`](./context-canvas-proposed-mcp-instruction.md)
 and is applied in AgentMatrix MCP server version `1.4.0`.
+The same instruction remains active in version `1.5.0`, which adds the Plan
+renderer and optional summarized Plan steps.
 
 The previous production string is retained below for comparison:
 

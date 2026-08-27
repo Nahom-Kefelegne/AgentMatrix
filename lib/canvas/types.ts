@@ -12,7 +12,7 @@ export type CanvasRequestKind =
   | 'runtime_evidence'
   | 'browser_preview';
 
-export const CANVAS_RENDERED_KINDS = ['code', 'locations', 'changes', 'decision'] as const;
+export const CANVAS_RENDERED_KINDS = ['code', 'locations', 'changes', 'decision', 'plan'] as const;
 export type CanvasRenderedKind = typeof CANVAS_RENDERED_KINDS[number];
 
 export function isCanvasRenderedKind(
@@ -55,6 +55,7 @@ export interface CanvasPlanItem {
   id: string;
   label: string;
   status: 'pending' | 'in_progress' | 'done' | 'blocked';
+  summary?: string;
 }
 
 export interface CanvasRuntimeEvidence {

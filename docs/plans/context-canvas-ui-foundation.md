@@ -74,12 +74,13 @@ One explicit switch determines what can render now:
 | Typed Locations | Locations ledger |
 | Typed Changes | Existing Diff |
 | Typed Decision | Interactive decision/receipt |
-| Validation, Plan, Runtime Evidence, Browser Preview | Queued until their components exist |
+| Typed Plan | Execution rail with silent same-kind replacement |
+| Validation, Runtime Evidence, Browser Preview | Queued until their components exist |
 
 There is no plugin registry. `artifactRenderer()` is an exhaustive typed switch
-and the deliberate extension point. Locations and Decision each required:
+and the deliberate extension point. Each dedicated renderer requires:
 
-1. Add `locations` to the shared `CANVAS_RENDERED_KINDS` capability list.
+1. Add its kind to the shared `CANVAS_RENDERED_KINDS` capability list.
 2. Add one dynamic component import.
 3. Add one render branch.
 
@@ -91,7 +92,7 @@ New MCP tools emit `canvas:requested` only.
 
 - Typed Code and Changes are adapted to the existing component prop shape in
   the renderer.
-- Typed Locations and Decision render directly from their validated payloads.
+- Typed Locations, Decision, and Plan render directly from their validated payloads.
 - Decision resolution emits `canvas:decision-resolved` and replaces every local
   copy of that request in active content, history, and queue.
 - Legacy MCP tools and terminal links continue to emit `navigation:requested`.
@@ -114,8 +115,9 @@ The existing seamlessness policy applies to both sides of the union:
    artifacts queue instead of replacing them.
 5. Unsupported typed kind: queue.
 6. Duplicate `requestRef`: ignore.
-7. Code, Changes, Plan, and Decision replacement already occurs in the
-   server-side retained request store.
+7. Code, Changes, Plan, and Decision replacement occurs in the server-side
+   retained request store. Visible Plan updates also replace the current client
+   history slot rather than appending progress snapshots.
 8. Closing Canvas preserves history and queued artifacts.
 9. Snapshot hydration never discards an accepted unknown request: older requests
    queue, while newer requests enter normal preview/queue policy.

@@ -127,13 +127,13 @@ The model never chooses:
 | `present_locations` | `locations` | Shipped | Grouped verified locations with inline snippets and Code handoff |
 | `present_changes` | `changes` | Shipped | Reuses session review/diff renderer |
 | `request_decision` | `decision` | Shipped | Interactive response delivery and retained receipt |
+| `update_plan` | `plan` | Implemented | Execution rail with summarized steps and silent progress replacement |
 
 ### Typed tools whose protocol is shipped but renderer is not
 
 | Tool | Typed kind | Current delivery |
 |---|---|---|
 | `present_validation` | `validation` | Retained and emitted as `event_only` |
-| `update_plan` | `plan` | Retained and emitted as `event_only` |
 | `present_runtime_evidence` | `runtime_evidence` | Retained and emitted as `event_only` |
 | `present_browser_preview` | `browser_preview` | Retained and emitted as `event_only` |
 
@@ -229,6 +229,7 @@ flowchart LR
 7. **Dedicated renderers**
    - `LocationsArtifact.tsx`
    - `DecisionArtifact.tsx`
+   - `PlanArtifact.tsx`
    - existing Code, Markdown, and Diff components
 
 ---
@@ -458,7 +459,7 @@ view.
 Current value:
 
 ```ts
-['code', 'locations', 'changes', 'decision']
+['code', 'locations', 'changes', 'decision', 'plan']
 ```
 
 Adding a renderer requires changing this list and the exhaustive renderer
@@ -674,31 +675,18 @@ lowest-risk new renderer.
 
 ### 10.2 Plan
 
-Protocol and detailed UX design exist; renderer is not implemented.
+The renderer is implemented and the MCP server is now version `1.5.0`.
 
-Current production item shape:
+Implemented item shape:
 
 ```ts
 interface CanvasPlanItem {
   id: string;
   label: string;
   status: 'pending' | 'in_progress' | 'done' | 'blocked';
+  summary?: string;
 }
 ```
-
-The prototype/design proposes:
-
-```ts
-summary?: string;
-```
-
-That field is not in production. Adding it requires synchronized changes to:
-
-- `lib/canvas/types.ts`
-- `lib/canvas/requests.ts`
-- MCP JSON schema in `mcp-server/index.mjs`
-- prompt/tool documentation
-- renderer tests
 
 Plan is a session-authored execution map, not the durable human Task Board.
 V1 is read-only.
@@ -713,13 +701,7 @@ The design in `docs/plans/context-canvas-components.md` specifies:
 - selected/background/pinned/reconnect behavior
 - no checkboxes, editing, drag/reorder, nested tasks, or Task Board conversion
 
-Important implementation gap:
-
-The server already replaces retained Plan requests, and the client queue
-deduplicates replacing kinds. That is not yet sufficient for true visible
-in-place Plan replacement. A new active Plan request would otherwise create a
-new history entry through normal activation. The Plan implementation must add
-an explicit same-kind active/history replacement transition that:
+Implemented replacement behavior:
 
 - mutates the current Plan history slot
 - does not grow history for progress-only updates
@@ -727,8 +709,9 @@ an explicit same-kind active/history replacement transition that:
 - preserves expanded item and scroll anchor by stable item ID
 - respects pinned and human-owned content
 
-Because the full Plan design and prototype already exist, Plan is the most
-prepared larger feature after Validation.
+Focused state and live MCP probes passed. A fresh MCP process accepted optional
+bounded item summaries, reported `canvas_renderer`, and retained only the second
+of two Plan updates.
 
 ### 10.3 Runtime Evidence
 
@@ -797,14 +780,14 @@ Do not run `start.sh` from a session hosted by AgentMatrix.
 `AGENTMATRIX_SESSION_ID` intentionally makes the script refuse self-restart
 because doing so disconnects the conversation.
 
-### Step 2 - Smoke-test MCP policy `1.4.0`
+### Step 2 - Smoke-test MCP policy `1.5.0`
 
 Launch a fresh managed session, then test:
 
 | Prompt | Expected behavior |
 |---|---|
 | "Show where Canvas instructions are injected" | `present_locations` after verifying exact locations |
-| "Give me an implementation plan" | `update_plan` after forming a real plan; terminal fallback because renderer is absent |
+| "Give me an implementation plan" | `update_plan` after forming a real plan; execution rail opens without focus theft |
 | routine internal file exploration | no Canvas tool |
 | "What changed?" after edits | `present_changes` |
 | completed tests/build | `present_validation`; terminal fallback until renderer ships |
@@ -818,16 +801,9 @@ Watch for:
 - missing concise text fallback
 - Canvas spam during private exploration
 
-### Step 3 - Implement Validation or Plan
+### Step 3 - Implement Validation
 
-Recommended decision:
-
-- choose **Validation** for the smallest low-risk next renderer and to preserve
-  the original component sequence
-- choose **Plan** if continuing the most recently designed feature; its design
-  and prototype are much more complete
-
-For either renderer:
+For the next renderer:
 
 1. add the kind to `CANVAS_RENDERED_KINDS`
 2. add an exhaustive `artifactRenderer()` branch
@@ -899,7 +875,7 @@ renderer/protocol changes.
 - Decision idempotency/conflict behavior
 - Decision Stop-hook readiness path
 - resolved Decision after renderer reload
-- fresh MCP handshake reporting `agentmatrix 1.4.0`
+- fresh MCP handshake reporting `agentmatrix 1.5.0`
 - runtime/document instruction parity
 - all eight typed tools in `tools/list`
 - TypeScript and production builds
@@ -909,7 +885,7 @@ renderer/protocol changes.
 - Windows-machine restart path after process-tree/lock cleanup changes
 - cross-provider prompt compliance suite
 - renderer behavior on very narrow Canvas widths
-- screen-reader pass for future Plan/Validation renderers
+- screen-reader pass for future Validation/Runtime Evidence renderers
 
 ### Development-process warning
 
@@ -937,6 +913,7 @@ that terminates the active conversation.
 | Canvas shell and dynamic renderers | `app/components/context-canvas/ContextCanvas.tsx` |
 | Locations renderer | `app/components/context-canvas/LocationsArtifact.tsx` |
 | Decision renderer | `app/components/context-canvas/DecisionArtifact.tsx` |
+| Plan renderer | `app/components/context-canvas/PlanArtifact.tsx` |
 | Decision response validation/idempotency | `lib/canvas/decisionResponses.ts` |
 | Trusted Decision API | `app/api/canvas/decision/route.ts` |
 | Decision delivery bridge | `electron/terminalBridge.ts`, `electron/pty/PtyManager.ts` |
@@ -988,7 +965,7 @@ handoff is enough to continue implementation.
 ## 15. Known Pitfalls
 
 1. **Do not claim `event_only` artifacts rendered.**
-   Validation, Plan, Runtime Evidence, and Browser Preview currently require a
+   Validation, Runtime Evidence, and Browser Preview currently require a
    terminal fallback.
 
 2. **Do not use Locations as search.**
@@ -1005,7 +982,8 @@ handoff is enough to continue implementation.
    final line.
 
 6. **Do not let Plan progress updates grow history.**
-   True in-place replacement is still an implementation requirement.
+   Keep the implemented active history-slot replacement and latest-queued-Plan
+   behavior intact.
 
 7. **Do not equate Plan with Task Board.**
    Plan is session-authored and read-only; Task Board is durable and human-owned.

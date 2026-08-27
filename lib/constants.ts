@@ -165,6 +165,8 @@ export const STATUS_COLORS: Record<string, string> = {
   idle: '#888888',
   working: '#51cf66',
   meeting: '#4a9eff',
+  attention: '#ef4444',
+  done: '#60a5fa',
 };
 
 // ===== Socket Path =====

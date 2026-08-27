@@ -73,6 +73,7 @@ graph TD
     ContextCanvas --> MarkdownPreview
     ContextCanvas --> LocationsArtifact
     ContextCanvas --> DecisionArtifact
+    ContextCanvas --> PlanArtifact
     ContextCanvas --> DiffCanvas
 
     EditorView --> FileTree
@@ -98,11 +99,13 @@ graph TD
 ### Dashboard V2 Context Canvas
 
 `DashboardV2Container` derives the attention model and owns the selected
-session. `DashboardV2` keeps that session's `SessionConsole` mounted while
-conditionally opening `ContextCanvas` beside it.
+session. Dashboard and Office share the same command rail and session list.
+Dashboard renders `SessionConsole` plus the optional `ContextCanvas`; Office
+lazy-loads `OfficeWorkspace` in the same main-workspace slot, so the terminal
+and Office engine never render simultaneously.
 
 The Canvas uses one per-session artifact state for legacy navigation and typed
-requests. Code, Markdown, Locations, Decision, and Changes share history,
+requests. Code, Markdown, Locations, Decision, Plan, and Changes share history,
 pinning, background queues, reconnect snapshots, and close watermarks.
 
 `DecisionArtifact` is the first interactive typed renderer:
@@ -142,11 +145,11 @@ than duplicating task mutation controls.
 ```mermaid
 stateDiagram-v2
     [*] --> Dashboard : Default
-    Dashboard --> Office : HeaderBar toggle
-    Office --> Dashboard : HeaderBar toggle
+    Dashboard --> Office : Control Center nav
+    Office --> Dashboard : Open CLI / Control Center nav
 
-    note right of Dashboard : Card grid with filters
-    note right of Office : Pixel RPG canvas (kept mounted)
+    note right of Dashboard : Console-first session workspace
+    note right of Office : Lazy pixel fleet map (mounted only while active)
 
     state Editor {
         [*] --> PathPicker : No root selected
@@ -158,9 +161,9 @@ The `OfficeView` component holds a `viewMode` state: `'dashboard' | 'office' | '
 
 ### View Switching
 
-- **HeaderBar** renders a toggle button group with `Dashboard` and `Office`; `Editor` appears after the hidden Ctrl/Cmd+Shift+E unlock.
-- **Office canvas is mounted only when visible** so its 60fps render loop stops while the Dashboard or Editor is active.
-- **Dashboard** is conditionally rendered (`{viewMode === 'dashboard' && <DashboardView />}`).
+- **DashboardV2Nav** owns the Control Center / Office switch when Dashboard V2 is enabled; the legacy HeaderBar remains only for Dashboard V1 and Editor compatibility.
+- **Office workspace is mounted only when visible** and is dynamically loaded. Its engine renders at 30 FPS locally or 12 FPS in reduced/remote mode, and explicitly suspends on Electron hide/minimize.
+- **Dashboard V2** remains mounted for Dashboard and Office so selection, attention ranking, Context Canvas state, and the session rail stay authoritative.
 - **Editor** is lazy-loaded via `next/dynamic` with `{ ssr: false }` and only rendered when `viewMode === 'editor'`.
 
 ### Default View

@@ -24,6 +24,7 @@ export type CanvasRendererKind =
   | Exclude<CanvasMode, 'closed'>
   | 'locations'
   | 'decision'
+  | 'plan'
   | 'unsupported';
 
 function assertNever(value: never): never {
@@ -72,6 +73,8 @@ export function artifactRenderer(artifact: CanvasArtifact): CanvasRendererKind {
         return 'review';
       case 'decision':
         return 'decision';
+      case 'plan':
+        return 'plan';
       default:
         return assertNever(request);
     }

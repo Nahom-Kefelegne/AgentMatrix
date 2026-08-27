@@ -5,6 +5,7 @@ import { TileMap } from './TileMap';
 import { CharacterManager } from './CharacterManager';
 import { Character } from './Character';
 import { ConnectionLine } from './ConnectionLine';
+import { perfEvent } from '@/lib/perf';
 
 export class GameEngine {
   private canvas: HTMLCanvasElement;
@@ -17,8 +18,12 @@ export class GameEngine {
   private spriteSheet: SpriteSheet;
 
   private running = false;
+  private suspended = false;
   private lastTimestamp = 0;
   private rafId = 0;
+  private readonly targetFrameMs: number;
+  private overlayScale = SCALE;
+  private readonly reducedMotion: boolean;
 
   // Callbacks for React integration
   private onCharacterHover: ((data: CharacterData | null, screenX: number, screenY: number) => void) | null = null;
@@ -27,7 +32,11 @@ export class GameEngine {
   // Track active sessions for returnToDesks
   private sessions = new Map<string, SessionData>();
 
-  constructor(canvas: HTMLCanvasElement, overlayCanvas?: HTMLCanvasElement) {
+  constructor(
+    canvas: HTMLCanvasElement,
+    overlayCanvas?: HTMLCanvasElement,
+    options: { reducedMotion?: boolean } = {},
+  ) {
     this.canvas = canvas;
     this.ctx = canvas.getContext('2d')!;
     this.ctx.imageSmoothingEnabled = false;
@@ -38,18 +47,20 @@ export class GameEngine {
     if (overlayCanvas) {
       this.overlayCanvas = overlayCanvas;
       this.overlayCtx = overlayCanvas.getContext('2d')!;
-      overlayCanvas.width = CANVAS_W * SCALE;
-      overlayCanvas.height = CANVAS_H * SCALE;
+      this.overlayScale = overlayCanvas.width / CANVAS_W || SCALE;
     }
 
+    this.reducedMotion = options.reducedMotion === true;
+    this.targetFrameMs = 1000 / (this.reducedMotion ? 12 : 30);
     this.tileMap = new TileMap();
     this.characterManager = new CharacterManager();
     this.spriteSheet = new SpriteSheet();
   }
 
-  async init(): Promise<void> {
+  async loadAssets(): Promise<void> {
     try {
       await this.spriteSheet.load('/sprites/characters.png');
+      if (this.running && !this.suspended) this.render();
     } catch {
       console.warn('Sprite sheet not loaded, using fallback rendering');
     }
@@ -59,7 +70,8 @@ export class GameEngine {
     if (this.running) return;
     this.running = true;
     this.lastTimestamp = performance.now();
-    this.rafId = requestAnimationFrame((ts) => this.gameLoop(ts));
+    this.render();
+    this.scheduleFrame();
   }
 
   stop(): void {
@@ -70,16 +82,57 @@ export class GameEngine {
     }
   }
 
-  private gameLoop(timestamp: number): void {
-    if (!this.running) return;
+  setSuspended(suspended: boolean): void {
+    if (this.suspended === suspended) return;
+    this.suspended = suspended;
+    perfEvent(suspended ? 'office:suspended' : 'office:resumed');
+    if (suspended) {
+      if (this.rafId) cancelAnimationFrame(this.rafId);
+      this.rafId = 0;
+      return;
+    }
+    if (this.running) {
+      this.lastTimestamp = performance.now();
+      this.render();
+      this.scheduleFrame();
+    }
+  }
 
-    const dt = Math.min((timestamp - this.lastTimestamp) / 1000, 0.1); // cap at 100ms
-    this.lastTimestamp = timestamp;
+  resizeOverlay(width: number, height: number): void {
+    if (!this.overlayCanvas || !this.overlayCtx) return;
+    const nextWidth = Math.max(1, Math.round(width));
+    const nextHeight = Math.max(1, Math.round(height));
+    if (
+      this.overlayCanvas.width !== nextWidth
+      || this.overlayCanvas.height !== nextHeight
+    ) {
+      this.overlayCanvas.width = nextWidth;
+      this.overlayCanvas.height = nextHeight;
+      this.overlayCtx = this.overlayCanvas.getContext('2d')!;
+    }
+    this.overlayScale = nextWidth / CANVAS_W;
+    if (this.running && !this.suspended) this.render();
+  }
 
-    this.update(dt);
-    this.render();
-
+  private scheduleFrame(): void {
+    if (!this.running || this.suspended || this.rafId) return;
     this.rafId = requestAnimationFrame((ts) => this.gameLoop(ts));
+  }
+
+  private gameLoop(timestamp: number): void {
+    this.rafId = 0;
+    if (!this.running || this.suspended) return;
+
+    const elapsed = timestamp - this.lastTimestamp;
+    if (elapsed >= this.targetFrameMs) {
+      const dt = Math.min(elapsed / 1000, 0.1);
+      this.lastTimestamp = timestamp - (elapsed % this.targetFrameMs);
+
+      this.update(dt);
+      this.render();
+    }
+
+    this.scheduleFrame();
   }
 
   private update(dt: number): void {
@@ -95,6 +148,7 @@ export class GameEngine {
   }
 
   private render(): void {
+    perfEvent('office:frame');
     this.ctx.clearRect(0, 0, CANVAS_W, CANVAS_H);
 
     // Pixel art layer (native resolution)
@@ -114,9 +168,9 @@ export class GameEngine {
       if (this.highlightedId) {
         const hChar = this.characterManager.getCharacter(this.highlightedId);
         if (hChar) {
-          const hx = (hChar.x + TILE_SIZE / 2) * SCALE;
-          const hy = (hChar.y + TILE_SIZE / 2) * SCALE;
-          const hr = TILE_SIZE * SCALE * 0.8;
+          const hx = (hChar.x + TILE_SIZE / 2) * this.overlayScale;
+          const hy = (hChar.y + TILE_SIZE / 2) * this.overlayScale;
+          const hr = TILE_SIZE * this.overlayScale * 0.8;
           this.overlayCtx.save();
           this.overlayCtx.strokeStyle = '#4a9eff';
           this.overlayCtx.lineWidth = 3;
@@ -129,9 +183,9 @@ export class GameEngine {
         }
       }
 
-      this.characterManager.renderEmojisHD(this.overlayCtx, SCALE);
-      this.characterManager.renderBubblesHD(this.overlayCtx, SCALE);
-      this.characterManager.renderLabelsHD(this.overlayCtx, SCALE);
+      this.characterManager.renderEmojisHD(this.overlayCtx, this.overlayScale, this.reducedMotion);
+      this.characterManager.renderBubblesHD(this.overlayCtx, this.overlayScale);
+      this.characterManager.renderLabelsHD(this.overlayCtx, this.overlayScale);
     } else {
       // Fallback: render on game canvas (will be pixelated)
       this.characterManager.renderLabels(this.ctx);
@@ -221,11 +275,21 @@ export class GameEngine {
 
   // === Public API for React integration ===
 
-  spawnCharacter(session: SessionData): void {
+  spawnCharacter(session: SessionData, animateEntrance = true): void {
     // Skip if already spawned
     if (this.characterManager.getCharacter(session.id)) return;
-    this.sessions.set(session.id, session);
-    this.characterManager.spawn(session, this.spriteSheet, this.tileMap);
+    const internalSession: SessionData = {
+      ...session,
+      recentActions: [...session.recentActions],
+      agents: session.agents.map(agent => ({ ...agent })),
+    };
+    this.sessions.set(session.id, internalSession);
+    this.characterManager.spawn(
+      internalSession,
+      this.spriteSheet,
+      this.tileMap,
+      animateEntrance,
+    );
   }
 
   removeCharacter(sessionId: string): void {
@@ -260,16 +324,50 @@ export class GameEngine {
     if (changes.currentTool !== undefined) char.currentTool = changes.currentTool;
     if (changes.recentActions !== undefined) char.recentActions = changes.recentActions;
     if (changes.teamId !== undefined) char.teamId = changes.teamId;
-    if (changes.name !== undefined) char.name = changes.name;
+    if (changes.name !== undefined) char.setName(changes.name);
     if (changes.lastToolSummary !== undefined) char.lastToolSummary = changes.lastToolSummary;
     if (changes.lastActivity !== undefined) char.lastActivity = changes.lastActivity;
   }
 
-  spawnAgent(sessionId: string, agent: AgentData, teamId: string): void {
+  spawnAgent(
+    sessionId: string,
+    agent: AgentData,
+    teamId: string,
+    animateEntrance = true,
+    moveParent = true,
+  ): void {
     if (this.characterManager.getCharacter(agent.id)) return;
-    this.characterManager.spawnAgent(agent, sessionId, teamId, this.spriteSheet, this.tileMap);
-    // Also move the parent to the meeting room
-    this.characterManager.moveParentToMeeting(sessionId, teamId, this.tileMap);
+    this.characterManager.spawnAgent(
+      agent,
+      sessionId,
+      teamId,
+      this.spriteSheet,
+      this.tileMap,
+      animateEntrance,
+    );
+    if (moveParent) {
+      this.characterManager.moveParentToMeeting(
+        sessionId,
+        teamId,
+        this.tileMap,
+        animateEntrance,
+      );
+    }
+  }
+
+  hydrateSessions(sessions: Iterable<SessionData>): void {
+    for (const session of sessions) {
+      this.spawnCharacter(session, false);
+      if (session.status === 'idle') {
+        this.showEmoji(session.id, '💤', true);
+      } else if (session.status === 'attention') {
+        this.showEmoji(session.id, '✋', true);
+      }
+      session.agents.forEach((agent, index) => {
+        const teamId = agent.teamName || `team-${session.id.slice(0, 6)}`;
+        this.spawnAgent(session.id, agent, teamId, false, index === 0);
+      });
+    }
   }
 
   removeAgent(sessionId: string, agentId: string): void {
@@ -352,53 +450,4 @@ export class GameEngine {
     return this.characterManager;
   }
 
-  /**
-   * Get a character's screen position (in display pixels) and a data URL of its sprite.
-   * Used for the floating sprite animation when opening the session dialog.
-   */
-  getCharacterScreenInfo(characterId: string): {
-    screenX: number;
-    screenY: number;
-    spriteDataURL: string;
-    name: string;
-    color: string;
-  } | null {
-    const char = this.characterManager.getCharacter(characterId);
-    if (!char) return null;
-
-    // Screen position (center of character, in display coordinates)
-    const canvasEl = this.canvas;
-    const rect = canvasEl.getBoundingClientRect();
-    const screenX = rect.left + (char.x + TILE_SIZE / 2) * (rect.width / CANVAS_W);
-    const screenY = rect.top + (char.y + TILE_SIZE / 2) * (rect.height / CANVAS_H);
-
-    // Render sprite to a small offscreen canvas
-    const spriteSize = 64;
-    const offscreen = document.createElement('canvas');
-    offscreen.width = spriteSize;
-    offscreen.height = spriteSize;
-    const ctx = offscreen.getContext('2d')!;
-    ctx.imageSmoothingEnabled = false;
-
-    // Draw the character's current frame centered in the canvas
-    if (this.spriteSheet.isReady) {
-      const frame = char.getFrameInfo();
-      this.spriteSheet.drawCharFrame(
-        ctx,
-        frame.blockX, frame.blockY,
-        frame.dirRow, frame.frame,
-        (spriteSize - 48) / 2, (spriteSize - 51) / 2,
-        frame.flip,
-        48, 51,
-      );
-    }
-
-    return {
-      screenX,
-      screenY,
-      spriteDataURL: offscreen.toDataURL(),
-      name: char.name,
-      color: char.color,
-    };
-  }
 }

@@ -1,6 +1,6 @@
 # Dashboard V2 - Console-First Control Center
 
-Status: **Dashboard V2 with Code, Locations, Decision, and Changes Canvas components implemented**
+Status: **Dashboard V2 with integrated Office workspace and Code, Locations, Decision, Plan, and Changes Canvas components implemented**
 
 Implementation plan:
 [`../plans/dashboard-v2-context-canvas.md`](../plans/dashboard-v2-context-canvas.md)
@@ -128,7 +128,8 @@ The integrated command rail contains:
 ### Center
 
 - Dashboard.
-- Office.
+- Office, rendered as a lazy alternate workspace inside the same command rail
+  and session list.
 - Editor, only when unlocked.
 
 ### Right
@@ -246,6 +247,7 @@ The Canvas is a conditional session-scoped companion to the terminal.
 - Auto-preview selected-session `docs/design/*.md` changes without stealing focus.
 - Present grouped, exact repository locations already verified by the session.
 - Present a blocking structured decision and deliver one answer to the owning session.
+- Present the session's retained execution plan with in-place progress updates.
 - Open stack-trace and compiler-error locations.
 - Review This Turn, This Session, Working Tree, Branch/Worktree, and Checkpoint
   diffs.
@@ -416,7 +418,7 @@ OfficeView
     DashboardV2
       DashboardV2Nav
       SessionSidebar
-      SessionWorkspaceController
+      ConsoleWorkspace
         EmbeddedSessionConsole
         SessionInspector (on demand)
         ContextCanvas
@@ -424,8 +426,12 @@ OfficeView
           CodePreview
           LocationsArtifact
           DecisionArtifact
+          PlanArtifact
           DiffWorkspace / DiffCore
           ReviewFeedbackComposer
+      OfficeWorkspace (lazy)
+        OfficeCanvas
+        OfficeSelectionStrip
     FullscreenTerminal (on demand)
     ChangesViewer compatibility wrapper (shared DiffCore)
 ```
@@ -489,6 +495,8 @@ Implemented:
 - Lazy Monaco code/range preview.
 - Grouped verified locations with lightweight snippets and Monaco handoff.
 - Structured decisions with authenticated, idempotent PTY response delivery.
+- Retained Plan execution rail with bounded step summaries and silent
+  same-history-slot replacement.
 - Session Inspector with runtime MCP provenance, assigned tasks, launch profile,
   and provider-authoritative rename.
 - Shared embedded DiffCore and compatibility ChangesViewer.

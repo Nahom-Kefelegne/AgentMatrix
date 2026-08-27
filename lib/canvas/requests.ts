@@ -214,7 +214,7 @@ function decisionOption(value: unknown, index: number): CanvasDecisionOption {
 
 function planItem(value: unknown, index: number): CanvasPlanItem {
   const item = record(value, `items[${index}]`);
-  assertKnownKeys(item, ['id', 'label', 'status'], `items[${index}]`);
+  assertKnownKeys(item, ['id', 'label', 'status', 'summary'], `items[${index}]`);
   if (!['pending', 'in_progress', 'done', 'blocked'].includes(item.status as string)) {
     throw new NavigationServiceError(
       'INVALID_CANVAS_REQUEST',
@@ -225,6 +225,12 @@ function planItem(value: unknown, index: number): CanvasPlanItem {
     id: limitedString(item.id, `items[${index}].id`, 100)!,
     label: limitedString(item.label, `items[${index}].label`, 500)!,
     status: item.status as CanvasPlanItem['status'],
+    summary: limitedString(
+      item.summary,
+      `items[${index}].summary`,
+      1_000,
+      { optional: true },
+    ),
   };
 }
 

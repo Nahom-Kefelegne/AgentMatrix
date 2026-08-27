@@ -75,12 +75,13 @@ deferred. Decision adds one narrow host-authored resolution lifecycle.
 - `present_locations` renders the verified-location ledger and can hand off to Code.
 - `present_changes` is adapted client-side to the existing session review renderer.
 - `request_decision` renders a blocking choice and a retained response receipt.
+- `update_plan` renders the retained execution rail and replaces progress in place.
 
 These tools should open the current Context Canvas immediately.
 
 ### Components not built yet
 
-Validation, Plan, Runtime Evidence, and Browser Preview still emit:
+Validation, Runtime Evidence, and Browser Preview still emit:
 
 - `canvas:requested`
 - `canvas:acknowledged`

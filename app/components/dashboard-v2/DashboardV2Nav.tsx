@@ -18,11 +18,13 @@ const VIEW_LABELS: { key: DashboardV2ViewMode; label: string }[] = [
 ];
 
 const numberFormat = new Intl.NumberFormat();
+const preloadOffice = () => import('../office/OfficeWorkspace');
 
 export default function DashboardV2Nav({
   connected,
   sessionCount,
   editorUnlocked,
+  viewMode,
   onViewChange,
   onNewSession,
   onResume,
@@ -49,8 +51,11 @@ export default function DashboardV2Nav({
           <button
             key={view.key}
             type="button"
-            className={`mc-nav-view ${view.key === 'dashboard' ? 'mc-nav-view--active' : ''}`}
+            className={`mc-nav-view ${view.key === viewMode ? 'mc-nav-view--active' : ''}`}
             onClick={() => onViewChange(view.key)}
+            onMouseEnter={view.key === 'office' ? preloadOffice : undefined}
+            onFocus={view.key === 'office' ? preloadOffice : undefined}
+            aria-current={view.key === viewMode ? 'page' : undefined}
           >
             {view.label}
           </button>

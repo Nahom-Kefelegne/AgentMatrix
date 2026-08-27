@@ -1,6 +1,6 @@
 # Context Canvas Component Roadmap
 
-Status: **Locations and Decision shipped; remaining components planned**
+Status: **Locations, Decision, and Plan implemented; remaining components planned**
 
 Related foundations:
 
@@ -73,7 +73,7 @@ structural transitions only.
 | Existing | Code / Document | `present_code` | Typed routing into existing renderers, file validation, history |
 | Existing | Changes | `present_changes` | Typed routing into a stateful existing renderer, request refresh |
 | 1 | Locations | `present_locations` | First new renderer, queue activation, typed-to-Code history |
-| 2 | Decision (implemented locally) | `request_decision` | User interaction delivery, blocking lifecycle, session attention |
+| 2 | Decision | `request_decision` | User interaction delivery, blocking lifecycle, session attention |
 | 3 | Validation | `present_validation` | Status/provenance, actionable failure links, retained evidence |
 | 4 | Plan | `update_plan` | Same-kind replacement, persistent session artifact, progress states |
 | 5 | Runtime Evidence | `present_runtime_evidence` | Dense bounded payloads, disclosure, copying, source links |
@@ -653,6 +653,8 @@ Authoritative run references and rerun controls remain a later extension.
 
 Plan is the session's live execution map.
 
+Implementation status: **Complete**
+
 It answers:
 
 > “What is this session trying to accomplish, where is it now, and what is
@@ -668,9 +670,9 @@ It is intentionally different from the Task Board:
 | Read-only evidence in V1 | User-editable workflow |
 | Ends with the session/runtime retention window | Persists as app state |
 
-### 8.1 Current and target typed contract
+### 8.1 Implemented typed contract
 
-The current production request is:
+The request is:
 
 ```ts
 interface PlanCanvasRequest {
@@ -682,24 +684,24 @@ interface PlanCanvasRequest {
       id: string;
       label: string;
       status: 'pending' | 'in_progress' | 'done' | 'blocked';
+      summary?: string;
     }>;
   };
 }
 ```
 
-The current server guarantees:
+The server guarantees:
 
 - 1–100 items
 - unique item IDs
 - bounded labels
+- optional plain-text summaries bounded to 1,000 characters
 - valid status values
 - one retained plan per session
 - full-list replacement rather than patches
 
-Plan renderer implementation will extend the item schema with an optional, bounded
-`summary` (maximum 1,000 characters). The model uses it for concise work
-completed/current intent/blocker context. It remains plain text; no Markdown or
-arbitrary HTML is accepted.
+The model uses `summary` for concise completed-work, current-intent, or blocker
+context. It remains plain text; no Markdown or arbitrary HTML is accepted.
 
 Stable IDs are meaningful even though each update replaces the full request.
 They let the renderer preserve the visible item/scroll anchor and distinguish a
@@ -909,6 +911,16 @@ Plan is complete when:
 6. A 100-item plan remains readable and responsive without virtualization.
 7. TypeScript, production build, state probes, and live Electron validation
    pass.
+
+Local validation completed:
+
+- first Plan opened as one history entry
+- second Plan replaced the active request and current history slot
+- pinned and developer-owned artifacts queued only the newest Plan
+- snapshot hydration restored only the newest retained Plan
+- fresh MCP server `1.5.0` accepted bounded item summaries
+- two live `update_plan` calls retained one latest Plan with
+  `canvas_renderer` delivery
 
 ## 9. Component 5: Runtime Evidence
 

@@ -152,4 +152,5 @@ flowchart TD
 - Canvas and text have distinct roles.
 - Anti-spam and security constraints remain explicit.
 
-Applied in AgentMatrix MCP server version `1.4.0`.
+Applied starting in AgentMatrix MCP server version `1.4.0`; still active in
+version `1.5.0`.

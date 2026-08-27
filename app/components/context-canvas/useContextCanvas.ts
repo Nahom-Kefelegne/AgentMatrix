@@ -217,6 +217,45 @@ function activateArtifact(
   };
 }
 
+function replaceActivePlan(
+  state: SessionCanvasState,
+  artifact: CanvasArtifact,
+): SessionCanvasState {
+  const history = [...state.history];
+  let historyIndex = state.historyIndex;
+  if (historyIndex >= 0 && historyIndex < history.length) {
+    history[historyIndex] = artifact;
+  } else {
+    history.push(artifact);
+    historyIndex = history.length - 1;
+  }
+  return {
+    ...state,
+    visible: true,
+    activeArtifact: artifact,
+    history,
+    historyIndex,
+    queuedArtifacts: state.queuedArtifacts.filter(item =>
+      item.type !== 'typed' || item.request.kind !== 'plan'),
+    closedAt: 0,
+  };
+}
+
+function activateOrReplaceArtifact(
+  state: SessionCanvasState,
+  artifact: CanvasArtifact,
+): SessionCanvasState {
+  if (
+    artifact.type === 'typed'
+    && artifact.request.kind === 'plan'
+    && state.activeArtifact?.type === 'typed'
+    && state.activeArtifact.request.kind === 'plan'
+  ) {
+    return replaceActivePlan(state, artifact);
+  }
+  return activateArtifact(state, artifact);
+}
+
 export function closeCanvasState(
   state: SessionCanvasState,
   closedAt = Date.now(),
@@ -261,7 +300,7 @@ export function activateQueuedCanvasArtifact(
 ): SessionCanvasState {
   const artifact = state.queuedArtifacts.find(item => artifactId(item) === requestRef);
   if (!artifact || !artifactIsRenderable(artifact)) return state;
-  return activateArtifact(state, artifact);
+  return activateOrReplaceArtifact(state, artifact);
 }
 
 export function restoreCanvasOnSessionSelection(
@@ -289,7 +328,9 @@ export function restoreCanvasOnSessionSelection(
     return state;
   }
   const queued = eligible.find(artifactIsRenderable);
-  return queued ? activateArtifact(state, queued) : { ...state, visible: true };
+  return queued
+    ? activateOrReplaceArtifact(state, queued)
+    : { ...state, visible: true };
 }
 
 export function reduceCanvasArtifact(
@@ -328,9 +369,10 @@ export function reduceCanvasArtifact(
     && !predatesExplicitClose
     && artifactDisposition(artifact) !== 'queue';
 
-  return shouldQueue
-    ? queueArtifact(state, artifact, showQueuedCanvas)
-    : activateArtifact(state, artifact);
+  if (shouldQueue) {
+    return queueArtifact(state, artifact, showQueuedCanvas);
+  }
+  return activateOrReplaceArtifact(state, artifact);
 }
 
 export function hydrateCanvasSnapshot(
