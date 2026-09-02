@@ -186,7 +186,6 @@ The terminal header contains only operational information:
 Actions:
 
 - Session Inspector.
-- Review Diff, when changes exist.
 - Request Summary.
 - Fullscreen Terminal.
 
@@ -280,7 +279,6 @@ Monaco is dynamically imported only after the Canvas opens.
 - Clickable terminal file links.
 - Stack traces and diagnostics.
 - Manual Open File/Range.
-- Review buttons.
 
 ### Session-controlled
 
@@ -290,6 +288,7 @@ Local AgentMatrix MCP tools:
 - `reveal_range`.
 - `present_code`.
 - `present_locations`.
+- `present_changes`.
 - `request_decision`.
 - `open_diff`.
 - `open_review`.

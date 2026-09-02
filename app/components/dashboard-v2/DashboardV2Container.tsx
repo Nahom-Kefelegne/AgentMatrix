@@ -10,7 +10,6 @@ import HandoffModal from '../HandoffModal';
 import { useSocketContext } from '../SocketProvider';
 import DashboardV2 from './DashboardV2';
 import type { DashboardV2Navigation, SessionControlState } from './types';
-import { useSessionChanges } from './useSessionChanges';
 
 const FullscreenTerminal = dynamic(() => import('../FullscreenTerminal'), { ssr: false });
 const SessionInspector = dynamic(() => import('./SessionInspector'), { ssr: false });
@@ -198,21 +197,9 @@ export default function DashboardV2Container({
   const selectedContextUsage = selectedSessionId
     ? contextMap[selectedSessionId] ?? selectedSession?.contextUsage ?? null
     : null;
-  const selectedAttention = selectedSessionId
-    ? model.queue.find(item => item.sessionId === selectedSessionId) ?? null
-    : null;
-  const reviewSummarySessionId = selectedAttention?.kind === 'ready-to-review'
-    ? selectedAttention.sessionId
-    : null;
-  const changes = useSessionChanges(reviewSummarySessionId, socketRef);
-
   const handleRequestSummary = useCallback((sessionId: string) => {
     socketRef.current?.emit('session:summary' as any, { sessionId });
   }, [socketRef]);
-
-  const handleReviewChanges = useCallback(() => {
-    canvas.openSessionDiff();
-  }, [canvas]);
 
   const handleContinueSession = useCallback((sessionId: string) => {
     setHandoffSessionId(sessionId);
@@ -288,19 +275,16 @@ export default function DashboardV2Container({
         sessions={sessions}
         model={model}
         selectedSession={selectedSession}
-        selectedAttention={selectedAttention}
         selectedSessionId={selectedSessionId}
         selectedContextUsage={selectedContextUsage}
         consoleVisible={!fullscreenSession}
         navigation={navigation}
         canvas={canvas}
-        changes={changes}
         sessionControlState={selectedSessionId ? sessionControls[selectedSessionId] ?? null : null}
         sessionControlsAvailable={connected}
         onOfficeEvent={onEvent}
         onSelectSession={handleSelectSession}
         onOpenOfficeSession={handleOpenOfficeSession}
-        onReviewChanges={handleReviewChanges}
         onRequestSummary={handleRequestSummary}
         onFullscreenSession={setFullscreenSessionId}
         onInspectSession={() => setInspectorSessionId(selectedSessionId)}

@@ -6,7 +6,6 @@ import {
   Bot,
   ChevronDown,
   Clock3,
-  GitCompareArrows,
   Maximize2,
   PanelRightOpen,
   Power,
@@ -432,12 +431,9 @@ function ConsoleWorkspace(props: DashboardV2ViewProps) {
   const {
     model,
     selectedSession,
-    selectedAttention,
     selectedContextUsage,
     consoleVisible,
     canvas,
-    changes,
-    onReviewChanges,
     onRequestSummary,
     onFullscreenSession,
     onInspectSession,
@@ -461,10 +457,6 @@ function ConsoleWorkspace(props: DashboardV2ViewProps) {
       </main>
     );
   }
-
-  const hasReview = selectedAttention?.kind === 'ready-to-review'
-    || (selectedSession.filesModified?.length ?? 0) > 0;
-  const changeCount = changes.data?.files.length ?? selectedSession.filesModified?.length ?? 0;
 
   return (
     <main id="mc-console-workspace" className="mc-console-workspace" tabIndex={-1}>
@@ -501,18 +493,6 @@ function ConsoleWorkspace(props: DashboardV2ViewProps) {
             >
               <PanelRightOpen size={16} aria-hidden="true" />
             </button>
-            {hasReview ? (
-              <button
-                type="button"
-                className="mc-button mc-button--secondary"
-                onClick={() => onReviewChanges(selectedSession.id)}
-                aria-label={changeCount > 0 ? `Review ${numberFormat.format(changeCount)} changed files` : 'Review diff'}
-                title={changeCount > 0 ? `Review ${numberFormat.format(changeCount)} Changed Files` : 'Review Diff'}
-              >
-                <GitCompareArrows size={14} aria-hidden="true" />
-                <span>Review {changeCount > 0 ? `${numberFormat.format(changeCount)} Files` : 'Diff'}</span>
-              </button>
-            ) : null}
             {!selectedSession.summaryBullets?.length ? (
               <button
                 type="button"
@@ -553,12 +533,6 @@ function ConsoleWorkspace(props: DashboardV2ViewProps) {
           <MiniContext usage={selectedContextUsage} />
         </div>
 
-        {changes.error && hasReview ? (
-          <div className="mc-console-error" role="alert">
-            <AlertTriangle size={14} aria-hidden="true" />
-            {changes.error}
-          </div>
-        ) : null}
         {sessionControlState ? <SessionLifecycleNotice state={sessionControlState} /> : null}
       </header>
 

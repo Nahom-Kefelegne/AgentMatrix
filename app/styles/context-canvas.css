@@ -212,15 +212,10 @@
   display: flex;
   flex: 0 0 34px;
   align-items: center;
-  justify-content: space-between;
+  justify-content: flex-end;
   padding: 0 7px;
   border-top: 1px solid var(--mc-line-strong);
   background: var(--mc-panel-raised);
-}
-
-.cc-footer-group {
-  display: flex;
-  align-items: center;
 }
 
 .cc-loading,

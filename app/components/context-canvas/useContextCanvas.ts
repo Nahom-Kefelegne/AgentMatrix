@@ -49,7 +49,6 @@ export interface ContextCanvasController {
   openFile: (target: NavigationTarget, summary?: string) => void;
   openCode: (target: NavigationTarget, summary?: string) => void;
   openCanvas: () => void;
-  openSessionDiff: () => void;
   resolveDecision: (request: DecisionCanvasRequest) => void;
   close: () => void;
   togglePin: () => void;
@@ -702,21 +701,6 @@ export function useContextCanvas(
     }));
   }, [updateSession]);
 
-  const openSessionDiff = useCallback(() => {
-    const request = createRequest(
-      'open_review',
-      {
-        diff: {
-          source: 'session',
-          sessionId: selectedRef.current ?? undefined,
-          view: 'inline',
-        },
-      },
-      'Review this session',
-    );
-    if (request) openRequest(request);
-  }, [createRequest, openRequest]);
-
   const close = useCallback(() => {
     const sessionId = selectedRef.current;
     if (!sessionId) return;
@@ -770,7 +754,6 @@ export function useContextCanvas(
     openFile,
     openCode,
     openCanvas,
-    openSessionDiff,
     resolveDecision,
     close,
     togglePin,

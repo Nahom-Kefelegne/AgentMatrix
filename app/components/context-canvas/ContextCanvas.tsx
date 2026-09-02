@@ -6,7 +6,6 @@ import {
   ArrowLeft,
   ArrowRight,
   Code2,
-  GitCompareArrows,
   LockKeyhole,
   PanelRightClose,
   Pin,
@@ -307,11 +306,6 @@ export default function ContextCanvas({ sessionId, sessionName, cwd, controller 
       </div>
 
       <footer className="cc-footer">
-        <div className="cc-footer-group">
-          <button type="button" onClick={controller.openSessionDiff}>
-            <GitCompareArrows size={13} aria-hidden="true" /> Review Session
-          </button>
-        </div>
         <button type="button" onClick={controller.backToConversation}>
           Back to Conversation
         </button>
