@@ -58,6 +58,37 @@ export interface CanvasPlanItem {
   summary?: string;
 }
 
+export interface ReviewFileEntry {
+  fileId: string;
+  path: string;
+  reason?: string;
+  status: 'added' | 'modified' | 'deleted' | 'renamed' | 'unchanged' | 'unavailable';
+  previousPath?: string;
+  additions: number;
+  deletions: number;
+  contentAvailable: boolean;
+  contentKind?: 'text' | 'gitlink';
+  unavailableReason?: 'binary' | 'too_large' | 'submodule' | 'sparse' | 'type_changed';
+}
+
+export type ReviewBaseResolution =
+  | 'explicit'
+  | 'upstream-merge-base'
+  | 'head-fallback'
+  | 'unborn'
+  | 'non-git';
+
+export interface ReviewSnapshotMeta {
+  snapshotRef: string;
+  branch: string | null;
+  headSha: string | null;
+  requestedBaseRef: string | null;
+  effectiveBaseSha: string | null;
+  baseResolution: ReviewBaseResolution;
+  isGitRepository: boolean;
+  capturedAt: number;
+}
+
 export interface CanvasRuntimeEvidence {
   kind: 'log' | 'error' | 'request';
   label: string;
@@ -95,9 +126,13 @@ export interface LocationsCanvasRequest extends CanvasRequestBase {
 
 export interface ChangesCanvasRequest extends CanvasRequestBase {
   kind: 'changes';
-  payload: {
-    scope: 'session';
-  };
+  payload:
+    | { scope: 'session' }
+    | {
+        scope: 'selection';
+        files: ReviewFileEntry[];
+        snapshot: ReviewSnapshotMeta;
+      };
 }
 
 export interface DecisionCanvasRequest extends CanvasRequestBase {

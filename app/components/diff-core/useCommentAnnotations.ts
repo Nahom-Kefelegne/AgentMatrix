@@ -4,7 +4,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import type { DiffOnMount } from '@monaco-editor/react';
 import type { editor as monacoEditor } from 'monaco-editor';
 import { defineAgentMatrixTheme, AGENT_MATRIX_THEME } from '@/lib/monacoTheme';
-import type { FloatingPopover, ReviewComment } from './types';
+import type { FileDiff, FloatingPopover, ReviewComment } from './types';
 import { useMousePosition } from './hooks';
 
 type MonacoNs = Parameters<DiffOnMount>[1];
@@ -18,7 +18,20 @@ interface UseCommentAnnotationsOpts {
   // A value that changes whenever the editor's content/model is replaced
   // (e.g. the diff object or file content). Forces decorations to reapply.
   revision: unknown;
-  onAddComment: (filePath: string, lineNumber: number, text: string) => void | Promise<void>;
+  snapshotRef?: string;
+  onAddComment: (
+    filePath: string,
+    lineNumber: number,
+    text: string,
+    anchor?: {
+      snapshotRef?: string;
+      side?: 'original' | 'current';
+      startLine?: number;
+      endLine?: number;
+      contentHash?: string;
+      contextExcerpt?: string;
+    },
+  ) => void | Promise<void>;
   onDeleteComment: (commentId: string) => void | Promise<void>;
 }
 
@@ -26,15 +39,21 @@ interface UseCommentAnnotationsOpts {
 // glyph/line decorations, gutter-click + selection interactions, and the
 // floating add/view popover state. Reusable across the diff and browse editors.
 export function useCommentAnnotations(opts: UseCommentAnnotationsOpts) {
-  const { containerRef, activeFilePath, comments, revision } = opts;
+  const { containerRef, activeFilePath, comments, revision, snapshotRef } = opts;
 
   const [popover, setPopover] = useState<FloatingPopover | null>(null);
   const [commentText, setCommentText] = useState('');
 
   const mousePos = useMousePosition();
-  const editorRef = useRef<monacoEditor.IStandaloneCodeEditor | null>(null);
+  const editorRefs = useRef<Record<
+    'original' | 'current',
+    monacoEditor.IStandaloneCodeEditor | null
+  >>({ original: null, current: null });
   const monacoRef = useRef<MonacoNs | null>(null);
-  const decorationsRef = useRef<monacoEditor.IEditorDecorationsCollection | null>(null);
+  const decorationsRefs = useRef<Record<
+    'original' | 'current',
+    monacoEditor.IEditorDecorationsCollection | null
+  >>({ original: null, current: null });
   const floatingInputRef = useRef<HTMLTextAreaElement>(null);
 
   const commentsRef = useRef(comments);
@@ -62,22 +81,32 @@ export function useCommentAnnotations(opts: UseCommentAnnotationsOpts) {
   // Rebuild decorations for the currently-wired editor from the active file's
   // comments. Ref-based so the callback identity stays stable.
   const refreshDecorations = useCallback(() => {
-    const editor = editorRef.current;
     const monaco = monacoRef.current;
-    if (!editor || !monaco) return;
-    const fileComments = commentsRef.current.filter(c => c.filePath === activeFileRef.current);
-    decorationsRef.current?.clear();
-    decorationsRef.current = editor.createDecorationsCollection(
-      fileComments.map(c => ({
-        range: new monaco.Range(c.lineNumber, 1, c.lineNumber, 1),
-        options: {
-          glyphMarginClassName: c.resolved ? 'review-comment-glyph--resolved' : 'review-comment-glyph',
-          isWholeLine: true,
-          className: c.resolved ? 'review-comment-line--resolved' : 'review-comment-line',
-          glyphMarginHoverMessage: { value: `${c.resolved ? '(resolved) ' : ''}${c.text}` },
-        },
-      }))
-    );
+    if (!monaco) return;
+    for (const side of ['original', 'current'] as const) {
+      const editor = editorRefs.current[side];
+      if (!editor) continue;
+      const fileComments = commentsRef.current.filter(comment =>
+        comment.filePath === activeFileRef.current
+        && (comment.side ?? 'current') === side);
+      decorationsRefs.current[side]?.clear();
+      decorationsRefs.current[side] = editor.createDecorationsCollection(
+        fileComments.map(comment => ({
+          range: new monaco.Range(
+            comment.startLine ?? comment.lineNumber,
+            1,
+            comment.endLine ?? comment.lineNumber,
+            1,
+          ),
+          options: {
+            glyphMarginClassName: comment.resolved ? 'review-comment-glyph--resolved' : 'review-comment-glyph',
+            isWholeLine: true,
+            className: comment.resolved ? 'review-comment-line--resolved' : 'review-comment-line',
+            glyphMarginHoverMessage: { value: `${comment.resolved ? '(resolved) ' : ''}${comment.text}` },
+          },
+        })),
+      );
+    }
   }, []);
 
   useEffect(() => {
@@ -85,8 +114,12 @@ export function useCommentAnnotations(opts: UseCommentAnnotationsOpts) {
   }, [comments, activeFilePath, revision, refreshDecorations]);
 
   // Wire gutter-glyph clicks (add/view) and text-selection (add on range).
-  const wireEditor = useCallback((editor: monacoEditor.IStandaloneCodeEditor, monaco: MonacoNs) => {
-    editorRef.current = editor;
+  const wireEditor = useCallback((
+    editor: monacoEditor.IStandaloneCodeEditor,
+    monaco: MonacoNs,
+    side: 'original' | 'current',
+  ) => {
+    editorRefs.current[side] = editor;
     monacoRef.current = monaco;
     defineAgentMatrixTheme(monaco);
     monaco.editor.setTheme(AGENT_MATRIX_THEME);
@@ -95,9 +128,9 @@ export function useCommentAnnotations(opts: UseCommentAnnotationsOpts) {
     // switch), drop our references so a later decorations refresh can't touch a
     // disposed instance.
     editor.onDidDispose(() => {
-      if (editorRef.current === editor) {
-        editorRef.current = null;
-        decorationsRef.current = null;
+      if (editorRefs.current[side] === editor) {
+        editorRefs.current[side] = null;
+        decorationsRefs.current[side] = null;
       }
     });
 
@@ -107,12 +140,15 @@ export function useCommentAnnotations(opts: UseCommentAnnotationsOpts) {
         if (!line) return;
         const pos = clampPopover(mousePos.current.x, mousePos.current.y);
         const existing = commentsRef.current.find(
-          c => c.filePath === activeFileRef.current && c.lineNumber === line
+          comment =>
+            comment.filePath === activeFileRef.current
+            && (comment.side ?? 'current') === side
+            && comment.lineNumber === line,
         );
         if (existing) {
-          setPopover({ mode: 'view', line, endLine: line, x: pos.x, y: pos.y, comment: existing });
+          setPopover({ mode: 'view', side, line, endLine: line, x: pos.x, y: pos.y, comment: existing });
         } else {
-          setPopover({ mode: 'add', line, endLine: line, x: pos.x, y: pos.y });
+          setPopover({ mode: 'add', side, line, endLine: line, x: pos.x, y: pos.y });
           setCommentText('');
         }
       }
@@ -122,7 +158,14 @@ export function useCommentAnnotations(opts: UseCommentAnnotationsOpts) {
       if (!sel || sel.isEmpty()) return;
       setTimeout(() => {
         const pos = clampPopover(mousePos.current.x, mousePos.current.y);
-        setPopover({ mode: 'add', line: sel.startLineNumber, endLine: sel.endLineNumber, x: pos.x, y: pos.y });
+        setPopover({
+          mode: 'add',
+          side,
+          line: sel.startLineNumber,
+          endLine: sel.endLineNumber,
+          x: pos.x,
+          y: pos.y,
+        });
         setCommentText('');
       }, 50);
     });
@@ -133,12 +176,13 @@ export function useCommentAnnotations(opts: UseCommentAnnotationsOpts) {
 
   // Mount handler for a Monaco DiffEditor — decorations live on the modified side.
   const handleDiffMount = useCallback<DiffOnMount>((editor, monaco) => {
-    wireEditor(editor.getModifiedEditor(), monaco);
+    wireEditor(editor.getOriginalEditor(), monaco, 'original');
+    wireEditor(editor.getModifiedEditor(), monaco, 'current');
   }, [wireEditor]);
 
   // Mount handler for a standalone Monaco Editor (browse mode).
   const handleEditorMount = useCallback((editor: monacoEditor.IStandaloneCodeEditor, monaco: MonacoNs) => {
-    wireEditor(editor, monaco);
+    wireEditor(editor, monaco, 'current');
   }, [wireEditor]);
 
   const dismissPopover = useCallback(() => { setPopover(null); setCommentText(''); }, []);
@@ -148,10 +192,32 @@ export function useCommentAnnotations(opts: UseCommentAnnotationsOpts) {
     const text = popover.line !== popover.endLine
       ? `[Lines ${popover.line}-${popover.endLine}] ${commentText.trim()}`
       : commentText.trim();
-    await onAddRef.current(activeFileRef.current, popover.line, text);
+    const fileDiff = revision
+      && typeof revision === 'object'
+      && 'current' in revision
+      ? revision as FileDiff
+      : null;
+    const side = popover.side ?? 'current';
+    const content = side === 'original'
+      ? fileDiff?.original
+      : fileDiff?.current;
+    const contentHash = side === 'original'
+      ? fileDiff?.originalHash
+      : fileDiff?.currentHash;
+    const lines = content?.replace(/\r\n|\r/g, '\n').split('\n') ?? [];
+    const contextStart = Math.max(0, popover.line - 3);
+    const contextEnd = Math.min(lines.length, popover.endLine + 2);
+    await onAddRef.current(activeFileRef.current, popover.line, text, {
+      snapshotRef,
+      side,
+      startLine: popover.line,
+      endLine: popover.endLine,
+      contentHash,
+      contextExcerpt: lines.slice(contextStart, contextEnd).join('\n').slice(0, 2_000),
+    });
     setCommentText('');
     setPopover(null);
-  }, [commentText, popover]);
+  }, [commentText, popover, revision, snapshotRef]);
 
   const handleDeleteComment = useCallback(async (commentId: string) => {
     await onDeleteRef.current(commentId);

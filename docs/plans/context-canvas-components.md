@@ -122,6 +122,11 @@ Preserve:
 - comments and review delivery
 - inline/split diff
 - full-file handoff
+- exact session-selected file sets with per-file reasons
+- host-resolved branch/base provenance
+- bounded frozen snapshots with stale/expired treatment
+- filename-only rows with full paths available as tooltips
+- snapshot-scoped comment anchors and read-only evidence controls
 
 Each new typed Changes request already remounts the diff data boundary by
 `requestRef`.

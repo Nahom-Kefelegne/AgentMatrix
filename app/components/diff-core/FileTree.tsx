@@ -1,5 +1,7 @@
 'use client';
 
+import { toPosixPath } from '@/lib/paths/displayPath';
+
 // File-tree primitives shared by the changes/browse sidebars: a lightweight
 // tree model plus presentational icon/row components.
 
@@ -13,7 +15,8 @@ export interface TreeNode {
 export function buildFileTree(files: string[]): TreeNode[] {
   const root: TreeNode = { name: '', path: '', isDir: true, children: [] };
   for (const file of files) {
-    const parts = file.split('/');
+    const normalized = toPosixPath(file);
+    const parts = normalized.split('/').filter(Boolean);
     let current = root;
     for (let i = 0; i < parts.length; i++) {
       const part = parts[i];
@@ -100,7 +103,7 @@ export function FileTreeNode({ node, depth, selected, expanded, onSelect, onTogg
             {isOpen ? '\u25BE' : '\u25B8'}
           </span>
           <span style={{ fontSize: 14 }}>{isOpen ? '\uD83D\uDCC2' : '\uD83D\uDCC1'}</span>
-          <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{node.name}</span>
+          <span title={node.path} style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{node.name}</span>
         </div>
         {isOpen && node.children.map(child => (
           <FileTreeNode
@@ -134,7 +137,7 @@ export function FileTreeNode({ node, depth, selected, expanded, onSelect, onTogg
       onMouseLeave={e => { if (!isSelected) e.currentTarget.style.background = 'transparent'; }}
     >
       <FileIcon name={node.name} />
-      <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1 }}>{node.name}</span>
+      <span title={node.path} style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1 }}>{node.name}</span>
       {count > 0 && (
         <span style={{ fontSize: 10, padding: '0 5px', borderRadius: 8, background: '#fbbf2420', color: '#fbbf24', fontWeight: 700, flexShrink: 0 }}>{count}</span>
       )}

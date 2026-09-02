@@ -74,13 +74,19 @@ export function useChangedFiles(
 
 // Fetch the diff for a single file. Aborts the previous request when the
 // selected file changes so a slow earlier response can't overwrite a newer one.
-export function useFileDiff(sessionId: string, filePath: string | null, changeSignal: number) {
+export function useFileDiff(
+  sessionId: string,
+  filePath: string | null,
+  changeSignal: number,
+  opts: { enabled?: boolean } = {},
+) {
+  const { enabled = true } = opts;
   const [diff, setDiff] = useState<FileDiff | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!filePath) { setDiff(null); setLoading(false); setError(null); return; }
+    if (!enabled || !filePath) { setDiff(null); setLoading(false); setError(null); return; }
     const ctrl = new AbortController();
     setLoading(true); setDiff(null); setError(null);
     fetch(`/api/sessions/changes?sessionId=${sessionId}&file=${encodeURIComponent(filePath)}`, { signal: ctrl.signal })
@@ -96,20 +102,25 @@ export function useFileDiff(sessionId: string, filePath: string | null, changeSi
         setDiff(null); setLoading(false);
       });
     return () => ctrl.abort();
-  }, [sessionId, filePath, changeSignal]);
+  }, [enabled, sessionId, filePath, changeSignal]);
 
   return { diff, loading, error };
 }
 
 // Load and mutate review comments for a session. All mutations go through the
 // existing /api/sessions/comments endpoint and refresh from its response.
-export function useComments(sessionId: string, opts: { enabled?: boolean } = {}) {
-  const { enabled = true } = opts;
+export function useComments(
+  sessionId: string,
+  opts: { enabled?: boolean; snapshotRef?: string } = {},
+) {
+  const { enabled = true, snapshotRef } = opts;
   const [comments, setComments] = useState<ReviewComment[]>([]);
   const [error, setError] = useState<string | null>(null);
 
   const reload = useCallback(() => {
-    fetch(`/api/sessions/comments?sessionId=${sessionId}`)
+    const params = new URLSearchParams({ sessionId });
+    if (snapshotRef) params.set('snapshotRef', snapshotRef);
+    fetch(`/api/sessions/comments?${params.toString()}`)
       .then(r => {
         if (!r.ok) throw new Error(`comments request failed (${r.status})`);
         return r.json();
@@ -119,7 +130,7 @@ export function useComments(sessionId: string, opts: { enabled?: boolean } = {})
         console.error('[diff-core] Failed to load comments:', err);
         setError(err instanceof Error ? err.message : 'Failed to load comments');
       });
-  }, [sessionId]);
+  }, [sessionId, snapshotRef]);
 
   useEffect(() => { if (enabled) reload(); }, [enabled, reload]);
 
@@ -127,17 +138,29 @@ export function useComments(sessionId: string, opts: { enabled?: boolean } = {})
     const res = await fetch('/api/sessions/comments', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ sessionId, ...body }),
+      body: JSON.stringify({ sessionId, snapshotRef, ...body }),
     });
     if (!res.ok) throw new Error(`${label} failed (${res.status})`);
     const data = await res.json();
     setComments(data.comments || []);
     return data;
-  }, [sessionId]);
+  }, [sessionId, snapshotRef]);
 
-  const addComment = useCallback(async (filePath: string, lineNumber: number, text: string) => {
+  const addComment = useCallback(async (
+    filePath: string,
+    lineNumber: number,
+    text: string,
+    anchor?: {
+      snapshotRef?: string;
+      side?: 'original' | 'current';
+      startLine?: number;
+      endLine?: number;
+      contentHash?: string;
+      contextExcerpt?: string;
+    },
+  ) => {
     try {
-      await post({ comment: { filePath, lineNumber, text } }, 'add comment');
+      await post({ comment: { filePath, lineNumber, text, ...anchor } }, 'add comment');
     } catch (err) {
       console.error('[diff-core] Failed to add comment:', err);
       setError(err instanceof Error ? err.message : 'Failed to add comment');
@@ -150,7 +173,7 @@ export function useComments(sessionId: string, opts: { enabled?: boolean } = {})
       const res = await fetch('/api/sessions/comments', {
         method: 'DELETE',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ sessionId, commentId }),
+        body: JSON.stringify({ sessionId, snapshotRef, commentId }),
       });
       if (!res.ok) throw new Error(`delete comment failed (${res.status})`);
       const data = await res.json();
@@ -160,7 +183,7 @@ export function useComments(sessionId: string, opts: { enabled?: boolean } = {})
       setError(err instanceof Error ? err.message : 'Failed to delete comment');
       throw err;
     }
-  }, [sessionId]);
+  }, [sessionId, snapshotRef]);
 
   const resolveComment = useCallback(async (commentId: string) => {
     try {

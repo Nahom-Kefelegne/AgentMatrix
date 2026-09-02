@@ -249,8 +249,8 @@ The Canvas is a conditional session-scoped companion to the terminal.
 - Present a blocking structured decision and deliver one answer to the owning session.
 - Present the session's retained execution plan with in-place progress updates.
 - Open stack-trace and compiler-error locations.
-- Review This Turn, This Session, Working Tree, Branch/Worktree, and Checkpoint
-  diffs.
+- Review exact session-selected files from a frozen branch/worktree snapshot,
+  while retaining legacy transcript/session review.
 - Select code/diff lines and send structured feedback to the owning session.
 - Navigate Back/Forward and Back to Conversation.
 
@@ -336,14 +336,16 @@ The UI never shows an ambiguous "diff." Every review declares:
 
 Sources:
 
-- This Turn.
-- This Session.
-- Working Tree.
-- Branch/Worktree.
-- Checkpoint.
+- Session-selected snapshot (preferred).
+- Legacy transcript-attributed session changes.
 
 This distinction prevents transcript patches from being mistaken for the full
 working-tree state.
+
+Selected review snapshots show branch, resolved base, capture time, and stale
+state. The session supplies exact repository-relative files and optional
+`baseRef`; AgentMatrix binds them to the session's registered root and never
+accepts an arbitrary worktree path.
 
 ## 12. Review Feedback
 

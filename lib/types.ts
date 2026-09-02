@@ -14,6 +14,12 @@ export interface ReviewComment {
   text: string;
   createdAt: number;
   resolved: boolean;
+  snapshotRef?: string;
+  side?: 'original' | 'current';
+  startLine?: number;
+  endLine?: number;
+  contentHash?: string;
+  contextExcerpt?: string;
 }
 
 export interface SessionFileChange {

@@ -3,6 +3,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type {
   CommentsController,
+  FileChange,
+  FileDiff,
   DiffMode,
   DiffPresentation,
   ReviewSendMode,
@@ -39,6 +41,11 @@ export interface SessionDiffCoreProps extends SessionDiffCoreCallbacks {
   hideHeader?: boolean;
   // Repository-relative or absolute file to select once changes are loaded.
   initialPath?: string;
+  providedFiles?: FileChange[];
+  loadFileDiff?: (file: FileChange, signal: AbortSignal) => Promise<FileDiff>;
+  snapshotRef?: string;
+  readOnlyEvidence?: boolean;
+  evidenceNotice?: React.ReactNode;
 }
 
 // Reusable, layout-agnostic core of the changes review experience: changed-file
@@ -56,25 +63,78 @@ export default function SessionDiffCore({
   headerRight,
   hideHeader = false,
   initialPath,
+  providedFiles,
+  loadFileDiff,
+  snapshotRef,
+  readOnlyEvidence = false,
+  evidenceNotice,
   onOpenFullFile,
   onClose,
   onSendReviewAll,
   onSendReviewComment,
 }: SessionDiffCoreProps) {
   const [selectedFile, setSelectedFile] = useState<string | null>(null);
-  const [diffMode, setDiffMode] = useState<DiffMode>('inline');
+  const [diffMode, setDiffMode] = useState<DiffMode>(
+    () => snapshotRef ? 'split' : 'inline',
+  );
   const [reverting, setReverting] = useState(false);
   const [sending, setSending] = useState(false);
 
   const rootRef = useRef<HTMLDivElement>(null);
   const popoverContainerRef = containerRef ?? rootRef;
 
-  const { files, setFiles, loading, error: filesError, reload: reloadFiles, changeSignal } =
-    useChangedFiles(sessionId, socketRef);
-  const { diff, loading: loadingDiff, error: diffError } = useFileDiff(sessionId, selectedFile, changeSignal);
+  const provided = providedFiles !== undefined;
+  const legacyFiles =
+    useChangedFiles(sessionId, socketRef, { enabled: !provided });
+  const files = providedFiles ?? legacyFiles.files;
+  const filesLoading = provided ? false : legacyFiles.loading;
+  const filesError = provided ? null : legacyFiles.error;
+  const [providedDiff, setProvidedDiff] = useState<FileDiff | null>(null);
+  const [providedDiffLoading, setProvidedDiffLoading] = useState(false);
+  const [providedDiffError, setProvidedDiffError] = useState<string | null>(null);
+  const legacyDiff = useFileDiff(
+    sessionId,
+    selectedFile,
+    legacyFiles.changeSignal,
+    { enabled: !provided },
+  );
+  const selectedEntry = files.find(file => file.path === selectedFile) ?? null;
+
+  useEffect(() => {
+    if (!provided || !selectedEntry || !loadFileDiff) {
+      setProvidedDiff(null);
+      setProvidedDiffLoading(false);
+      setProvidedDiffError(null);
+      return;
+    }
+    const controller = new AbortController();
+    setProvidedDiff(null);
+    setProvidedDiffLoading(true);
+    setProvidedDiffError(null);
+    loadFileDiff(selectedEntry, controller.signal)
+      .then(value => {
+        setProvidedDiff(value);
+        setProvidedDiffLoading(false);
+      })
+      .catch(error => {
+        if (controller.signal.aborted) return;
+        setProvidedDiffError(
+          error instanceof Error ? error.message : 'Failed to load review snapshot.',
+        );
+        setProvidedDiffLoading(false);
+      });
+    return () => controller.abort();
+  }, [loadFileDiff, provided, selectedEntry]);
+
+  const diff = provided ? providedDiff : legacyDiff.diff;
+  const loadingDiff = provided ? providedDiffLoading : legacyDiff.loading;
+  const diffError = provided ? providedDiffError : legacyDiff.error;
 
   // Own comments only when a controller isn't provided by the parent.
-  const ownedComments = useComments(sessionId, { enabled: !commentsController });
+  const ownedComments = useComments(sessionId, {
+    enabled: !commentsController,
+    snapshotRef,
+  });
   const cc: CommentsController = commentsController ?? ownedComments;
   const comments = cc.comments;
 
@@ -83,6 +143,7 @@ export default function SessionDiffCore({
     activeFilePath: selectedFile,
     comments,
     revision: diff,
+    snapshotRef,
     onAddComment: cc.addComment,
     onDeleteComment: cc.deleteComment,
   });
@@ -96,13 +157,13 @@ export default function SessionDiffCore({
   const language = selectedFile ? detectLanguage(selectedFile) : 'plaintext';
 
   useEffect(() => {
-    if (!initialPath || files.length === 0) return;
+    if (selectedFile !== null || !initialPath || files.length === 0) return;
     const target = initialPath.replaceAll('\\', '/').toLocaleLowerCase();
     const match = files.find(file => {
       const candidate = file.path.replaceAll('\\', '/').toLocaleLowerCase();
       return candidate === target || candidate.endsWith(`/${target}`);
     });
-    if (match && match.path !== selectedFile) setSelectedFile(match.path);
+    if (match) setSelectedFile(match.path);
   }, [files, initialPath, selectedFile]);
 
   // === Revert / clear-tracking actions (explicit failures) ===
@@ -120,13 +181,13 @@ export default function SessionDiffCore({
     try {
       await postChangeAction({ action: 'revert-file', file: filePath }, 'revert file');
       if (selectedFile === filePath) setSelectedFile(null);
-      reloadFiles();
+      legacyFiles.reload();
     } catch (err) {
       console.error('[diff-core] Failed to revert file:', err);
     } finally {
       setReverting(false);
     }
-  }, [postChangeAction, selectedFile, reloadFiles]);
+  }, [postChangeAction, selectedFile, legacyFiles.reload]);
 
   const handleRevertAll = useCallback(async () => {
     if (!confirm('Revert all changes? This will restore files to their reconstructed pre-session state.')) return;
@@ -134,23 +195,23 @@ export default function SessionDiffCore({
     try {
       await postChangeAction({ action: 'revert-all' }, 'revert all');
       setSelectedFile(null);
-      reloadFiles();
+      legacyFiles.reload();
     } catch (err) {
       console.error('[diff-core] Failed to revert all changes:', err);
     } finally {
       setReverting(false);
     }
-  }, [postChangeAction, reloadFiles]);
+  }, [postChangeAction, legacyFiles.reload]);
 
   const handleClearTracking = useCallback(async () => {
     try {
       await postChangeAction({ action: 'clear-tracking' }, 'clear tracking');
-      setFiles([]);
+      legacyFiles.setFiles([]);
       setSelectedFile(null);
     } catch (err) {
       console.error('[diff-core] Failed to clear tracking:', err);
     }
-  }, [postChangeAction, setFiles]);
+  }, [postChangeAction, legacyFiles.setFiles]);
 
   // === Review send (delegated to parent; terminal-injection stays there) ===
   const handleSendAll = useCallback(async (mode: ReviewSendMode) => {
@@ -191,6 +252,7 @@ export default function SessionDiffCore({
       style={{ display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0, background: '#131316' }}
     >
       <DiffCoreStyles />
+      {evidenceNotice}
 
       {!hideHeader && (
         <div style={{
@@ -214,7 +276,7 @@ export default function SessionDiffCore({
                 </button>
               ))}
             </div>
-            {files.length > 0 && (
+            {files.length > 0 && !readOnlyEvidence && (
               <button onClick={handleClearTracking} className="cv-btn-outline">Clear Tracked</button>
             )}
             {headerRight}
@@ -240,7 +302,7 @@ export default function SessionDiffCore({
               selectedFile={selectedFile}
               onSelect={setSelectedFile}
               comments={comments}
-              loading={loading}
+              loading={filesLoading}
               error={filesError}
             />
           </div>
@@ -278,7 +340,7 @@ export default function SessionDiffCore({
         padding: '10px 16px', borderTop: '1px solid #26262e',
         display: 'flex', gap: 8, alignItems: 'center', flexShrink: 0,
       }}>
-        {files.length > 0 && (
+        {files.length > 0 && !readOnlyEvidence && (
           <RevertControls
             selectedFile={selectedFile}
             reverting={reverting}

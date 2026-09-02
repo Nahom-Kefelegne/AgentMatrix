@@ -21,6 +21,7 @@ import {
   detectLanguage,
   monacoOpts,
 } from './diff-core';
+import { baseName, parentPath } from '@/lib/paths/displayPath';
 import { FolderPicker } from './ui/FolderPicker';
 
 // Module-level file index cache — persists across re-renders/remounts, not page reloads
@@ -376,7 +377,7 @@ export default function ChangesViewer({ sessionId, sessionName, cwd, onClose, so
               <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
                 {modeToggle}
                 <span style={{ fontSize: 15, fontWeight: 700, color: '#fafafa' }}>
-                  {repoRoot?.split('/').pop() || 'Project'}
+                  {repoRoot ? baseName(repoRoot) : 'Project'}
                 </span>
                 {allFiles.length > 0 && (
                   <span style={{ fontSize: 12, color: '#71717a', fontWeight: 400 }}>({allFiles.length} files)</span>
@@ -453,8 +454,8 @@ export default function ChangesViewer({ sessionId, sessionName, cwd, onClose, so
                       <div style={{ padding: 20, color: '#555', textAlign: 'center' }}>No matches</div>
                     ) : (
                       filteredBrowseFiles.map(f => {
-                        const name = f.split('/').pop() || f;
-                        const dir = f.includes('/') ? f.replace(/\/[^/]+$/, '') : '';
+                        const name = baseName(f);
+                        const dir = parentPath(f);
                         const isSelected = browseFile === f;
                         const count = browseCommentCounts.get(f) || 0;
                         return (
@@ -466,7 +467,7 @@ export default function ChangesViewer({ sessionId, sessionName, cwd, onClose, so
                           }}>
                             <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                               <FileIcon name={name} />
-                              <span style={{ fontSize: 13, fontWeight: 600, color: isSelected ? '#eee' : '#ccc', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1 }}>{name}</span>
+                              <span title={f} style={{ fontSize: 13, fontWeight: 600, color: isSelected ? '#eee' : '#ccc', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1 }}>{name}</span>
                               {count > 0 && (
                                 <span style={{ fontSize: 10, padding: '0 5px', borderRadius: 8, background: '#fbbf2420', color: '#fbbf24', fontWeight: 700, flexShrink: 0 }}>{count}</span>
                               )}

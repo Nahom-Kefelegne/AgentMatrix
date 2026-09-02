@@ -38,6 +38,7 @@ export function CommentComposerPopover({
         }}>
           <span style={{ fontSize: 12, fontWeight: 700, color: '#fbbf24', display: 'flex', alignItems: 'center', gap: 6 }}>
             <span style={{ width: 6, height: 6, borderRadius: '50%', background: '#fbbf24', display: 'inline-block' }} />
+            {popover.side === 'original' ? 'Original · ' : ''}
             {popover.line === popover.endLine ? `Line ${popover.line}` : `Lines ${popover.line}\u2013${popover.endLine}`}
           </span>
           <button onClick={onDismiss} style={{

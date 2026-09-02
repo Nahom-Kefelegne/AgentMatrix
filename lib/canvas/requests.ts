@@ -16,6 +16,8 @@ import { getNavigationService, NavigationServiceError } from '@/lib/navigation/N
 import { getSession, updateSession } from '@/lib/state/sessionStore';
 import { emitToClients } from '@/lib/state/socketEmitter';
 import { retainCanvasRequest } from './requestStore';
+import { captureReviewSnapshot } from '@/lib/review/snapshot';
+import type { ReviewFileInput } from '@/lib/review/types';
 
 const CANVAS_KINDS = new Set<CanvasRequestKind>([
   'code',
@@ -34,7 +36,7 @@ const globalClock = globalThis as typeof globalThis & {
 const ARG_KEYS: Record<CanvasRequestKind, readonly string[]> = {
   code: ['path', 'startLine', 'startColumn', 'endLine', 'endColumn', 'title', 'summary'],
   locations: ['title', 'summary', 'locations'],
-  changes: ['scope', 'title', 'summary'],
+  changes: ['scope', 'files', 'baseRef', 'title', 'summary'],
   decision: ['question', 'options', 'allowCustom', 'title', 'summary'],
   validation: ['title', 'status', 'summary', 'command', 'failures'],
   plan: ['title', 'summary', 'items'],
@@ -124,6 +126,20 @@ function titleAndSummary(
   return {
     title: limitedString(args.title, 'title', 200, { optional: true }) ?? defaultTitle,
     summary: limitedString(args.summary, 'summary', 1_000, { optional: true }) ?? defaultSummary,
+  };
+}
+
+function reviewFileInput(value: unknown, index: number): ReviewFileInput {
+  const item = record(value, `files[${index}]`);
+  assertKnownKeys(item, ['path', 'reason'], `files[${index}]`);
+  return {
+    path: limitedString(item.path, `files[${index}].path`, 1_024)!,
+    reason: limitedString(
+      item.reason,
+      `files[${index}].reason`,
+      300,
+      { optional: true },
+    ),
   };
 }
 
@@ -436,14 +452,51 @@ export async function createCanvasRequest(
   }
 
   if (kind === 'changes') {
-    if (args.scope !== 'session') {
+    if (args.scope === 'session') {
+      if (args.files !== undefined || args.baseRef !== undefined) {
+        throw new NavigationServiceError(
+          'INVALID_CANVAS_REQUEST',
+          'files and baseRef are only supported when scope is "selection".',
+        );
+      }
+      const copy = titleAndSummary(args, 'Session Changes', 'Review this session’s changes');
+      return { ...requestBase(), kind, ...copy, payload: { scope: 'session' } };
+    }
+    if (args.scope !== 'selection') {
       throw new NavigationServiceError(
         'INVALID_CANVAS_REQUEST',
-        'present_changes currently supports scope "session" only.',
+        'present_changes scope must be "session" or "selection".',
       );
     }
-    const copy = titleAndSummary(args, 'Session Changes', 'Review this session’s changes');
-    return { ...requestBase(), kind, ...copy, payload: { scope: 'session' } };
+    if (!Array.isArray(args.files) || args.files.length < 1 || args.files.length > 50) {
+      throw new NavigationServiceError(
+        'INVALID_CANVAS_REQUEST',
+        'files must contain between 1 and 50 review entries.',
+      );
+    }
+    const selectedFiles = args.files.map(reviewFileInput);
+    const copy = titleAndSummary(
+      args,
+      'Selected Changes',
+      `Review ${selectedFiles.length} file${selectedFiles.length === 1 ? '' : 's'} selected by this session`,
+    );
+    const captured = await captureReviewSnapshot({
+      sessionId: options.sessionId,
+      root,
+      files: selectedFiles,
+      baseRef: args.baseRef,
+      signal: options.signal,
+    });
+    return {
+      ...requestBase(),
+      kind,
+      ...copy,
+      payload: {
+        scope: 'selection',
+        files: captured.files,
+        snapshot: captured.snapshot,
+      },
+    };
   }
 
   if (kind === 'decision') {

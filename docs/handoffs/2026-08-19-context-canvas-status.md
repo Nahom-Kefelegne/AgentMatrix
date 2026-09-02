@@ -125,7 +125,7 @@ The model never chooses:
 |---|---|---|---|
 | `present_code` | `code` | Shipped | Reuses Code or Markdown Document based on path |
 | `present_locations` | `locations` | Shipped | Grouped verified locations with inline snippets and Code handoff |
-| `present_changes` | `changes` | Shipped | Reuses session review/diff renderer |
+| `present_changes` | `changes` | Shipped | Preferred session-selected frozen worktree snapshots plus legacy transcript review |
 | `request_decision` | `decision` | Shipped | Interactive response delivery and retained receipt |
 | `update_plan` | `plan` | Implemented | Execution rail with summarized steps and silent progress replacement |
 
@@ -675,7 +675,7 @@ lowest-risk new renderer.
 
 ### 10.2 Plan
 
-The renderer is implemented and the MCP server is now version `1.5.0`.
+The renderer is implemented and the MCP server is now version `1.6.0`.
 
 Implemented item shape:
 
@@ -780,7 +780,7 @@ Do not run `start.sh` from a session hosted by AgentMatrix.
 `AGENTMATRIX_SESSION_ID` intentionally makes the script refuse self-restart
 because doing so disconnects the conversation.
 
-### Step 2 - Smoke-test MCP policy `1.5.0`
+### Step 2 - Smoke-test MCP policy `1.6.0`
 
 Launch a fresh managed session, then test:
 
@@ -875,7 +875,7 @@ renderer/protocol changes.
 - Decision idempotency/conflict behavior
 - Decision Stop-hook readiness path
 - resolved Decision after renderer reload
-- fresh MCP handshake reporting `agentmatrix 1.5.0`
+- fresh MCP handshake reporting `agentmatrix 1.6.0`
 - runtime/document instruction parity
 - all eight typed tools in `tools/list`
 - TypeScript and production builds

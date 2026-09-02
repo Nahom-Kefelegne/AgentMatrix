@@ -7,6 +7,12 @@ export interface FileChange {
   status: string;
   additions: number;
   deletions: number;
+  fileId?: string;
+  reason?: string;
+  previousPath?: string;
+  contentAvailable?: boolean;
+  contentKind?: 'text' | 'gitlink';
+  unavailableReason?: string;
 }
 
 // The raw diff payload for a single file.
@@ -14,6 +20,11 @@ export interface FileDiff {
   original: string;
   current: string;
   isNew: boolean;
+  contentAvailable?: boolean;
+  unavailableReason?: string;
+  snapshotRef?: string;
+  originalHash?: string;
+  currentHash?: string;
 }
 
 export type DiffMode = 'inline' | 'split';
@@ -37,6 +48,7 @@ export interface CommentAnchor {
 // Floating comment popover state (add a new comment or view an existing one).
 export interface FloatingPopover {
   mode: 'add' | 'view';
+  side?: 'original' | 'current';
   line: number;
   endLine: number;
   x: number;
@@ -68,7 +80,19 @@ export interface CommentsController {
   comments: ReviewComment[];
   setComments: React.Dispatch<React.SetStateAction<ReviewComment[]>>;
   reload: () => void;
-  addComment: (filePath: string, lineNumber: number, text: string) => void | Promise<void>;
+  addComment: (
+    filePath: string,
+    lineNumber: number,
+    text: string,
+    anchor?: {
+      snapshotRef?: string;
+      side?: 'original' | 'current';
+      startLine?: number;
+      endLine?: number;
+      contentHash?: string;
+      contextExcerpt?: string;
+    },
+  ) => void | Promise<void>;
   deleteComment: (commentId: string) => void | Promise<void>;
   resolveComment: (commentId: string) => void | Promise<void>;
   resolveAll: () => void | Promise<void>;

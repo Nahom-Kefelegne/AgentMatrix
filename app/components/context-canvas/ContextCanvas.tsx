@@ -22,6 +22,7 @@ import {
   navigationRequestForArtifact,
 } from './canvasArtifact';
 import type {
+  ChangesCanvasRequest,
   DecisionCanvasRequest,
   LocationsCanvasRequest,
   PlanCanvasRequest,
@@ -118,6 +119,10 @@ export default function ContextCanvas({ sessionId, sessionName, cwd, controller 
       : null;
   const planRequest: PlanCanvasRequest | null =
     artifact?.type === 'typed' && artifact.request.kind === 'plan'
+      ? artifact.request
+      : null;
+  const changesRequest: ChangesCanvasRequest | null =
+    artifact?.type === 'typed' && artifact.request.kind === 'changes'
       ? artifact.request
       : null;
   const disabledSearch =
@@ -295,6 +300,7 @@ export default function ContextCanvas({ sessionId, sessionName, cwd, controller 
             sessionName={sessionName}
             cwd={cwd}
             request={request}
+            canvasRequest={changesRequest}
             controller={controller}
           />
         ) : null}

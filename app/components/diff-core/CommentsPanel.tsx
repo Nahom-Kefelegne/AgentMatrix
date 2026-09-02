@@ -29,7 +29,7 @@ export function CommentsPanel({ comments, onDelete }: CommentsPanelProps) {
             opacity: c.resolved ? 0.5 : 1,
           }}>
             <span style={{ color: c.resolved ? '#51cf66' : '#fbbf24', fontWeight: 700, minWidth: 50 }}>
-              {c.resolved ? '\u2713' : ''} Line {c.lineNumber}
+              {c.resolved ? '\u2713' : ''} {c.side === 'original' ? 'Original ' : ''}Line {c.lineNumber}
             </span>
             <span style={{ flex: 1, color: '#ccc', textDecoration: c.resolved ? 'line-through' : 'none' }}>{c.text}</span>
             <button onClick={() => onDelete(c.id)} style={{

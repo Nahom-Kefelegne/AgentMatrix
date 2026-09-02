@@ -39,10 +39,12 @@ TOOL SELECTION
   Do not use as repository search or for speculative paths.
 
 - present_changes
-  Purpose: let the user review the meaningful work produced by this session.
-  Use when the user asks what changed or when a coherent edit set is ready for inspection.
+  Purpose: let the user review a coherent, authoritative snapshot of meaningful work.
+  Use scope "selection" with exact verified files when the session knows what should be reviewed. AgentMatrix resolves those files from the session's registered worktree and freezes the evidence.
+  Use legacy scope "session" only when transcript-attributed changes are specifically needed.
+  Call at a coherent milestone, before approval/completion, or when the user asks to review—not after every file edit.
   Prefer this over opening each edited file individually.
-  Do not use when there are no meaningful session-attributed changes.
+  Do not supply arbitrary worktree paths, model-authored diff content, or speculative files.
 
 - request_decision
   Purpose: give the user a clear structured choice that unblocks progress.

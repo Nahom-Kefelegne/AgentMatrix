@@ -73,7 +73,8 @@ deferred. Decision adds one narrow host-authored resolution lifecycle.
 
 - `present_code` is adapted client-side to the existing Code/Document renderer.
 - `present_locations` renders the verified-location ledger and can hand off to Code.
-- `present_changes` is adapted client-side to the existing session review renderer.
+- `present_changes` supports legacy session review and preferred
+  session-selected frozen worktree snapshots through the existing renderer.
 - `request_decision` renders a blocking choice and a retained response receipt.
 - `update_plan` renders the retained execution rail and replaces progress in place.
 

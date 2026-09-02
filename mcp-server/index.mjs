@@ -21,7 +21,7 @@ const sessionId = process.env.AGENTMATRIX_SESSION_ID || process.env.CLAUDE_SESSI
 const capability = process.env.AGENTMATRIX_NAVIGATION_CAPABILITY || '';
 
 const server = new Server(
-  { name: 'agentmatrix', version: '1.5.0' },
+  { name: 'agentmatrix', version: '1.6.0' },
   {
     capabilities: { tools: {} },
     instructions: AGENTMATRIX_MCP_INSTRUCTIONS,
@@ -127,14 +127,42 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
     },
     {
       name: 'present_changes',
-      description: 'Present the meaningful session-attributed change set when edits are ready for inspection or the user asks what changed. Prefer this over opening every modified file separately.',
+      description: 'Present a coherent change set for review. Use scope "selection" with exact verified files when the session knows what the user should review; AgentMatrix captures authoritative frozen diffs from the session worktree. Use at milestones, not after every edit.',
       inputSchema: {
         type: 'object',
         properties: {
           scope: {
             type: 'string',
-            enum: ['session'],
-            description: 'Initial release supports the current managed session only.',
+            enum: ['session', 'selection'],
+            description: 'Use "selection" for exact session-selected files, or "session" for legacy transcript-attributed changes.',
+          },
+          files: {
+            type: 'array',
+            minItems: 1,
+            maxItems: 50,
+            description: 'Exact verified files to review. Required only with scope "selection".',
+            items: {
+              type: 'object',
+              properties: {
+                path: {
+                  type: 'string',
+                  maxLength: 1024,
+                  description: 'Repository-relative POSIX path. Absolute paths, backslashes, drive letters, and parent traversal are forbidden.',
+                },
+                reason: {
+                  type: 'string',
+                  maxLength: 300,
+                  description: 'Why this file belongs in the review set.',
+                },
+              },
+              required: ['path'],
+              additionalProperties: false,
+            },
+          },
+          baseRef: {
+            type: 'string',
+            maxLength: 200,
+            description: 'Optional Git commit-ish to compare against in selection mode. AgentMatrix resolves it to a commit before use.',
           },
           title: { type: 'string', maxLength: 200 },
           summary: { type: 'string', maxLength: 1000 },

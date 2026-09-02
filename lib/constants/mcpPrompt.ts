@@ -24,7 +24,7 @@ export const MCP_SYSTEM_PROMPT = `CRITICAL — Agent Matrix Status Reporting (yo
    Anticipate which evidence the user is likely to inspect next, and present it when doing so removes a manual navigation, comparison, review, or copy/paste step:
    - present_code: exact verified file/range; Markdown automatically renders as a document
    - present_locations: several exact verified locations that should be compared
-   - present_changes: meaningful session changes ready for inspection
+   - present_changes: a coherent milestone review; prefer scope "selection" with exact verified files so AgentMatrix freezes authoritative worktree evidence; never call after every edit
    - present_validation: checks that actually ran; never fabricate results
    - update_plan: meaningful phase changes only
    - present_runtime_evidence: observed logs/errors/requests with no secrets

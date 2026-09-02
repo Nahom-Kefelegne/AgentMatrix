@@ -22,7 +22,14 @@ export function detectLanguage(filePath: string): string {
 
 // Per-status accent colors for the changed-files list.
 export const statusColors: Record<string, string> = {
-  modified: '#f59e0b', new: '#51cf66', deleted: '#ff6b6b', untracked: '#a78bfa',
+  modified: '#f59e0b',
+  new: '#51cf66',
+  added: '#51cf66',
+  deleted: '#ff6b6b',
+  renamed: '#60a5fa',
+  unchanged: '#71717a',
+  unavailable: '#a78bfa',
+  untracked: '#a78bfa',
 };
 
 // Shared, read-only Monaco editor options used by both the diff and browse

@@ -7,6 +7,7 @@ import {
 import { NavigationServiceError } from '@/lib/navigation/NavigationService';
 import { verifyNavigationCapability } from '@/lib/navigation/rootRegistry';
 import { getSession } from '@/lib/state/sessionStore';
+import { discardReviewSnapshot } from '@/lib/review/snapshotStore';
 
 export const runtime = 'nodejs';
 
@@ -71,6 +72,12 @@ export async function POST(request: Request) {
       !getSession(sessionId)
       || !verifyNavigationCapability(sessionId, capability)
     ) {
+      if (
+        canvasRequest.kind === 'changes'
+        && canvasRequest.payload.scope === 'selection'
+      ) {
+        discardReviewSnapshot(canvasRequest.payload.snapshot.snapshotRef);
+      }
       return NextResponse.json(
         { error: { code: 'SESSION_ENDED', message: 'The managed session ended before the Canvas request was accepted.' } },
         { status: 410 },

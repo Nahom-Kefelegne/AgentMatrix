@@ -224,7 +224,33 @@ sequenceDiagram
     PTY->>Agent: continue from user decision
 ```
 
-## 8. File-Change to Markdown Preview Flow
+## 8. Session-Selected Review Flow
+
+```mermaid
+sequenceDiagram
+    participant Agent as Managed session
+    participant MCP as present_changes
+    participant Capture as Review snapshot service
+    participant Git as Session worktree + Git objects
+    participant Store as Bounded snapshot store
+    participant Canvas as DiffCanvas / SessionDiffCore
+    participant API as Renderer-token review API
+
+    Agent->>MCP: scope=selection + exact files + optional baseRef
+    MCP->>Capture: capability-bound session identity
+    Capture->>Git: resolve root, HEAD, base, selected paths
+    Git-->>Capture: host-authoritative original/current bytes
+    Capture->>Store: atomic frozen snapshot + content hashes
+    Capture-->>Canvas: file manifest + provenance + opaque file IDs
+    Canvas->>API: load selected frozen file by fileId
+    API->>Store: lease and retrieve content
+    Store-->>Canvas: immutable original/current diff
+```
+
+The session selects **what** matters. AgentMatrix owns **how** evidence is
+resolved, bounded, frozen, authenticated, expired, and marked stale.
+
+## 9. File-Change to Markdown Preview Flow
 
 ```mermaid
 flowchart LR
@@ -244,7 +270,7 @@ flowchart LR
 Only validated `docs/design/*.md` changes auto-preview. Source remains
 available through Monaco, and Markdown is sanitized before rendering.
 
-## 9. Where to Make Changes
+## 10. Where to Make Changes
 
 | Goal | Primary files |
 |---|---|
@@ -256,10 +282,11 @@ available through Monaco, and Markdown is sanitized before rendering.
 | Change Control Center layout | `DashboardV2*.tsx`, `mission-control.css` |
 | Change Office behavior | `OfficeWorkspace.tsx`, `OfficeCanvas.tsx`, `lib/engine/*`, `office.css` |
 | Change Markdown security | `MarkdownPreview.tsx`, `markdown.ts`, navigation link routes |
+| Change selected review capture | `lib/review/*`, `app/api/canvas/review/*`, `DiffCanvas.tsx`, `SessionDiffCore.tsx` |
 | Change provider launch behavior | `lib/cli/*Provider.ts`, `electron/pty/PtyManager.ts` |
 | Change persistent app state | `lib/state/*`, `~/.agentmatrix/*` path helpers |
 
-## 10. Reading Order for New Contributors
+## 11. Reading Order for New Contributors
 
 1. `docs/design/repository-flow-map.md`
 2. `docs/design/dashboard-v2.md`

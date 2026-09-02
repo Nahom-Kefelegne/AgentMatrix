@@ -3,6 +3,7 @@
 import { useMemo } from 'react';
 import type { FileChange, ReviewComment } from './types';
 import { statusColors } from './editorConfig';
+import { baseName, parentPath } from '@/lib/paths/displayPath';
 
 interface ChangedFilesListProps {
   files: FileChange[];
@@ -49,8 +50,8 @@ export function ChangedFilesList({ files, selectedFile, onSelect, comments, load
   return (
     <>
       {files.map(f => {
-        const name = f.path.split('/').pop() || f.path.split('\\').pop() || f.path;
-        const dir = f.path.replace(/[/\\][^/\\]+$/, '');
+        const name = baseName(f.path);
+        const dir = f.reason || parentPath(f.path);
         const isSelected = selectedFile === f.path;
         const commentCount = commentCounts.get(f.path) || 0;
         return (
@@ -65,7 +66,7 @@ export function ChangedFilesList({ files, selectedFile, onSelect, comments, load
               containIntrinsicSize: 'auto 58px',
             }}>
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-              <div style={{ fontSize: 13, fontWeight: 600, color: isSelected ? '#fafafa' : '#c8c8d0' }}>{name}</div>
+              <div title={f.path} style={{ fontSize: 13, fontWeight: 600, color: isSelected ? '#fafafa' : '#c8c8d0' }}>{name}</div>
               {commentCount > 0 && (
                 <span style={{ fontSize: 10, padding: '1px 6px', borderRadius: 8, background: '#fbbf2420', color: '#fbbf24', fontWeight: 700 }}>{commentCount}</span>
               )}

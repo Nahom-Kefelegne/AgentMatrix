@@ -1,9 +1,10 @@
 // Writes review markdown for Claude to read and act on
 import { NextResponse } from 'next/server';
 import { writeFileSync, unlinkSync, existsSync } from 'fs';
-import { basename } from 'path';
 import type { ReviewComment } from '@/lib/types';
 import { reviewFilePath, REVIEW_DIR, ensureDir } from '@/lib/state/paths';
+import { baseName, parentPath } from '@/lib/paths/displayPath';
+import { verifyRendererApiRequest } from '@/lib/navigation/rendererAuth';
 
 function getReviewFilePath(sessionId: string): string {
   ensureDir(REVIEW_DIR);
@@ -16,6 +17,9 @@ function getReviewFilePath(sessionId: string): string {
  * Body: { sessionId, comments: ReviewComment[] }
  */
 export async function POST(request: Request) {
+  if (!verifyRendererApiRequest(request)) {
+    return NextResponse.json({ error: 'Unauthorized renderer' }, { status: 401 });
+  }
   try {
     const body = await request.json();
     const { sessionId, comments } = body as { sessionId: string; comments: ReviewComment[] };
@@ -43,17 +47,43 @@ export async function POST(request: Request) {
 
     for (const [file, fileComments] of grouped) {
       // Use shorter display path
-      const displayPath = file.includes('/') ? file.split('/').slice(-3).join('/') : basename(file);
+      const parent = parentPath(file).split('/').filter(Boolean).slice(-2);
+      const displayPath = [...parent, baseName(file)].join('/');
       sections.push(`## ${displayPath}`);
       sections.push(`<!-- Full path: ${file} -->`);
       sections.push('');
 
       // Sort by line number
-      fileComments.sort((a, b) => a.lineNumber - b.lineNumber);
+      fileComments.sort((a, b) => {
+        const sideOrder = (a.side === 'original' ? 0 : 1)
+          - (b.side === 'original' ? 0 : 1);
+        return sideOrder || a.lineNumber - b.lineNumber;
+      });
 
       for (const c of fileComments) {
-        sections.push(`### Line ${c.lineNumber}`);
+        const startLine = c.startLine ?? c.lineNumber;
+        const endLine = c.endLine ?? startLine;
+        const sideLabel = c.side === 'original'
+          ? ' — removed/base side'
+          : c.side === 'current'
+            ? ' — current side'
+            : '';
+        sections.push(
+          `### ${startLine === endLine ? `Line ${startLine}` : `Lines ${startLine}-${endLine}`}${sideLabel}`,
+        );
+        if (c.snapshotRef) {
+          sections.push(`Snapshot: \`${c.snapshotRef}\``);
+          if (c.contentHash) sections.push(`Content hash: \`${c.contentHash}\``);
+          sections.push('');
+        }
         sections.push(c.text);
+        if (c.contextExcerpt) {
+          sections.push('');
+          sections.push('Frozen review context:');
+          sections.push('```text');
+          sections.push(c.contextExcerpt.replace(/```/g, '``\u200b`'));
+          sections.push('```');
+        }
         sections.push('');
       }
     }
@@ -73,6 +103,9 @@ export async function POST(request: Request) {
  * Body: { sessionId }
  */
 export async function DELETE(request: Request) {
+  if (!verifyRendererApiRequest(request)) {
+    return NextResponse.json({ error: 'Unauthorized renderer' }, { status: 401 });
+  }
   try {
     const body = await request.json();
     const filePath = getReviewFilePath(body.sessionId);

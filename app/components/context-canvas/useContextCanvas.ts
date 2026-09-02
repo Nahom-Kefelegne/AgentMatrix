@@ -217,7 +217,7 @@ function activateArtifact(
   };
 }
 
-function replaceActivePlan(
+function replaceActiveTypedArtifact(
   state: SessionCanvasState,
   artifact: CanvasArtifact,
 ): SessionCanvasState {
@@ -236,7 +236,9 @@ function replaceActivePlan(
     history,
     historyIndex,
     queuedArtifacts: state.queuedArtifacts.filter(item =>
-      item.type !== 'typed' || item.request.kind !== 'plan'),
+      item.type !== 'typed'
+      || artifact.type !== 'typed'
+      || item.request.kind !== artifact.request.kind),
     closedAt: 0,
   };
 }
@@ -247,11 +249,11 @@ function activateOrReplaceArtifact(
 ): SessionCanvasState {
   if (
     artifact.type === 'typed'
-    && artifact.request.kind === 'plan'
+    && (artifact.request.kind === 'plan' || artifact.request.kind === 'changes')
     && state.activeArtifact?.type === 'typed'
-    && state.activeArtifact.request.kind === 'plan'
+    && state.activeArtifact.request.kind === artifact.request.kind
   ) {
-    return replaceActivePlan(state, artifact);
+    return replaceActiveTypedArtifact(state, artifact);
   }
   return activateArtifact(state, artifact);
 }

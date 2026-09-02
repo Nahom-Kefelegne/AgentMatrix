@@ -1374,6 +1374,52 @@ label.cc-decision-option:hover,
   flex-direction: column;
 }
 
+.cc-review-provenance {
+  display: grid;
+  flex: 0 0 auto;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 5px 12px;
+  align-items: center;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--mc-line-strong);
+  color: var(--mc-faint);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 8px;
+  background: color-mix(in srgb, var(--mc-review) 7%, var(--mc-panel));
+}
+
+.cc-review-provenance > div {
+  display: flex;
+  min-width: 0;
+  gap: 6px;
+  align-items: center;
+}
+
+.cc-review-provenance strong {
+  color: var(--mc-ink);
+  font-weight: 700;
+}
+
+.cc-review-provenance span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cc-review-provenance p {
+  grid-column: 1 / -1;
+  margin: 2px 0 0;
+  color: var(--mc-warning);
+  font-family: inherit;
+  font-size: 9px;
+  line-height: 1.45;
+}
+
+.cc-review-provenance--warning {
+  border-bottom-color: color-mix(in srgb, var(--mc-warning) 45%, var(--mc-line));
+  background: color-mix(in srgb, var(--mc-warning) 8%, var(--mc-panel));
+}
+
 .cc-diff > div:last-child {
   flex: 1;
   min-height: 0;
