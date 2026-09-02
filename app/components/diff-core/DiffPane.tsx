@@ -22,8 +22,8 @@ export function DiffPane({ hasSelection, diff, language, diffMode, loading, erro
   if (!hasSelection) {
     return (
       <div style={{ height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', flexDirection: 'column', gap: 8 }}>
-        <div style={{ fontSize: 14, color: '#555' }}>Select a file to view changes</div>
-        <div style={{ fontSize: 12, color: '#444' }}>Highlight code or click the gutter to add comments</div>
+        <div style={{ fontSize: 16, color: '#555' }}>Select a file to view changes</div>
+        <div style={{ fontSize: 14, color: '#444' }}>Highlight code or click the gutter to add comments</div>
       </div>
     );
   }

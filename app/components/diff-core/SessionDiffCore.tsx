@@ -262,9 +262,9 @@ export default function SessionDiffCore({
         }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
             {headerLeft}
-            <span style={{ fontSize: 15, fontWeight: 700, color: '#fafafa' }}>{sessionName}</span>
+            <span style={{ fontSize: 17, fontWeight: 700, color: '#fafafa' }}>{sessionName}</span>
             {files.length > 0 && (
-              <span style={{ fontSize: 12, color: '#71717a', fontWeight: 400 }}>({files.length} files)</span>
+              <span style={{ fontSize: 14, color: '#71717a', fontWeight: 400 }}>({files.length} files)</span>
             )}
           </div>
           <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>

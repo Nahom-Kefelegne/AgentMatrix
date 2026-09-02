@@ -46,7 +46,7 @@ export const DIFF_CORE_STYLE_CSS = `
   }
   /* Segmented toggle (Changes/Browse, Inline/Split) — matches app pill toggles */
   .cv-seg {
-    padding: 5px 13px; font-size: 11px; font-weight: 600; border-radius: 6px;
+    padding: 5px 13px; font-size: 13px; font-weight: 600; border-radius: 6px;
     border: none; background: transparent; color: #71717a; cursor: pointer;
     font-family: inherit; transition: color 0.15s, background 0.15s;
   }
@@ -56,7 +56,7 @@ export const DIFF_CORE_STYLE_CSS = `
   /* Outline button (Change Root, Clear Tracked, Cancel) */
   .cv-btn-outline {
     padding: 5px 12px; border-radius: 7px; border: 1px solid #33333c;
-    background: transparent; color: #a1a1aa; font-size: 12px; cursor: pointer;
+    background: transparent; color: #a1a1aa; font-size: 14px; cursor: pointer;
     font-family: inherit; transition: all 0.15s;
   }
   .cv-btn-outline:hover { border-color: #4a4a56; background: #1c1c22; color: #e4e4e7; }

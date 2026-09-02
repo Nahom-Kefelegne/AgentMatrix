@@ -66,16 +66,16 @@ export function ChangedFilesList({ files, selectedFile, onSelect, comments, load
               containIntrinsicSize: 'auto 58px',
             }}>
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-              <div title={f.path} style={{ fontSize: 13, fontWeight: 600, color: isSelected ? '#fafafa' : '#c8c8d0' }}>{name}</div>
+              <div title={f.path} style={{ fontSize: 15, fontWeight: 600, color: isSelected ? '#fafafa' : '#c8c8d0' }}>{name}</div>
               {commentCount > 0 && (
                 <span style={{ fontSize: 10, padding: '1px 6px', borderRadius: 8, background: '#fbbf2420', color: '#fbbf24', fontWeight: 700 }}>{commentCount}</span>
               )}
             </div>
-            <div style={{ fontSize: 11, color: '#71717a', fontFamily: "'Courier New', monospace", marginTop: 2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{dir}</div>
-            <div style={{ display: 'flex', gap: 8, marginTop: 5, fontSize: 11, alignItems: 'center' }}>
+            <div style={{ fontSize: 13, color: '#71717a', fontFamily: "'Courier New', monospace", marginTop: 2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{dir}</div>
+            <div style={{ display: 'flex', gap: 8, marginTop: 5, fontSize: 13, alignItems: 'center' }}>
               <span style={{
                 color: statusColors[f.status] || '#888', fontWeight: 700,
-                fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.03em',
+                fontSize: 12, textTransform: 'uppercase', letterSpacing: '0.03em',
                 padding: '1px 7px', borderRadius: 5,
                 background: `${statusColors[f.status] || '#888'}1a`,
               }}>{f.status}</span>

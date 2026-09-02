@@ -74,7 +74,7 @@ export default function CodePreview({ request }: { request: NavigationRequest })
         domReadOnly: true,
         automaticLayout: true,
         minimap: { enabled: false },
-        fontSize: 13,
+        fontSize: 15,
         lineHeight: 21,
         lineNumbers: 'on',
         scrollBeyondLastLine: false,

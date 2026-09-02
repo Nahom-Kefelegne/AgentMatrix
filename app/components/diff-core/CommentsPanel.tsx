@@ -25,7 +25,7 @@ export function CommentsPanel({ comments, onDelete }: CommentsPanelProps) {
         {comments.map(c => (
           <div key={c.id} style={{
             display: 'flex', alignItems: 'center', gap: 8,
-            padding: '5px 12px', fontSize: 12,
+            padding: '5px 12px', fontSize: 14,
             opacity: c.resolved ? 0.5 : 1,
           }}>
             <span style={{ color: c.resolved ? '#51cf66' : '#fbbf24', fontWeight: 700, minWidth: 50 }}>

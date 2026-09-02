@@ -39,7 +39,7 @@ export const monacoOpts: monacoEditor.IStandaloneEditorConstructionOptions &
   readOnly: true,
   glyphMargin: true,
   minimap: { enabled: false },
-  fontSize: 13,
+  fontSize: 15,
   lineNumbers: 'on' as const,
   scrollBeyondLastLine: false,
   smoothScrolling: true,

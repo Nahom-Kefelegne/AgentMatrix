@@ -1457,3 +1457,65 @@ label.cc-decision-option:hover,
     transition: none;
   }
 }
+
+/* Canvas readability scale. Keep panel geometry fixed; enlarge only text and
+   controls so the terminal/Canvas split remains stable at narrow widths. */
+.cc-canvas .cc-toolbar button,
+.cc-canvas .cc-footer button,
+.cc-canvas .cc-error button,
+.cc-canvas .cc-empty button,
+.cc-canvas .cc-document-toolbar button {
+  font-size: 11px;
+}
+
+.cc-canvas .cc-title-label { font-size: 9px; }
+.cc-canvas .cc-title strong { font-size: 13px; }
+.cc-canvas .cc-provenance { font-size: 9px; }
+.cc-canvas .cc-loading { font-size: 11px; }
+.cc-canvas .cc-empty strong,
+.cc-canvas .cc-error strong { font-size: 14px; }
+.cc-canvas .cc-empty span,
+.cc-canvas .cc-error span { font-size: 12px; }
+
+.cc-canvas .cc-locations-overview strong { font-size: 13px; }
+.cc-canvas .cc-locations-overview div > span { font-size: 11px; }
+.cc-canvas .cc-locations-verified { font-size: 9px; }
+.cc-canvas .cc-location-file { font-size: 11px; }
+.cc-canvas .cc-location-range { font-size: 10px; }
+.cc-canvas .cc-location-copy strong { font-size: 12px; }
+.cc-canvas .cc-location-copy span { font-size: 10px; }
+.cc-canvas .cc-location-preview-toolbar > span { font-size: 9px; }
+.cc-canvas .cc-location-preview-toolbar button,
+.cc-canvas .cc-location-preview-state button,
+.cc-canvas .cc-location-preview-state { font-size: 10px; }
+.cc-canvas .cc-location-code { font-size: 11px; }
+.cc-canvas .cc-location-code-omission { font-size: 10px; }
+
+.cc-canvas .cc-plan-progress-copy strong { font-size: 13px; }
+.cc-canvas .cc-plan-progress-copy div > span { font-size: 10px; }
+.cc-canvas .cc-plan-progress-copy > span { font-size: 12px; }
+.cc-canvas .cc-plan-item-copy strong { font-size: 12px; }
+.cc-canvas .cc-plan-status { font-size: 9px; }
+.cc-canvas .cc-plan-summary { font-size: 11px; }
+
+.cc-canvas .cc-decision-question > span { font-size: 10px; }
+.cc-canvas .cc-decision-question h3 {
+  font-size: clamp(16px, 1.55vw, 20px);
+}
+.cc-canvas .cc-decision-option-copy strong { font-size: 13px; }
+.cc-canvas .cc-decision-option-copy > span { font-size: 11px; }
+.cc-canvas .cc-decision-option--custom textarea { font-size: 12px; }
+.cc-canvas .cc-decision-count,
+.cc-canvas .cc-decision-actions > span,
+.cc-canvas .cc-decision-receipt > div > span { font-size: 10px; }
+.cc-canvas .cc-decision-error,
+.cc-canvas .cc-decision-actions button,
+.cc-canvas .cc-decision-receipt strong { font-size: 12px; }
+
+.cc-canvas .cc-review-provenance { font-size: 10px; }
+.cc-canvas .cc-review-provenance p,
+.cc-canvas .cc-diff-error { font-size: 11px; }
+
+.cc-canvas .cc-markdown { font-size: 15px; }
+.cc-canvas .cc-markdown table { font-size: 13px; }
+.cc-canvas .cc-markdown pre code { font-size: 13px; }
