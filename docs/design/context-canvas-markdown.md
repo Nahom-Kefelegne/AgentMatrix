@@ -36,6 +36,8 @@ the same document mode.
    not every intermediate write.
 9. Background-session changes queue in that session.
 10. Large documents over 512 KB require an explicit **Render Anyway** action.
+11. Fenced `mermaid` blocks render as static, sanitized diagrams with Source
+    fallback.
 
 ## 3. Component Contract
 
@@ -76,6 +78,7 @@ It:
 - Offers Preview/Source without mounting Monaco until Source is selected.
 - Resolves internal links through the root-scoped NavigationService.
 - Blocks images in the initial release.
+- Lazily loads Mermaid only when a `mermaid` fence is rendered.
 - Preserves the terminal’s keyboard focus.
 
 ### Shared file state
@@ -178,8 +181,18 @@ Repository Markdown is treated as untrusted content.
   canonical target must remain inside the session repository.
 - Images are replaced with a noninteractive placeholder. A validated raster asset
   route is intentionally deferred.
-- Code blocks render as escaped text and are never executed.
-- Mermaid is treated as an ordinary code block.
+- Ordinary code blocks render as escaped text and are never executed.
+- Mermaid uses strict security mode with HTML labels, click binding, external
+  resources, and document-provided security overrides disabled.
+- `click` directives are stripped before render; Mermaid init/frontmatter
+  configuration, image nodes, external protocols, and CSS image functions are
+  rejected before Mermaid can create DOM or request resources.
+- Advanced `@{...}` node metadata is rejected in V1 because quoted image keys
+  can initiate resource loading before post-render SVG sanitization.
+- Generated SVG is parsed inertly, then scripts, foreign objects, images,
+  embedded objects, SVG animation elements, event handlers, links, external URL
+  references, unsafe/motion CSS, and fixed dimensions are removed before DOM
+  insertion.
 
 The renderer never gains filesystem, Git, shell, or write access.
 
@@ -219,14 +232,16 @@ history and document navigation.
 - File reads remain bounded by the existing 2 MB navigation limit.
 - Automatic rendering requires confirmation above 512 KB.
 - Code blocks use plain escaped text; syntax-highlighting bundles are deferred.
-- Relative images and Mermaid are deferred to avoid network, decode, and layout
-  costs over remote desktop.
+- Mermaid is dynamically imported only for a diagram fence. Renders are
+  serialized, static, bounded to 12,000 source characters, 300 lines, 240 edge
+  tokens, 512 KB generated SVG, and 2.5 seconds.
+- Mermaid never fetches remote resources or starts continuous animation.
 
 ## 9. Current Limitations
 
 - Bash-generated Markdown is not automatically attributed.
 - Images are not rendered.
-- Mermaid and math are not rendered.
+- Math is not rendered.
 - Cross-document heading fragments open the target document and then scroll when
   the matching heading is available.
 - Duplicate Markdown headings share the same generated fragment ID.
@@ -239,19 +254,20 @@ history and document navigation.
 2. Validated raster asset endpoint with ETags and byte/dimension limits.
 3. Turn-level transcript reconciliation for multi-file changes.
 4. Narrow file observation for Bash-generated Markdown.
-5. Sandboxed, lazy Mermaid rendering:
-   - detect fenced code blocks whose language is `mermaid`
-   - keep the original source available through Preview/Source
-   - dynamically import Mermaid only when a document contains a diagram
-   - use strict security mode with no HTML labels, click handlers, external
-     links, scripts, or runtime configuration from document content
-   - render into an isolated, noninteractive container after sanitizing the
-     generated SVG
-   - show a bounded error state with **View source** when parsing fails
-   - cap diagram source length, node/edge count, generated SVG size, and render
-     time before falling back to source
-   - use static rendering only; no continuous layout animation
-   - re-render on theme change and document content change
-   - never fetch remote resources
-6. Optional wide-screen Preview/Source split.
-7. Explicit MCP `open_document` with `rendered | source | split` intent.
+5. Optional wide-screen Preview/Source split.
+6. Explicit MCP `open_document` with `rendered | source | split` intent.
+
+## 11. Mermaid Validation
+
+- A live flowchart rendered in the real Context Canvas.
+- A strict-security `click` directive was stripped before render while the
+  underlying node and diagram layout remained intact.
+- Invalid Mermaid rendered a concise **Diagram unavailable** state with
+  **View source**.
+- The browser-executed sanitizer probe passed 23 assertions covering source
+  limits, config directives, stripped clicks, relative/external image sources,
+  quoted image metadata, inline click directives, scripts, foreign objects, SVG
+  animation, event handlers, unsafe CSS/image functions, inert anchors, and
+  preserved transforms/internal markers.
+- Theme or source changes trigger a new serialized render; unmounted diagrams
+  never insert late output.

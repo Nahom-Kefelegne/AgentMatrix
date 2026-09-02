@@ -15,6 +15,7 @@ import rehypeSanitize, { defaultSchema } from 'rehype-sanitize';
 import remarkGfm from 'remark-gfm';
 import type { NavigationRequest, NavigationTarget } from '@/lib/navigation/types';
 import CodePreview from './CodePreview';
+import MermaidDiagram from './MermaidDiagram';
 import type { ContextCanvasController } from './useContextCanvas';
 import { useNavigationFile } from './useNavigationFile';
 
@@ -202,6 +203,33 @@ export default function MarkdownPreview({ request, controller }: MarkdownPreview
           aria-label={props.checked ? 'Completed task' : 'Incomplete task'}
         />
       ),
+      pre: ({ children, ...props }) => {
+        const child = Children.toArray(children)[0];
+        if (
+          child
+          && typeof child === 'object'
+          && 'props' in child
+          && child.props
+          && typeof child.props === 'object'
+          && 'className' in child.props
+          && typeof child.props.className === 'string'
+          && child.props.className.split(/\s+/).includes('language-mermaid')
+        ) {
+          return <>{children}</>;
+        }
+        return <pre {...props}>{children}</pre>;
+      },
+      code: ({ className = '', children, ...props }) => {
+        if (className.split(/\s+/).includes('language-mermaid')) {
+          return (
+            <MermaidDiagram
+              source={textFromChildren(children).replace(/\n$/, '')}
+              onViewSource={() => setView('source')}
+            />
+          );
+        }
+        return <code className={className} {...props}>{children}</code>;
+      },
     };
   }, [handleInternalLink]);
 

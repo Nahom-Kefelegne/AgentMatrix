@@ -260,15 +260,18 @@ flowchart LR
     Cache["useNavigationFile invalidation"]
     Policy{"Selected and unprotected?"}
     Preview["MarkdownPreview"]
+    Mermaid["Lazy MermaidDiagram<br/>strict + sanitized SVG"]
     Queue["session Canvas queue"]
 
     Tool --> Hook --> Event --> Cache --> Policy
     Policy -- Yes --> Preview
     Policy -- "background / pinned / human artifact" --> Queue
+    Preview -- "fenced mermaid block" --> Mermaid
 ```
 
 Only validated `docs/design/*.md` changes auto-preview. Source remains
-available through Monaco, and Markdown is sanitized before rendering.
+available through Monaco. Markdown is sanitized before rendering; Mermaid is
+loaded only for diagram fences and its generated SVG is sanitized again.
 
 ## 10. Where to Make Changes
 
@@ -281,7 +284,7 @@ available through Monaco, and Markdown is sanitized before rendering.
 | Change session lifecycle | `electron/pty/PtyManager.ts`, `electron/terminalBridge.ts`, `lib/state/sessionStore.ts` |
 | Change Control Center layout | `DashboardV2*.tsx`, `mission-control.css` |
 | Change Office behavior | `OfficeWorkspace.tsx`, `OfficeCanvas.tsx`, `lib/engine/*`, `office.css` |
-| Change Markdown security | `MarkdownPreview.tsx`, `markdown.ts`, navigation link routes |
+| Change Markdown/Mermaid security | `MarkdownPreview.tsx`, `MermaidDiagram.tsx`, `mermaidSecurity.ts`, navigation link routes |
 | Change selected review capture | `lib/review/*`, `app/api/canvas/review/*`, `DiffCanvas.tsx`, `SessionDiffCore.tsx` |
 | Change provider launch behavior | `lib/cli/*Provider.ts`, `electron/pty/PtyManager.ts` |
 | Change persistent app state | `lib/state/*`, `~/.agentmatrix/*` path helpers |

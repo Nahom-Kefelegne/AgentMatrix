@@ -71,6 +71,7 @@ graph TD
     DashboardV2 --> ContextCanvas
     ContextCanvas --> CodePreview
     ContextCanvas --> MarkdownPreview
+    MarkdownPreview --> MermaidDiagram["MermaidDiagram (lazy library)"]
     ContextCanvas --> LocationsArtifact
     ContextCanvas --> DecisionArtifact
     ContextCanvas --> PlanArtifact

@@ -100,10 +100,10 @@ flowchart LR
 | Document | Scope | Key Topics |
 |----------|-------|------------|
 | [Repository Flow Map](repository-flow-map.md) | Visual repository and runtime architecture | Source tree, Electron/server/renderer topology, session events, Control Center, Context Canvas, Plan, Decision, and Markdown flows |
-| [Session-Selected Review Canvas](../plans/session-selected-review-canvas.md) | Proposed Git-backed review redesign | Session-selected files, host-resolved branch/worktree snapshots, renderer API, retained replacement, and Windows filename fix |
+| [Session-Selected Review Canvas](../plans/session-selected-review-canvas.md) | Implemented Git-backed review | Session-selected files, host-resolved branch/worktree snapshots, renderer API, retained replacement, and Windows filename fix |
 | [Control Center](dashboard-v2.md) | Console-first dashboard and Context Canvas | Native command rail, unified session list, embedded CLI, fullscreen, Monaco code/diff preview, navigation tools, focus and security contracts |
 | [Office Reintegration Plan](../plans/office-control-center-reintegration.md) | Performance-first return of the pixel Office | Shared Control Center shell, lazy workspace, bounded rendering, RDP-safe suspension, responsive fit, snapshot correctness, and rollout budgets |
-| [Context Canvas Markdown](context-canvas-markdown.md) | Rendered session design documents | Sanitized GFM rendering, Preview/Source, automatic docs/design previews, file-change event and link security contracts |
+| [Context Canvas Markdown](context-canvas-markdown.md) | Rendered session design documents | Sanitized GFM and lazy Mermaid rendering, Preview/Source, automatic docs/design previews, file-change event and link security contracts |
 | [Context Canvas Agent Instructions](context-canvas-agent-instructions.md) | Current model-facing Canvas policy audit | Exact injected strings, provider delivery layers, duplication analysis, anticipation framing, and candidate improvements |
 | [Context Canvas Prompt Strengthening Plan](context-canvas-prompt-strengthening-plan.md) | Proposed agent-decided Canvas policy roadmap | Canonical anticipation principle, per-tool contracts, decision flow, examples, regression evaluation, and rollout |
 | [Context Canvas MCP Instruction](context-canvas-proposed-mcp-instruction.md) | Applied anticipation-first MCP initialization policy | Full instruction, tool contracts, examples, presentation rules, and Mermaid decision flow |

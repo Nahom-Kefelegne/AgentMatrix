@@ -496,6 +496,89 @@
   background: var(--mc-panel);
 }
 
+.cc-mermaid {
+  margin: 0 0 18px;
+  overflow: hidden;
+  border: 1px solid var(--mc-line-strong);
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--mc-panel-raised) 82%, #0c0c11);
+}
+
+.cc-mermaid-canvas {
+  overflow: auto;
+  padding: 16px;
+  text-align: center;
+  overscroll-behavior: contain;
+}
+
+.cc-mermaid-canvas > svg {
+  display: inline-block;
+  width: 100% !important;
+  max-width: none !important;
+  height: auto;
+  max-height: 70vh;
+}
+
+.cc-mermaid-status {
+  padding: 24px;
+  color: var(--mc-faint);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 11px;
+  text-align: center;
+}
+
+.cc-mermaid-error {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+  padding: 13px;
+  color: var(--mc-warning);
+}
+
+.cc-mermaid-error > div {
+  min-width: 0;
+}
+
+.cc-mermaid-error strong,
+.cc-mermaid-error span {
+  display: block;
+}
+
+.cc-mermaid-error strong {
+  color: var(--mc-ink);
+  font-size: 13px;
+}
+
+.cc-mermaid-error span {
+  margin-top: 4px;
+  color: var(--mc-muted);
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.cc-mermaid-error button {
+  display: inline-flex;
+  min-height: 28px;
+  gap: 6px;
+  align-items: center;
+  justify-content: center;
+  padding: 0 9px;
+  border: 1px solid color-mix(in srgb, var(--mc-warning) 45%, var(--mc-line));
+  border-radius: 4px;
+  color: var(--mc-warning);
+  font: inherit;
+  font-size: 11px;
+  font-weight: 700;
+  background: color-mix(in srgb, var(--mc-warning) 7%, transparent);
+  cursor: pointer;
+}
+
+.cc-mermaid-error button:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+}
+
 .cc-locations {
   height: 100%;
   overflow-y: auto;

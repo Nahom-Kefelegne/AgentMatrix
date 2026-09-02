@@ -27,6 +27,7 @@
     "clsx": "^2.1.1",
     "framer-motion": "^12.35.2",
     "lucide-react": "^0.577.0",
+    "mermaid": "^11.17.2",
     "next": "16.1.6",
     "node-pty": "^1.0.0",
     "postcss": "^8.5.8",
